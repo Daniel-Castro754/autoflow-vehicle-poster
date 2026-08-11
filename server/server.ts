@@ -74,6 +74,8 @@ ensureColumn('publication_jobs','fill_report',"TEXT NOT NULL DEFAULT ''")
 ensureColumn('publication_jobs','extension_version',"TEXT NOT NULL DEFAULT ''")
 ensureColumn('publication_jobs','started_at','TEXT')
 ensureColumn('publication_jobs','filled_at','TEXT')
+ensureColumn('publication_jobs','removed_at','TEXT')
+ensureColumn('vehicles','sold_at','TEXT')
 
 function hashPassword(password:string) {
   const salt = randomBytes(16).toString('hex')
@@ -124,13 +126,13 @@ if (!(db.prepare('SELECT id FROM users LIMIT 1').get())) {
   const adminId = Number(admin.lastInsertRowid)
   const marina = db.prepare('INSERT INTO users (organization_id,name,email,password_hash,role) VALUES (?,?,?,?,?)').run(orgId,'Marina Costa','marina@autoflow.local',hashPassword('demo1234'),'seller')
   const rows = [
-    [2022,'Toyota','Corolla','XEi 2.0',119900,42500,Number(marina.lastInsertRowid),'Pronto','#dce8ef'],
-    [2021,'Jeep','Compass','Longitude',134500,51820,adminId,'Publicado','#dedbd3'],
-    [2023,'Volkswagen','T-Cross','Comfortline',128900,22300,Number(marina.lastInsertRowid),'Rascunho','#d9e2e6'],
-    [2020,'Honda','Civic','Touring',139990,68100,adminId,'Atenção','#e7e4de'],
-    [2024,'Chevrolet','Tracker','Premier',154900,8900,adminId,'Pronto','#d9e0df'],
+    [2022,'Toyota','Corolla','XEi 2.0',119900,42500,Number(marina.lastInsertRowid),'Pronto','#dce8ef','São Paulo, SP','2022 Toyota Corolla XEi 2.0 com 42.500 km. Único dono, revisões em dia.'],
+    [2021,'Jeep','Compass','Longitude',134500,51820,adminId,'Publicado','#dedbd3','São Paulo, SP','2021 Jeep Compass Longitude com 51.820 km. Completo, pneus novos.'],
+    [2023,'Volkswagen','T-Cross','Comfortline',128900,22300,Number(marina.lastInsertRowid),'Rascunho','#d9e2e6','São Paulo, SP','2023 Volkswagen T-Cross Comfortline com 22.300 km.'],
+    [2020,'Honda','Civic','Touring',139990,68100,adminId,'Atenção','#e7e4de','São Paulo, SP','2020 Honda Civic Touring com 68.100 km. Revisar documentação antes de publicar.'],
+    [2024,'Chevrolet','Tracker','Premier',154900,8900,adminId,'Pronto','#d9e0df','São Paulo, SP','2024 Chevrolet Tracker Premier com 8.900 km. Seminovo, garantia de fábrica.'],
   ]
-  const insert = db.prepare('INSERT INTO vehicles (organization_id,year,make,model,trim,price,km,assigned_user_id,status,color) VALUES (?,?,?,?,?,?,?,?,?,?)')
+  const insert = db.prepare('INSERT INTO vehicles (organization_id,year,make,model,trim,price,km,assigned_user_id,status,color,location,description) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
   for (const row of rows) insert.run(orgId,...row)
 }
 db.exec(`INSERT OR IGNORE INTO organization_settings (organization_id,default_location,daily_limit,require_confirmation,description_template)
@@ -165,11 +167,12 @@ createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/vehicles') {
       const rows = db.prepare(`SELECT v.id,v.year,v.make,v.model,v.trim,v.price,v.km,v.color,v.status,
         v.vehicle_type vehicleType,v.location,v.transmission,v.fuel_type fuelType,v.body_type bodyType,
-        v.exterior_color exteriorColor,v.description,
+        v.exterior_color exteriorColor,v.description,v.sold_at soldAt,
         COALESCE(u.name,'Não atribuído') seller,
         CASE WHEN u.name IS NULL THEN '—' ELSE substr(u.name,1,1)||substr(u.name,instr(u.name,' ')+1,1) END initials,
         v.updated_at updatedAt,(SELECT COUNT(*) FROM vehicle_images i WHERE i.vehicle_id=v.id) imageCount,
-        (SELECT 'http://127.0.0.1:3333/uploads/'||i.file_name FROM vehicle_images i WHERE i.vehicle_id=v.id ORDER BY i.position,i.id LIMIT 1) thumbnailUrl
+        (SELECT 'http://127.0.0.1:3333/uploads/'||i.file_name FROM vehicle_images i WHERE i.vehicle_id=v.id ORDER BY i.position,i.id LIMIT 1) thumbnailUrl,
+        (SELECT COUNT(*) FROM publication_jobs j WHERE j.vehicle_id=v.id AND j.status='completed') pendingRemovalCount
         FROM vehicles v LEFT JOIN users u ON u.id=v.assigned_user_id
         WHERE v.organization_id=? ORDER BY v.updated_at DESC`).all(auth.organizationId)
       return send(res,200,{vehicles:rows})
@@ -252,6 +255,12 @@ createServer(async (req, res) => {
         .run(Number(b.year),String(b.make||''),String(b.model||''),String(b.trim||''),Number(b.price||0),Number(b.km||0),String(b.vehicleType||'Carro/Caminhonete'),String(b.location||''),String(b.transmission||''),String(b.fuelType||''),String(b.bodyType||''),String(b.exteriorColor||''),String(b.description||''),String(b.status||'Rascunho'),Number(vehicleRoute[1]),auth.organizationId)
       return result.changes?send(res,200,{ok:true}):send(res,404,{error:'Veículo não encontrado.'})
     }
+    const markSoldRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)\/mark-sold$/)
+    if (req.method === 'POST' && markSoldRoute) {
+      const result = db.prepare("UPDATE vehicles SET status='Vendido',sold_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?")
+        .run(Number(markSoldRoute[1]),auth.organizationId)
+      return result.changes?send(res,200,{ok:true}):send(res,404,{error:'Veículo não encontrado.'})
+    }
     const vehicleImagesRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)\/images$/)
     if (req.method === 'GET' && vehicleImagesRoute) {
       const images = db.prepare(`SELECT id,original_name originalName,mime_type mimeType,position,'http://127.0.0.1:3333/uploads/'||file_name url FROM vehicle_images WHERE vehicle_id=? AND organization_id=? ORDER BY position,id`).all(Number(vehicleImagesRoute[1]),auth.organizationId)
@@ -271,6 +280,22 @@ createServer(async (req, res) => {
       const position = (db.prepare('SELECT COALESCE(MAX(position),-1)+1 next FROM vehicle_images WHERE vehicle_id=?').get(vehicleId) as {next:number}).next
       const result = db.prepare('INSERT INTO vehicle_images (organization_id,vehicle_id,file_name,original_name,mime_type,position) VALUES (?,?,?,?,?,?)').run(auth.organizationId,vehicleId,fileName,String(b.name||fileName),mime,position)
       return send(res,201,{id:Number(result.lastInsertRowid),url:`http://127.0.0.1:3333/uploads/${fileName}`})
+    }
+    const imageReorderRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)\/images\/reorder$/)
+    if (req.method === 'PATCH' && imageReorderRoute) {
+      const vehicleId = Number(imageReorderRoute[1])
+      if (!db.prepare('SELECT id FROM vehicles WHERE id=? AND organization_id=?').get(vehicleId,auth.organizationId)) return send(res,404,{error:'Veículo não encontrado.'})
+      const b = await jsonBody(req) as {order?:unknown[]}
+      const order = Array.isArray(b.order) ? b.order.map(Number).filter(Number.isInteger) : []
+      const owned = db.prepare('SELECT id FROM vehicle_images WHERE vehicle_id=? AND organization_id=?').all(vehicleId,auth.organizationId) as Array<{id:number}>
+      const ownedIds = new Set(owned.map(item=>item.id))
+      if (order.length !== owned.length || new Set(order).size !== order.length || !order.every(id=>ownedIds.has(id))) return send(res,400,{error:'Lista de fotos inválida.'})
+      db.exec('BEGIN')
+      try {
+        order.forEach((id,index)=>{ db.prepare('UPDATE vehicle_images SET position=? WHERE id=? AND vehicle_id=? AND organization_id=?').run(index,id,vehicleId,auth.organizationId) })
+        db.exec('COMMIT')
+      } catch (error) { db.exec('ROLLBACK'); throw error }
+      return send(res,200,{ok:true})
     }
     const imageRoute = url.pathname.match(/^\/api\/vehicle-images\/(\d+)$/)
     if (req.method === 'DELETE' && imageRoute) {
@@ -317,7 +342,7 @@ createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/publications') {
       const rows = db.prepare(`SELECT j.id,j.status,j.result_url resultUrl,j.error_code errorCode,j.fill_report fillReport,
-        j.extension_version extensionVersion,j.started_at startedAt,j.filled_at filledAt,j.created_at createdAt,j.updated_at updatedAt,
+        j.extension_version extensionVersion,j.started_at startedAt,j.filled_at filledAt,j.removed_at removedAt,j.created_at createdAt,j.updated_at updatedAt,
         v.id vehicleId,v.year,v.make,v.model,v.price,COALESCE(a.label,'Perfil não definido') accountLabel,
         COALESCE(u.name,'Não atribuído') seller FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id
         LEFT JOIN social_accounts a ON a.id=j.social_account_id LEFT JOIN users u ON u.id=v.assigned_user_id
@@ -327,8 +352,19 @@ createServer(async (req, res) => {
     }
     if (req.method === 'POST' && url.pathname === '/api/publications') {
       const b = await jsonBody(req) as Record<string,unknown>
-      const vehicle = db.prepare('SELECT id FROM vehicles WHERE id=? AND organization_id=?').get(Number(b.vehicleId),auth.organizationId)
+      const vehicle = db.prepare('SELECT id,price,km,location,description FROM vehicles WHERE id=? AND organization_id=?').get(Number(b.vehicleId),auth.organizationId) as {id:number;price:number;km:number;location:string;description:string}|undefined
       if (!vehicle) return send(res,400,{error:'Veículo inválido.'})
+      const imageCount = (db.prepare('SELECT COUNT(*) c FROM vehicle_images WHERE vehicle_id=? AND organization_id=?').get(vehicle.id,auth.organizationId) as {c:number}).c
+      const missing:string[] = []
+      if (!(vehicle.price>0)) missing.push('Preço')
+      if (!(vehicle.km>0)) missing.push('Quilometragem')
+      if (!vehicle.location.trim()) missing.push('Localização')
+      if (!vehicle.description.trim()) missing.push('Descrição')
+      if (!imageCount) missing.push('Fotos')
+      if (missing.length) {
+        db.prepare("UPDATE vehicles SET status='Atenção',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(vehicle.id,auth.organizationId)
+        return send(res,422,{error:'Complete os dados obrigatórios antes de publicar.',missing})
+      }
       const accountId=Number(b.accountId)
       if (!Number.isInteger(accountId)||!db.prepare('SELECT id FROM social_accounts WHERE id=? AND organization_id=?').get(accountId,auth.organizationId)) return send(res,400,{error:'Selecione o perfil do Brave que publicará este veículo.'})
       const duplicate = db.prepare("SELECT id FROM publication_jobs WHERE organization_id=? AND vehicle_id=? AND social_account_id=? AND status IN ('pending','filling','awaiting_confirmation')").get(auth.organizationId,Number(b.vehicleId),accountId)
@@ -343,13 +379,14 @@ createServer(async (req, res) => {
     const publication = url.pathname.match(/^\/api\/publications\/(\d+)$/)
     if (req.method === 'PATCH' && publication) {
       const b = await jsonBody(req) as Record<string,unknown>
-      const allowed = ['pending','filling','awaiting_confirmation','completed','error','canceled']
+      const allowed = ['pending','filling','awaiting_confirmation','completed','error','canceled','removed']
       if (!allowed.includes(String(b.status))) return send(res,400,{error:'Status inválido.'})
       const job=db.prepare('SELECT vehicle_id vehicleId FROM publication_jobs WHERE id=? AND organization_id=?').get(Number(publication[1]),auth.organizationId) as {vehicleId:number}|undefined
       if(!job)return send(res,404,{error:'Publicação não encontrada.'})
       db.exec('BEGIN')
       try{
-        if(String(b.status)==='pending')db.prepare("UPDATE publication_jobs SET status='pending',error_code=NULL,fill_report='',started_at=NULL,filled_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
+        if(String(b.status)==='pending')db.prepare("UPDATE publication_jobs SET status='pending',error_code=NULL,fill_report='',started_at=NULL,filled_at=NULL,removed_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
+        else if(String(b.status)==='removed')db.prepare("UPDATE publication_jobs SET status='removed',removed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
         else db.prepare('UPDATE publication_jobs SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?').run(String(b.status),Number(publication[1]),auth.organizationId)
         if(String(b.status)==='completed')db.prepare("UPDATE vehicles SET status='Publicado',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(job.vehicleId,auth.organizationId)
         db.exec('COMMIT')

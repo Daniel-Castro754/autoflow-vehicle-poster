@@ -1,6 +1,8 @@
 (function(){
   if(window.__autoflowLoaded)return;window.__autoflowLoaded=true
   const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms))
+  const randomDelay=(min,max)=>sleep(min+Math.random()*(max-min))
+  async function step(label,run){await randomDelay(300,850);return [label,await run()]}
   const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()
   const visible=el=>{const box=el.getBoundingClientRect();const style=getComputedStyle(el);return box.width>0&&box.height>0&&style.visibility!=='hidden'&&style.display!=='none'}
   const textOf=el=>normalize([el.getAttribute?.('aria-label'),el.getAttribute?.('placeholder'),el.getAttribute?.('name'),el.textContent].filter(Boolean).join(' '))
@@ -16,20 +18,21 @@
     const vehicle=task.vehicle||task
     const jobId=task.jobId
     const results=[]
-    results.push(['Tipo de veículo',await selectCustom(['tipo de veiculo','vehicle type'],vehicle.vehicleType||'Carro/Caminhonete')])
+    results.push(await step('Tipo de veículo',()=>selectCustom(['tipo de veiculo','vehicle type'],vehicle.vehicleType||'Carro/Caminhonete')))
+    await randomDelay(300,850)
     const imageCount=await uploadImages(vehicle.images)
     results.push(['Fotos',imageCount>0])
-    results.push(['Localização',await fillText(['localizacao','location'],vehicle.location)])
-    results.push(['Ano',await selectCustom(['ano','year'],String(vehicle.year))])
-    results.push(['Fabricante',await fillText(['fabricante','marca','make'],vehicle.make)])
-    results.push(['Modelo',await fillText(['modelo','model'],vehicle.model)])
-    results.push(['Preço',await fillText(['preco','price'],vehicle.price)])
-    results.push(['Quilometragem',await fillText(['quilometragem','mileage','odometro'],vehicle.km)])
-    results.push(['Câmbio',await selectCustom(['cambio','transmissao','transmission'],vehicle.transmission)])
-    results.push(['Combustível',await selectCustom(['combustivel','fuel'],vehicle.fuelType)])
-    results.push(['Carroceria',await selectCustom(['carroceria','body style','body type'],vehicle.bodyType)])
-    results.push(['Cor',await selectCustom(['cor externa','exterior color','cor'],vehicle.exteriorColor)])
-    results.push(['Descrição',await fillText(['descricao','description'],vehicle.description)])
+    results.push(await step('Localização',()=>fillText(['localizacao','location'],vehicle.location)))
+    results.push(await step('Ano',()=>selectCustom(['ano','year'],String(vehicle.year))))
+    results.push(await step('Fabricante',()=>fillText(['fabricante','marca','make'],vehicle.make)))
+    results.push(await step('Modelo',()=>fillText(['modelo','model'],vehicle.model)))
+    results.push(await step('Preço',()=>fillText(['preco','price'],vehicle.price)))
+    results.push(await step('Quilometragem',()=>fillText(['quilometragem','mileage','odometro'],vehicle.km)))
+    results.push(await step('Câmbio',()=>selectCustom(['cambio','transmissao','transmission'],vehicle.transmission)))
+    results.push(await step('Combustível',()=>selectCustom(['combustivel','fuel'],vehicle.fuelType)))
+    results.push(await step('Carroceria',()=>selectCustom(['carroceria','body style','body type'],vehicle.bodyType)))
+    results.push(await step('Cor',()=>selectCustom(['cor externa','exterior color','cor'],vehicle.exteriorColor)))
+    results.push(await step('Descrição',()=>fillText(['descricao','description'],vehicle.description)))
     showNotice(results,vehicle)
     if(jobId){const missing=results.filter(item=>!item[1]).map(item=>item[0]);chrome.runtime.sendMessage({type:'AUTOFLOW_FILL_RESULT',jobId,report:{filledCount:results.length-missing.length,totalCount:results.length,imageCount,missing,fields:results.map(item=>({name:item[0],ok:Boolean(item[1])}))}})}
   }

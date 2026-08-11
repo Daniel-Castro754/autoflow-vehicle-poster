@@ -3,7 +3,7 @@ import { BarChart3, Bell, Building2, Car, Check, ChevronDown, CircleAlert, Clock
 import { OverviewView, PublicationsView, ReportsView, SettingsView } from './Views'
 import VehiclesView, { type VehicleRecord } from './Vehicles'
 
-type Status = 'Pronto' | 'Publicado' | 'Rascunho' | 'Atenção'
+type Status = 'Pronto' | 'Publicado' | 'Rascunho' | 'Atenção' | 'Vendido'
 type Vehicle = VehicleRecord & {updated?:string}
 type TeamUser = { id:number; name:string; email:string; role:'admin'|'seller' }
 type SocialAccount = { id:number; userId:number; label:string; platform:string; status:string; browserProfile:string; lastSeenAt?:string }
@@ -49,7 +49,7 @@ export default function App() {
   async function api(path:string, options:RequestInit = {}) {
     const response = await fetch(`${API}${path}`, { ...options, headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`, ...options.headers} })
     const data = await response.json()
-    if (!response.ok) throw new Error(data.error || 'Não foi possível concluir a operação.')
+    if (!response.ok) throw Object.assign(new Error(data.error || 'Não foi possível concluir a operação.'), {missing: data.missing})
     return data
   }
 
@@ -81,8 +81,11 @@ export default function App() {
     const attention = vehicles.filter(v=>v.status==='Atenção').length
     const ready = vehicles.filter(v=>v.status==='Pronto').length
     const waiting = accounts.filter(a=>a.status!=='connected').length
+    const soldPendingRemoval = vehicles.filter(v=>v.status==='Vendido'&&Number(v.pendingRemovalCount)>0)
+    const overdue = soldPendingRemoval.filter(v=>v.soldAt&&Date.now()-new Date(v.soldAt+'Z').getTime()>24*60*60*1000)
     if (attention) items.push({id:`attention-${attention}`,title:`${attention} veículo${attention>1?'s':''} precisa${attention>1?'m':''} de atenção`,detail:'Revise os dados antes de colocar na fila.',page:'Veículos',tone:'red'})
     if (ready) items.push({id:`ready-${ready}`,title:`${ready} veículo${ready>1?'s':''} pronto${ready>1?'s':''} para publicar`,detail:'Distribua o estoque entre os perfis disponíveis.',page:'Publicações',tone:'amber'})
+    if (soldPendingRemoval.length) items.push({id:`sold-removal-${soldPendingRemoval.length}-${overdue.length}`,title:`${soldPendingRemoval.length} veículo${soldPendingRemoval.length>1?'s':''} vendido${soldPendingRemoval.length>1?'s':''} aguardando remoção do anúncio`,detail:overdue.length?'Já passou de 24h: remova o anúncio no Facebook e confirme em Publicações.':'A Meta exige remover o anúncio em até 24h após a venda.',page:'Publicações',tone:overdue.length?'red':'amber'})
     if (waiting) items.push({id:`profiles-${waiting}`,title:`${waiting} perfil${waiting>1?'s':''} aguardando extensão`,detail:'Abra a extensão no Brave para confirmar a conexão.',page:'Equipe e contas',tone:'blue'})
     return items
   },[vehicles,accounts])
@@ -136,7 +139,7 @@ export default function App() {
 
     <main>
       <header><button className="mobile-menu" onClick={()=>setMobileMenuOpen(true)} aria-label="Abrir menu"><Menu/></button><div className="crumb"><span>AutoFlow</span><b>/</b><strong>{active}</strong></div><div className="header-actions"><button className="theme-quick" onClick={()=>changeTheme(theme==='light'?'dark':'light')} aria-label={theme==='light'?'Ativar tema escuro':'Ativar tema claro'} title={theme==='light'?'Tema escuro':'Tema claro'}>{theme==='light'?<Moon size={17}/>:<Sun size={17}/>}</button><div className="notification-wrap"><button className="icon-btn" onClick={toggleNotifications} aria-label="Abrir notificações" aria-expanded={notificationsOpen}><Bell size={19}/>{unreadCount>0&&<span className="notification-count">{unreadCount}</span>}</button>{notificationsOpen&&<NotificationCenter notifications={notifications} onClose={()=>setNotificationsOpen(false)} onNavigate={page=>{setActive(page);setNotificationsOpen(false)}}/>}</div><span className="sync"><i/>Sincronizado agora</span></div></header>
-      {active === 'Visão geral' ? <OverviewView api={api} vehicles={vehicles} navigate={setActive}/> : active === 'Publicações' ? <PublicationsView api={api} vehicles={vehicles}/> : active === 'Equipe e contas' ? <TeamView team={team} accounts={accounts} onAddUser={addUser} onAddAccount={addAccount}/> : active === 'Relatórios' ? <ReportsView api={api} vehicles={vehicles}/> : active === 'Configurações' ? <SettingsView api={api} onSaved={loadOrganizationName} theme={theme} onThemeChange={changeTheme}/> : <VehiclesView api={api} vehicles={vehicles} reload={loadVehicles} notify={message=>{setToast(message);setTimeout(()=>setToast(''),3000)}}/>}
+      {active === 'Visão geral' ? <OverviewView api={api} vehicles={vehicles} navigate={setActive}/> : active === 'Publicações' ? <PublicationsView api={api} vehicles={vehicles} reload={loadVehicles}/> : active === 'Equipe e contas' ? <TeamView team={team} accounts={accounts} onAddUser={addUser} onAddAccount={addAccount}/> : active === 'Relatórios' ? <ReportsView api={api} vehicles={vehicles}/> : active === 'Configurações' ? <SettingsView api={api} onSaved={loadOrganizationName} theme={theme} onThemeChange={changeTheme}/> : <VehiclesView api={api} vehicles={vehicles} accounts={accounts} reload={loadVehicles} notify={message=>{setToast(message);setTimeout(()=>setToast(''),3000)}}/>}
     </main>
     {toast&&<div className="toast"><Check size={17}/>{toast}</div>}
   </div>
