@@ -66,7 +66,17 @@ try{
   job=(await call('/publications',adminToken)).jobs.find(item=>item.id===publication.id)
   const vehicle=(await call('/vehicles',adminToken)).vehicles.find(item=>item.id===1)
   if(job.status!=='completed'||vehicle.status!=='Publicado')throw new Error('A confirmação não encerrou o trabalho e o veículo.')
-  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:vehicle.status},null,2))
+
+  await call('/vehicles/1/mark-sold',adminToken,{method:'POST'})
+  let soldVehicle=(await call('/vehicles',adminToken)).vehicles.find(item=>item.id===1)
+  if(soldVehicle.status!=='Vendido'||!soldVehicle.soldAt||soldVehicle.pendingRemovalCount!==1)throw new Error('Marcar como vendido não registrou a data nem contou o anúncio pendente de remoção.')
+  await call(`/publications/${publication.id}`,adminToken,{method:'PATCH',body:JSON.stringify({status:'removed'})})
+  job=(await call('/publications',adminToken)).jobs.find(item=>item.id===publication.id)
+  if(job.status!=='removed'||!job.removedAt)throw new Error('A remoção do anúncio não foi registrada.')
+  soldVehicle=(await call('/vehicles',adminToken)).vehicles.find(item=>item.id===1)
+  if(soldVehicle.pendingRemovalCount!==0)throw new Error('O veículo continuou marcado como pendente de remoção após confirmar a remoção do anúncio.')
+
+  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
 }finally{
   server.kill()
   await new Promise(resolve=>server.once('exit',resolve))

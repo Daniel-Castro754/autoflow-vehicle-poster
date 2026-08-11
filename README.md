@@ -38,7 +38,7 @@ O comando `npm run dev` inicia o painel em `http://localhost:5173` e a API em `h
 - Validação obrigatória antes de entrar na fila (preço, quilometragem, localização, descrição e fotos)
 - Seleção individual e em massa com exclusão confirmada
 - Menus de ações por veículo
-- Extensão com preenchimento sequencial e upload de fotos
+- Extensão com preenchimento sequencial e upload de fotos, com ritmo variável entre campos
 - Estrutura visual para múltiplos vendedores e contas
 - Ajuda contextual acessível com indicadores `?` e avisos `!`
 - Fila isolada por trabalho e perfil ativo do Brave

@@ -74,6 +74,8 @@ ensureColumn('publication_jobs','fill_report',"TEXT NOT NULL DEFAULT ''")
 ensureColumn('publication_jobs','extension_version',"TEXT NOT NULL DEFAULT ''")
 ensureColumn('publication_jobs','started_at','TEXT')
 ensureColumn('publication_jobs','filled_at','TEXT')
+ensureColumn('publication_jobs','removed_at','TEXT')
+ensureColumn('vehicles','sold_at','TEXT')
 
 function hashPassword(password:string) {
   const salt = randomBytes(16).toString('hex')
@@ -165,11 +167,12 @@ createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/vehicles') {
       const rows = db.prepare(`SELECT v.id,v.year,v.make,v.model,v.trim,v.price,v.km,v.color,v.status,
         v.vehicle_type vehicleType,v.location,v.transmission,v.fuel_type fuelType,v.body_type bodyType,
-        v.exterior_color exteriorColor,v.description,
+        v.exterior_color exteriorColor,v.description,v.sold_at soldAt,
         COALESCE(u.name,'Não atribuído') seller,
         CASE WHEN u.name IS NULL THEN '—' ELSE substr(u.name,1,1)||substr(u.name,instr(u.name,' ')+1,1) END initials,
         v.updated_at updatedAt,(SELECT COUNT(*) FROM vehicle_images i WHERE i.vehicle_id=v.id) imageCount,
-        (SELECT 'http://127.0.0.1:3333/uploads/'||i.file_name FROM vehicle_images i WHERE i.vehicle_id=v.id ORDER BY i.position,i.id LIMIT 1) thumbnailUrl
+        (SELECT 'http://127.0.0.1:3333/uploads/'||i.file_name FROM vehicle_images i WHERE i.vehicle_id=v.id ORDER BY i.position,i.id LIMIT 1) thumbnailUrl,
+        (SELECT COUNT(*) FROM publication_jobs j WHERE j.vehicle_id=v.id AND j.status='completed') pendingRemovalCount
         FROM vehicles v LEFT JOIN users u ON u.id=v.assigned_user_id
         WHERE v.organization_id=? ORDER BY v.updated_at DESC`).all(auth.organizationId)
       return send(res,200,{vehicles:rows})
@@ -250,6 +253,12 @@ createServer(async (req, res) => {
       const b = await jsonBody(req) as Record<string,unknown>
       const result = db.prepare(`UPDATE vehicles SET year=?,make=?,model=?,trim=?,price=?,km=?,vehicle_type=?,location=?,transmission=?,fuel_type=?,body_type=?,exterior_color=?,description=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
         .run(Number(b.year),String(b.make||''),String(b.model||''),String(b.trim||''),Number(b.price||0),Number(b.km||0),String(b.vehicleType||'Carro/Caminhonete'),String(b.location||''),String(b.transmission||''),String(b.fuelType||''),String(b.bodyType||''),String(b.exteriorColor||''),String(b.description||''),String(b.status||'Rascunho'),Number(vehicleRoute[1]),auth.organizationId)
+      return result.changes?send(res,200,{ok:true}):send(res,404,{error:'Veículo não encontrado.'})
+    }
+    const markSoldRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)\/mark-sold$/)
+    if (req.method === 'POST' && markSoldRoute) {
+      const result = db.prepare("UPDATE vehicles SET status='Vendido',sold_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?")
+        .run(Number(markSoldRoute[1]),auth.organizationId)
       return result.changes?send(res,200,{ok:true}):send(res,404,{error:'Veículo não encontrado.'})
     }
     const vehicleImagesRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)\/images$/)
@@ -333,7 +342,7 @@ createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/publications') {
       const rows = db.prepare(`SELECT j.id,j.status,j.result_url resultUrl,j.error_code errorCode,j.fill_report fillReport,
-        j.extension_version extensionVersion,j.started_at startedAt,j.filled_at filledAt,j.created_at createdAt,j.updated_at updatedAt,
+        j.extension_version extensionVersion,j.started_at startedAt,j.filled_at filledAt,j.removed_at removedAt,j.created_at createdAt,j.updated_at updatedAt,
         v.id vehicleId,v.year,v.make,v.model,v.price,COALESCE(a.label,'Perfil não definido') accountLabel,
         COALESCE(u.name,'Não atribuído') seller FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id
         LEFT JOIN social_accounts a ON a.id=j.social_account_id LEFT JOIN users u ON u.id=v.assigned_user_id
@@ -370,13 +379,14 @@ createServer(async (req, res) => {
     const publication = url.pathname.match(/^\/api\/publications\/(\d+)$/)
     if (req.method === 'PATCH' && publication) {
       const b = await jsonBody(req) as Record<string,unknown>
-      const allowed = ['pending','filling','awaiting_confirmation','completed','error','canceled']
+      const allowed = ['pending','filling','awaiting_confirmation','completed','error','canceled','removed']
       if (!allowed.includes(String(b.status))) return send(res,400,{error:'Status inválido.'})
       const job=db.prepare('SELECT vehicle_id vehicleId FROM publication_jobs WHERE id=? AND organization_id=?').get(Number(publication[1]),auth.organizationId) as {vehicleId:number}|undefined
       if(!job)return send(res,404,{error:'Publicação não encontrada.'})
       db.exec('BEGIN')
       try{
-        if(String(b.status)==='pending')db.prepare("UPDATE publication_jobs SET status='pending',error_code=NULL,fill_report='',started_at=NULL,filled_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
+        if(String(b.status)==='pending')db.prepare("UPDATE publication_jobs SET status='pending',error_code=NULL,fill_report='',started_at=NULL,filled_at=NULL,removed_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
+        else if(String(b.status)==='removed')db.prepare("UPDATE publication_jobs SET status='removed',removed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
         else db.prepare('UPDATE publication_jobs SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?').run(String(b.status),Number(publication[1]),auth.organizationId)
         if(String(b.status)==='completed')db.prepare("UPDATE vehicles SET status='Publicado',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(job.vehicleId,auth.organizationId)
         db.exec('COMMIT')
