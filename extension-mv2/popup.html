@@ -1,0 +1,19 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><link rel="stylesheet" href="popup.css"></head><body>
+  <header><span class="logo">A</span><div><strong>AutoFlow</strong><small>Brave · preenchimento assistido</small></div><i id="apiState"></i></header>
+  <main>
+    <section id="loginView">
+      <h1>Conectar ao painel</h1><p>A sessão fica armazenada somente nesta extensão.</p>
+      <label>E-mail<input id="email" type="email" value="admin@autoflow.local"></label>
+      <label>Senha<input id="password" type="password" value="demo1234"></label>
+      <button id="login">Entrar</button><div id="loginError" class="error"></div>
+    </section>
+    <section id="queueView" hidden>
+      <div class="userbar"><div><small>Conectado como</small><strong id="userName">—</strong></div><button id="logout" class="link">Sair</button></div>
+      <div id="profileBox" class="profile-box"><label>Perfil ativo do Brave<select id="accountSelect"></select></label><small id="profileMeta">A fila será filtrada por este perfil.</small></div>
+      <div class="heading"><div><h1>Fila de publicação</h1><p>Somente trabalhos destinados ao perfil ativo.</p></div><button id="refresh" class="icon" title="Atualizar">↻</button></div>
+      <div id="queue" class="queue"></div>
+      <div class="safety"><strong>Confirmação obrigatória</strong><span>A extensão preenche os campos, mas não pressiona “Publicar”.</span></div>
+    </section>
+  </main>
+  <script src="popup.js"></script>
+</body></html>

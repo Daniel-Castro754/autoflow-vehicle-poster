@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.npm-cache/
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/uploads/
+.env
+*.tsbuildinfo
+work/
+vite.config.js
+vite.config.d.ts

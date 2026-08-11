@@ -1,0 +1,28 @@
+{
+  "manifest_version": 2,
+  "name": "AutoFlow para Brave",
+  "version": "0.3.0",
+  "description": "Preenchimento assistido de veículos a partir da fila local do AutoFlow.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab",
+    "http://localhost:3333/*",
+    "https://www.facebook.com/*"
+  ],
+  "browser_action": {
+    "default_title": "AutoFlow",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": false
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.facebook.com/marketplace/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
