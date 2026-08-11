@@ -37,10 +37,10 @@ O projeto aberto [FAP](https://github.com/Tigerzplace/FAP-FacebookAutoPoster), e
 ### P0 — antes de usar com várias contas
 
 1. **Fila por trabalho e perfil ativo — implementado na versão 0.3.0.** A extensão escolhe o perfil local e recebe apenas `publication_jobs` destinados a ele. Cada cartão carrega `jobId`, `vehicleId` e `accountId`.
-2. **Validação pré-publicação.** Antes de entrar na fila, conferir campos obrigatórios, preço, quilometragem, localização, descrição e pelo menos uma foto. Exibir exatamente o que falta.
+2. **Validação pré-publicação — implementada.** `POST /api/publications` recusa o trabalho (422) quando faltam preço, quilometragem, localização, descrição ou fotos, devolve exatamente o que falta e marca o veículo como `Atenção`. O painel mostra a lista de campos pendentes no aviso.
 3. **Retorno de execução — implementado na versão 0.3.0.** O trabalho salva quantidade de fotos e campos preenchidos, campos não encontrados, horário e versão da extensão. O ciclo usa `pendente → preenchendo → aguardando confirmação → concluído/erro`.
 4. **Saúde dos seletores.** Separar os mapas de campos por idioma, criar testes com páginas simuladas e mostrar um alerta quando o layout do Facebook mudar.
-5. **Galeria ordenável.** Permitir definir a capa e reordenar fotos; o envio deve preservar essa ordem.
+5. **Galeria ordenável — implementada.** `PATCH /api/vehicles/:id/images/reorder` grava a nova ordem; a primeira foto é a capa e o painel tem setas para reordenar cada imagem.
 
 ### P1 — operação diária
 

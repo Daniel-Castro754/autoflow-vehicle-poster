@@ -34,7 +34,8 @@ O comando `npm run dev` inicia o painel em `http://localhost:5173` e a API em `h
 - Central de notificações com atalhos operacionais
 - Menu lateral funcional em telas móveis
 - Cadastro e edição completa dos dados do Marketplace
-- Galeria de até 20 fotos por veículo
+- Galeria de até 20 fotos por veículo, com reordenação e capa definida pela primeira foto
+- Validação obrigatória antes de entrar na fila (preço, quilometragem, localização, descrição e fotos)
 - Seleção individual e em massa com exclusão confirmada
 - Menus de ações por veículo
 - Extensão com preenchimento sequencial e upload de fotos

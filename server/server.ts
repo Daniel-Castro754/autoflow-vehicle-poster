@@ -124,13 +124,13 @@ if (!(db.prepare('SELECT id FROM users LIMIT 1').get())) {
   const adminId = Number(admin.lastInsertRowid)
   const marina = db.prepare('INSERT INTO users (organization_id,name,email,password_hash,role) VALUES (?,?,?,?,?)').run(orgId,'Marina Costa','marina@autoflow.local',hashPassword('demo1234'),'seller')
   const rows = [
-    [2022,'Toyota','Corolla','XEi 2.0',119900,42500,Number(marina.lastInsertRowid),'Pronto','#dce8ef'],
-    [2021,'Jeep','Compass','Longitude',134500,51820,adminId,'Publicado','#dedbd3'],
-    [2023,'Volkswagen','T-Cross','Comfortline',128900,22300,Number(marina.lastInsertRowid),'Rascunho','#d9e2e6'],
-    [2020,'Honda','Civic','Touring',139990,68100,adminId,'Atenção','#e7e4de'],
-    [2024,'Chevrolet','Tracker','Premier',154900,8900,adminId,'Pronto','#d9e0df'],
+    [2022,'Toyota','Corolla','XEi 2.0',119900,42500,Number(marina.lastInsertRowid),'Pronto','#dce8ef','São Paulo, SP','2022 Toyota Corolla XEi 2.0 com 42.500 km. Único dono, revisões em dia.'],
+    [2021,'Jeep','Compass','Longitude',134500,51820,adminId,'Publicado','#dedbd3','São Paulo, SP','2021 Jeep Compass Longitude com 51.820 km. Completo, pneus novos.'],
+    [2023,'Volkswagen','T-Cross','Comfortline',128900,22300,Number(marina.lastInsertRowid),'Rascunho','#d9e2e6','São Paulo, SP','2023 Volkswagen T-Cross Comfortline com 22.300 km.'],
+    [2020,'Honda','Civic','Touring',139990,68100,adminId,'Atenção','#e7e4de','São Paulo, SP','2020 Honda Civic Touring com 68.100 km. Revisar documentação antes de publicar.'],
+    [2024,'Chevrolet','Tracker','Premier',154900,8900,adminId,'Pronto','#d9e0df','São Paulo, SP','2024 Chevrolet Tracker Premier com 8.900 km. Seminovo, garantia de fábrica.'],
   ]
-  const insert = db.prepare('INSERT INTO vehicles (organization_id,year,make,model,trim,price,km,assigned_user_id,status,color) VALUES (?,?,?,?,?,?,?,?,?,?)')
+  const insert = db.prepare('INSERT INTO vehicles (organization_id,year,make,model,trim,price,km,assigned_user_id,status,color,location,description) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
   for (const row of rows) insert.run(orgId,...row)
 }
 db.exec(`INSERT OR IGNORE INTO organization_settings (organization_id,default_location,daily_limit,require_confirmation,description_template)
@@ -272,6 +272,22 @@ createServer(async (req, res) => {
       const result = db.prepare('INSERT INTO vehicle_images (organization_id,vehicle_id,file_name,original_name,mime_type,position) VALUES (?,?,?,?,?,?)').run(auth.organizationId,vehicleId,fileName,String(b.name||fileName),mime,position)
       return send(res,201,{id:Number(result.lastInsertRowid),url:`http://127.0.0.1:3333/uploads/${fileName}`})
     }
+    const imageReorderRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)\/images\/reorder$/)
+    if (req.method === 'PATCH' && imageReorderRoute) {
+      const vehicleId = Number(imageReorderRoute[1])
+      if (!db.prepare('SELECT id FROM vehicles WHERE id=? AND organization_id=?').get(vehicleId,auth.organizationId)) return send(res,404,{error:'Veículo não encontrado.'})
+      const b = await jsonBody(req) as {order?:unknown[]}
+      const order = Array.isArray(b.order) ? b.order.map(Number).filter(Number.isInteger) : []
+      const owned = db.prepare('SELECT id FROM vehicle_images WHERE vehicle_id=? AND organization_id=?').all(vehicleId,auth.organizationId) as Array<{id:number}>
+      const ownedIds = new Set(owned.map(item=>item.id))
+      if (order.length !== owned.length || new Set(order).size !== order.length || !order.every(id=>ownedIds.has(id))) return send(res,400,{error:'Lista de fotos inválida.'})
+      db.exec('BEGIN')
+      try {
+        order.forEach((id,index)=>{ db.prepare('UPDATE vehicle_images SET position=? WHERE id=? AND vehicle_id=? AND organization_id=?').run(index,id,vehicleId,auth.organizationId) })
+        db.exec('COMMIT')
+      } catch (error) { db.exec('ROLLBACK'); throw error }
+      return send(res,200,{ok:true})
+    }
     const imageRoute = url.pathname.match(/^\/api\/vehicle-images\/(\d+)$/)
     if (req.method === 'DELETE' && imageRoute) {
       const image = db.prepare('SELECT file_name fileName FROM vehicle_images WHERE id=? AND organization_id=?').get(Number(imageRoute[1]),auth.organizationId) as {fileName:string}|undefined
@@ -327,8 +343,19 @@ createServer(async (req, res) => {
     }
     if (req.method === 'POST' && url.pathname === '/api/publications') {
       const b = await jsonBody(req) as Record<string,unknown>
-      const vehicle = db.prepare('SELECT id FROM vehicles WHERE id=? AND organization_id=?').get(Number(b.vehicleId),auth.organizationId)
+      const vehicle = db.prepare('SELECT id,price,km,location,description FROM vehicles WHERE id=? AND organization_id=?').get(Number(b.vehicleId),auth.organizationId) as {id:number;price:number;km:number;location:string;description:string}|undefined
       if (!vehicle) return send(res,400,{error:'Veículo inválido.'})
+      const imageCount = (db.prepare('SELECT COUNT(*) c FROM vehicle_images WHERE vehicle_id=? AND organization_id=?').get(vehicle.id,auth.organizationId) as {c:number}).c
+      const missing:string[] = []
+      if (!(vehicle.price>0)) missing.push('Preço')
+      if (!(vehicle.km>0)) missing.push('Quilometragem')
+      if (!vehicle.location.trim()) missing.push('Localização')
+      if (!vehicle.description.trim()) missing.push('Descrição')
+      if (!imageCount) missing.push('Fotos')
+      if (missing.length) {
+        db.prepare("UPDATE vehicles SET status='Atenção',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(vehicle.id,auth.organizationId)
+        return send(res,422,{error:'Complete os dados obrigatórios antes de publicar.',missing})
+      }
       const accountId=Number(b.accountId)
       if (!Number.isInteger(accountId)||!db.prepare('SELECT id FROM social_accounts WHERE id=? AND organization_id=?').get(accountId,auth.organizationId)) return send(res,400,{error:'Selecione o perfil do Brave que publicará este veículo.'})
       const duplicate = db.prepare("SELECT id FROM publication_jobs WHERE organization_id=? AND vehicle_id=? AND social_account_id=? AND status IN ('pending','filling','awaiting_confirmation')").get(auth.organizationId,Number(b.vehicleId),accountId)

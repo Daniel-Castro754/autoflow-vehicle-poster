@@ -13,7 +13,7 @@ server.stderr.on('data',chunk=>serverOutput+=chunk)
 
 async function waitForServer(){for(let attempt=0;attempt<40;attempt++){try{const response=await fetch(base+'/health');if(response.ok)return}catch{}await new Promise(resolve=>setTimeout(resolve,100))}throw new Error(`A API de teste não iniciou. ${serverOutput}`)}
 async function login(email){const response=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:'demo1234'})});const data=await response.json();if(!response.ok)throw new Error(data.error);return data.token}
-async function call(path,token,options={}){const response=await fetch(base+path,{...options,headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`}});const data=await response.json();if(!response.ok)throw Object.assign(new Error(`${response.status} ${path}: ${data.error}`),{status:response.status});return data}
+async function call(path,token,options={}){const response=await fetch(base+path,{...options,headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`}});const data=await response.json();if(!response.ok)throw Object.assign(new Error(`${response.status} ${path}: ${data.error}`),{status:response.status,body:data});return data}
 async function expectStatus(status,operation){try{await operation();throw new Error(`A operação deveria responder ${status}.`)}catch(error){if(error.status!==status)throw error}}
 
 try{
@@ -29,6 +29,25 @@ try{
   const sellerAccounts=await call('/extension/accounts',sellerToken)
   if(sellerAccounts.accounts.length!==1||sellerAccounts.accounts[0].id!==second.id)throw new Error('O vendedor recebeu perfis de outro usuário.')
   await expectStatus(403,()=>call(`/extension/queue?accountId=${first.id}`,sellerToken))
+
+  try{
+    await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:4,accountId:first.id})})
+    throw new Error('A publicação deveria ter sido bloqueada por falta de fotos.')
+  }catch(error){
+    if(error.status!==422||!error.body?.missing?.includes('Fotos'))throw error
+  }
+  const blockedVehicle=(await call('/vehicles',adminToken)).vehicles.find(item=>item.id===4)
+  if(blockedVehicle.status!=='Atenção')throw new Error('O veículo incompleto não foi marcado como Atenção.')
+
+  const imageOne=await call('/vehicles/1/images',adminToken,{method:'POST',body:JSON.stringify({name:'foto-1.jpg',mimeType:'image/jpeg',dataBase64:Buffer.from('foto-um').toString('base64')})})
+  const imageTwo=await call('/vehicles/1/images',adminToken,{method:'POST',body:JSON.stringify({name:'foto-2.jpg',mimeType:'image/jpeg',dataBase64:Buffer.from('foto-dois').toString('base64')})})
+  const orderedBefore=(await call('/vehicles/1/images',adminToken)).images.map(item=>item.id)
+  if(orderedBefore[0]!==imageOne.id||orderedBefore[1]!==imageTwo.id)throw new Error('A ordem inicial das fotos não respeitou o upload.')
+  await call('/vehicles/1/images/reorder',adminToken,{method:'PATCH',body:JSON.stringify({order:[imageTwo.id,imageOne.id]})})
+  const orderedAfter=(await call('/vehicles/1/images',adminToken)).images.map(item=>item.id)
+  if(orderedAfter[0]!==imageTwo.id||orderedAfter[1]!==imageOne.id)throw new Error('A reordenação de fotos não foi aplicada.')
+  await expectStatus(400,()=>call('/vehicles/1/images/reorder',adminToken,{method:'PATCH',body:JSON.stringify({order:[imageOne.id]})}))
+
   const publication=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:1,accountId:first.id})})
   const firstQueue=await call(`/extension/queue?accountId=${first.id}`,adminToken)
   const secondQueue=await call(`/extension/queue?accountId=${second.id}`,adminToken)
