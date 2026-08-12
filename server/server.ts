@@ -63,19 +63,26 @@ function ensureColumn(table:string,column:string,definition:string) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{name:string}>
   if (!columns.some(item=>item.name===column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
 }
-ensureColumn('vehicles','vehicle_type',"TEXT NOT NULL DEFAULT 'Carro/Caminhonete'")
+ensureColumn('vehicles','vehicle_type',"TEXT NOT NULL DEFAULT 'Carro/picape'")
 ensureColumn('vehicles','location',"TEXT NOT NULL DEFAULT ''")
 ensureColumn('vehicles','transmission',"TEXT NOT NULL DEFAULT 'Automático'")
 ensureColumn('vehicles','fuel_type',"TEXT NOT NULL DEFAULT 'Flex'")
 ensureColumn('vehicles','body_type',"TEXT NOT NULL DEFAULT 'Sedã'")
 ensureColumn('vehicles','exterior_color',"TEXT NOT NULL DEFAULT ''")
+ensureColumn('vehicles','interior_color',"TEXT NOT NULL DEFAULT ''")
 ensureColumn('vehicles','description',"TEXT NOT NULL DEFAULT ''")
+ensureColumn('vehicles','vehicle_condition',"TEXT NOT NULL DEFAULT ''")
 ensureColumn('publication_jobs','fill_report',"TEXT NOT NULL DEFAULT ''")
 ensureColumn('publication_jobs','extension_version',"TEXT NOT NULL DEFAULT ''")
 ensureColumn('publication_jobs','started_at','TEXT')
 ensureColumn('publication_jobs','filled_at','TEXT')
 ensureColumn('publication_jobs','removed_at','TEXT')
+ensureColumn('publication_jobs','extension_visible','INTEGER NOT NULL DEFAULT 1')
 ensureColumn('vehicles','sold_at','TEXT')
+ensureColumn('organization_settings','auto_advance','INTEGER NOT NULL DEFAULT 0')
+ensureColumn('organization_settings','fill_groups','INTEGER NOT NULL DEFAULT 0')
+ensureColumn('organization_settings','target_groups',"TEXT NOT NULL DEFAULT '[]'")
+ensureColumn('organization_settings','auto_publish','INTEGER NOT NULL DEFAULT 0')
 
 function hashPassword(password:string) {
   const salt = randomBytes(16).toString('hex')
@@ -109,6 +116,40 @@ function send(res:ServerResponse, status:number, data:unknown) {
   res.writeHead(status, { 'Content-Type':'application/json; charset=utf-8', 'Access-Control-Allow-Origin':'*', 'Access-Control-Allow-Headers':'Content-Type, Authorization', 'Access-Control-Allow-Methods':'GET, POST, PATCH, DELETE, OPTIONS' })
   res.end(JSON.stringify(data))
 }
+
+const vehicleOptions = {
+  vehicleType:new Set(['Carro/picape','Motocicleta','Veículos para esportes','Trailer','Reboque','Barco','Comercial/industrial','Outro']),
+  make:new Set([
+    'AM General','Agrale','Alfa Romeo','Aston Martin','Audi','BMW','Bentley','BYD','Cadillac','Caoa Chery','Chery','Chevrolet','Chrysler','Citroën','Cross Lander','Cupra','DS','Daewoo','Daihatsu','Dodge','Effa','Ferrari','Fiat','Ford','Geely','GWM','Honda','Hyundai','Iveco','JAC','Jaecoo','Jaguar','Jeep','Kia','Lamborghini','Land Rover','Lexus','Lifan','Maserati','Mazda','Mercedes-Benz','Mini','Mitsubishi','Nissan','Omoda','Peugeot','Porsche','RAM','Renault','Rolls-Royce','Seat','Smart','SsangYong','Subaru','Suzuki','Tesla','Toyota','Troller','Volkswagen','Volvo','Outra',
+  ]),
+  transmission:new Set(['Automático','Manual','Automatizado']),
+  fuelType:new Set(['Flex','Gasolina','Diesel','Elétrico','Híbrido','Etanol','GNV','Outro']),
+  bodyType:new Set(['Conversível','Cupê','Hatch','Minivan','Picape','Sedã','SUV','Perua','Van','Outro']),
+  condition:new Set(['Excelente','Muito bom','Bom','Regular','Ruim']),
+  color:new Set(['Preto','Azul','Marrom','Dourado','Verde','Cinza','Rosa','Roxo','Vermelho','Prateado','Laranja','Branco','Amarelo','Carvão','Off-white','Bronze','Bege','Bordô']),
+  status:new Set(['Rascunho','Pronto','Publicado','Atenção','Vendido']),
+}
+
+function validateVehicleBody(body:Record<string,unknown>) {
+  const year=Number(body.year), price=Number(body.price), km=Number(body.km)
+  if (!Number.isInteger(year)||year<1900||year>new Date().getFullYear()+1) return 'Selecione um ano válido.'
+  if (!vehicleOptions.make.has(String(body.make))) return 'Selecione uma fabricante da lista.'
+  if (!String(body.model||'').trim()) return 'O modelo é obrigatório.'
+  if (!String(body.location||'').trim()) return 'A localização é obrigatória.'
+  if (!Number.isFinite(price)||price<=0) return 'Informe um preço maior que zero.'
+  if (!Number.isFinite(km)||km<0) return 'Informe uma quilometragem válida.'
+  if (!vehicleOptions.vehicleType.has(String(body.vehicleType))) return 'Selecione um tipo de veículo válido.'
+  if (!vehicleOptions.transmission.has(String(body.transmission))) return 'Selecione um câmbio válido.'
+  if (!vehicleOptions.fuelType.has(String(body.fuelType))) return 'Selecione um combustível válido.'
+  if (!vehicleOptions.bodyType.has(String(body.bodyType))) return 'Selecione uma carroceria válida.'
+  if (!vehicleOptions.condition.has(String(body.condition))) return 'Selecione uma condição válida.'
+  if (!vehicleOptions.color.has(String(body.exteriorColor))) return 'Selecione uma cor externa da lista.'
+  if (!vehicleOptions.color.has(String(body.interiorColor))) return 'Selecione uma cor interna da lista.'
+  if (!vehicleOptions.status.has(String(body.status||'Rascunho'))) return 'Selecione um status válido.'
+  if (!String(body.description||'').trim()) return 'A descrição é obrigatória.'
+  return ''
+}
+
 function userById(id:number) { return db.prepare('SELECT id, organization_id organizationId, name, email, role FROM users WHERE id = ?').get(id) }
 function allowedExtensionAccount(accountId:number,auth:{userId:number;organizationId:number}) {
   const current = userById(auth.userId) as {role?:string}|undefined
@@ -140,6 +181,10 @@ db.exec(`INSERT OR IGNORE INTO organization_settings (organization_id,default_lo
 // Repairs values written by an early Windows encoding issue in the development seed.
 db.prepare("UPDATE organizations SET name='AutoPrime Veículos' WHERE name='AutoPrime Ve'||char(65533)||'culos'").run()
 db.prepare("UPDATE organization_settings SET default_location='São Paulo, SP' WHERE default_location='S'||char(65533)||'o Paulo, SP'").run()
+db.prepare("UPDATE vehicles SET vehicle_type='Carro/picape' WHERE vehicle_type='Carro/Caminhonete'").run()
+db.prepare("UPDATE vehicles SET vehicle_type='Outro' WHERE vehicle_type='Outro veículo'").run()
+db.prepare("UPDATE vehicles SET exterior_color='Prateado' WHERE exterior_color='Prata'").run()
+db.prepare("UPDATE vehicles SET interior_color='Preto' WHERE interior_color='' AND exterior_color!=''").run()
 
 createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return send(res, 204, null)
@@ -167,7 +212,7 @@ createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/vehicles') {
       const rows = db.prepare(`SELECT v.id,v.year,v.make,v.model,v.trim,v.price,v.km,v.color,v.status,
         v.vehicle_type vehicleType,v.location,v.transmission,v.fuel_type fuelType,v.body_type bodyType,
-        v.exterior_color exteriorColor,v.description,v.sold_at soldAt,
+        v.exterior_color exteriorColor,v.interior_color interiorColor,v.vehicle_condition condition,v.description,v.sold_at soldAt,
         COALESCE(u.name,'Não atribuído') seller,
         CASE WHEN u.name IS NULL THEN '—' ELSE substr(u.name,1,1)||substr(u.name,instr(u.name,' ')+1,1) END initials,
         v.updated_at updatedAt,(SELECT COUNT(*) FROM vehicle_images i WHERE i.vehicle_id=v.id) imageCount,
@@ -197,9 +242,13 @@ createServer(async (req, res) => {
         COALESCE(u.name,'Não atribuído') seller,a.label accountLabel
         FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id
         JOIN social_accounts a ON a.id=j.social_account_id LEFT JOIN users u ON u.id=v.assigned_user_id
-        WHERE j.organization_id=? AND j.social_account_id=? AND j.status IN ('pending','filling','error')
+        WHERE j.organization_id=? AND j.social_account_id=? AND j.extension_visible=1 AND j.status IN ('pending','filling','error','awaiting_confirmation')
         ORDER BY CASE j.status WHEN 'error' THEN 0 WHEN 'filling' THEN 1 ELSE 2 END,j.created_at`).all(auth.organizationId,accountId)
-      return send(res,200,{account,jobs})
+      const settings=db.prepare(`SELECT auto_advance autoAdvance,fill_groups fillGroups,target_groups targetGroups,auto_publish autoPublish
+        FROM organization_settings WHERE organization_id=?`).get(auth.organizationId) as Record<string,unknown>|undefined
+      let targetGroups:string[]=[]
+      try { const parsed=JSON.parse(String(settings?.targetGroups||'[]')); if(Array.isArray(parsed))targetGroups=parsed.map(String) } catch { /* lista antiga inválida */ }
+      return send(res,200,{account,jobs,automation:{autoAdvance:Boolean(settings?.autoAdvance),fillGroups:Boolean(settings?.fillGroups),targetGroups,autoPublish:Boolean(settings?.autoPublish)}})
     }
     const extensionPrepare = url.pathname.match(/^\/api\/extension\/jobs\/(\d+)\/prepare$/)
     if (req.method === 'POST' && extensionPrepare) {
@@ -209,16 +258,20 @@ createServer(async (req, res) => {
       const job = db.prepare(`SELECT j.id,j.vehicle_id vehicleId,j.status FROM publication_jobs j
         WHERE j.id=? AND j.organization_id=? AND j.social_account_id=?`).get(Number(extensionPrepare[1]),auth.organizationId,accountId) as {id:number;vehicleId:number;status:string}|undefined
       if (!job) return send(res,404,{error:'Trabalho não encontrado para este perfil.'})
-      if (!['pending','filling','error'].includes(job.status)) return send(res,409,{error:'Este trabalho não está disponível para preenchimento.'})
+      if (!['pending','filling','error','awaiting_confirmation'].includes(job.status)) return send(res,409,{error:'Este trabalho não está disponível para preenchimento.'})
       const vehicle = db.prepare(`SELECT v.id,v.year,v.make,v.model,v.trim,v.price,v.km,v.status,
-        v.vehicle_type vehicleType,v.location,v.transmission,v.fuel_type fuelType,v.body_type bodyType,v.exterior_color exteriorColor,
+        v.vehicle_type vehicleType,v.location,v.transmission,v.fuel_type fuelType,v.body_type bodyType,v.exterior_color exteriorColor,v.interior_color interiorColor,v.vehicle_condition condition,
         printf('%d %s %s %s',v.year,v.make,v.model,v.trim) title,
         CASE WHEN length(v.description)>0 THEN v.description ELSE printf('%d %s %s %s com %d km. Entre em contato para consultar disponibilidade e condições.',v.year,v.make,v.model,v.trim,v.km) END description
         FROM vehicles v WHERE v.id=? AND v.organization_id=?`).get(job.vehicleId,auth.organizationId)
       if (!vehicle) return send(res,404,{error:'Veículo não encontrado.'})
       const images = db.prepare(`SELECT 'http://127.0.0.1:3333/uploads/'||file_name url,original_name name,mime_type mimeType FROM vehicle_images WHERE vehicle_id=? AND organization_id=? ORDER BY position,id LIMIT 20`).all(job.vehicleId,auth.organizationId)
+      const settings=db.prepare(`SELECT auto_advance autoAdvance,fill_groups fillGroups,target_groups targetGroups,auto_publish autoPublish
+        FROM organization_settings WHERE organization_id=?`).get(auth.organizationId) as Record<string,unknown>|undefined
+      let targetGroups:string[]=[]
+      try { const parsed=JSON.parse(String(settings?.targetGroups||'[]')); if(Array.isArray(parsed))targetGroups=parsed.map(String) } catch { /* lista antiga inválida */ }
       db.prepare(`UPDATE publication_jobs SET status='filling',error_code=NULL,started_at=COALESCE(started_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).run(job.id,auth.organizationId)
-      return send(res,200,{jobId:job.id,accountId,vehicle:{...vehicle,images}})
+      return send(res,200,{jobId:job.id,accountId,vehicle:{...vehicle,images},automation:{autoAdvance:Boolean(settings?.autoAdvance),fillGroups:Boolean(settings?.fillGroups),targetGroups,autoPublish:Boolean(settings?.autoPublish)}})
     }
     const extensionFillResult = url.pathname.match(/^\/api\/extension\/jobs\/(\d+)\/fill-result$/)
     if (req.method === 'PATCH' && extensionFillResult) {
@@ -235,7 +288,20 @@ createServer(async (req, res) => {
       const report={
         filledCount:Math.max(0,Number(b.filledCount)||0),totalCount:Math.max(0,Number(b.totalCount)||0),
         imageCount:Math.max(0,Number(b.imageCount)||0),missing:Array.isArray(b.missing)?b.missing.map(String).slice(0,30):[],
-        fields:Array.isArray(b.fields)?b.fields.slice(0,30):[]
+        fields:Array.isArray(b.fields)?b.fields.slice(0,30):[],advanced:Boolean(b.advanced),
+        selectedGroups:Array.isArray(b.selectedGroups)?b.selectedGroups.map(String).slice(0,20):[],
+        missingGroups:Array.isArray(b.missingGroups)?b.missingGroups.map(String).slice(0,20):[],published:Boolean(b.published)
+      }
+      if(report.published){
+        const vehicleId=(db.prepare('SELECT vehicle_id vehicleId FROM publication_jobs WHERE id=? AND organization_id=?').get(job.id,auth.organizationId) as {vehicleId:number}).vehicleId
+        db.exec('BEGIN')
+        try{
+          db.prepare(`UPDATE publication_jobs SET status='completed',fill_report=?,extension_version=?,result_url=?,error_code=NULL,filled_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
+            .run(JSON.stringify(report),String(b.extensionVersion||'').slice(0,30),String(b.resultUrl||'').slice(0,500),job.id,auth.organizationId)
+          db.prepare("UPDATE vehicles SET status='Publicado',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(vehicleId,auth.organizationId)
+          db.exec('COMMIT')
+        }catch(error){db.exec('ROLLBACK');throw error}
+        return send(res,200,{ok:true,status:'completed'})
       }
       db.prepare(`UPDATE publication_jobs SET status='awaiting_confirmation',fill_report=?,extension_version=?,error_code=NULL,filled_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
         .run(JSON.stringify(report),String(b.extensionVersion||'').slice(0,30),job.id,auth.organizationId)
@@ -243,16 +309,19 @@ createServer(async (req, res) => {
     }
     if (req.method === 'POST' && url.pathname === '/api/vehicles') {
       const b = await jsonBody(req) as Record<string,unknown>
-      if (!b.make || !b.model || !b.year) return send(res,400,{error:'Marca, modelo e ano são obrigatórios.'})
-      const result = db.prepare(`INSERT INTO vehicles (organization_id,year,make,model,trim,price,km,status,assigned_user_id,vehicle_type,location,transmission,fuel_type,body_type,exterior_color,description)
-        VALUES (?,?,?,?,?,?,?,'Rascunho',?,?,?,?,?,?,?,?)`).run(auth.organizationId,Number(b.year),String(b.make),String(b.model),String(b.trim||''),Number(b.price||0),Number(b.km||0),auth.userId,String(b.vehicleType||'Carro/Caminhonete'),String(b.location||''),String(b.transmission||'Automático'),String(b.fuelType||'Flex'),String(b.bodyType||'Sedã'),String(b.exteriorColor||''),String(b.description||''))
+      const validationError=validateVehicleBody(b)
+      if (validationError) return send(res,400,{error:validationError})
+      const result = db.prepare(`INSERT INTO vehicles (organization_id,year,make,model,trim,price,km,status,assigned_user_id,vehicle_type,location,transmission,fuel_type,body_type,exterior_color,interior_color,vehicle_condition,description)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(auth.organizationId,Number(b.year),String(b.make),String(b.model).trim(),String(b.trim||''),Number(b.price),Number(b.km),String(b.status||'Rascunho'),auth.userId,String(b.vehicleType),String(b.location).trim(),String(b.transmission),String(b.fuelType),String(b.bodyType),String(b.exteriorColor),String(b.interiorColor),String(b.condition),String(b.description).trim())
       return send(res,201,{id:Number(result.lastInsertRowid)})
     }
     const vehicleRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)$/)
     if (req.method === 'PATCH' && vehicleRoute) {
       const b = await jsonBody(req) as Record<string,unknown>
-      const result = db.prepare(`UPDATE vehicles SET year=?,make=?,model=?,trim=?,price=?,km=?,vehicle_type=?,location=?,transmission=?,fuel_type=?,body_type=?,exterior_color=?,description=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
-        .run(Number(b.year),String(b.make||''),String(b.model||''),String(b.trim||''),Number(b.price||0),Number(b.km||0),String(b.vehicleType||'Carro/Caminhonete'),String(b.location||''),String(b.transmission||''),String(b.fuelType||''),String(b.bodyType||''),String(b.exteriorColor||''),String(b.description||''),String(b.status||'Rascunho'),Number(vehicleRoute[1]),auth.organizationId)
+      const validationError=validateVehicleBody(b)
+      if (validationError) return send(res,400,{error:validationError})
+      const result = db.prepare(`UPDATE vehicles SET year=?,make=?,model=?,trim=?,price=?,km=?,vehicle_type=?,location=?,transmission=?,fuel_type=?,body_type=?,exterior_color=?,interior_color=?,vehicle_condition=?,description=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
+        .run(Number(b.year),String(b.make),String(b.model).trim(),String(b.trim||''),Number(b.price),Number(b.km),String(b.vehicleType),String(b.location).trim(),String(b.transmission),String(b.fuelType),String(b.bodyType),String(b.exteriorColor),String(b.interiorColor),String(b.condition),String(b.description).trim(),String(b.status||'Rascunho'),Number(vehicleRoute[1]),auth.organizationId)
       return result.changes?send(res,200,{ok:true}):send(res,404,{error:'Veículo não encontrado.'})
     }
     const markSoldRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)\/mark-sold$/)
@@ -342,7 +411,7 @@ createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/publications') {
       const rows = db.prepare(`SELECT j.id,j.status,j.result_url resultUrl,j.error_code errorCode,j.fill_report fillReport,
-        j.extension_version extensionVersion,j.started_at startedAt,j.filled_at filledAt,j.removed_at removedAt,j.created_at createdAt,j.updated_at updatedAt,
+        j.extension_version extensionVersion,j.extension_visible extensionVisible,j.started_at startedAt,j.filled_at filledAt,j.removed_at removedAt,j.created_at createdAt,j.updated_at updatedAt,
         v.id vehicleId,v.year,v.make,v.model,v.price,COALESCE(a.label,'Perfil não definido') accountLabel,
         COALESCE(u.name,'Não atribuído') seller FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id
         LEFT JOIN social_accounts a ON a.id=j.social_account_id LEFT JOIN users u ON u.id=v.assigned_user_id
@@ -352,13 +421,25 @@ createServer(async (req, res) => {
     }
     if (req.method === 'POST' && url.pathname === '/api/publications') {
       const b = await jsonBody(req) as Record<string,unknown>
-      const vehicle = db.prepare('SELECT id,price,km,location,description FROM vehicles WHERE id=? AND organization_id=?').get(Number(b.vehicleId),auth.organizationId) as {id:number;price:number;km:number;location:string;description:string}|undefined
+      const vehicle = db.prepare(`SELECT id,year,make,model,price,km,location,description,vehicle_type vehicleType,
+        transmission,fuel_type fuelType,body_type bodyType,exterior_color exteriorColor,interior_color interiorColor,vehicle_condition condition
+        FROM vehicles WHERE id=? AND organization_id=?`).get(Number(b.vehicleId),auth.organizationId) as Record<string,any>|undefined
       if (!vehicle) return send(res,400,{error:'Veículo inválido.'})
       const imageCount = (db.prepare('SELECT COUNT(*) c FROM vehicle_images WHERE vehicle_id=? AND organization_id=?').get(vehicle.id,auth.organizationId) as {c:number}).c
       const missing:string[] = []
       if (!(vehicle.price>0)) missing.push('Preço')
-      if (!(vehicle.km>0)) missing.push('Quilometragem')
+      if (!(vehicle.year>=1900)) missing.push('Ano')
+      if (!String(vehicle.make||'').trim()) missing.push('Fabricante')
+      if (!String(vehicle.model||'').trim()) missing.push('Modelo')
+      if (!(vehicle.km>=0)) missing.push('Quilometragem')
       if (!vehicle.location.trim()) missing.push('Localização')
+      if (!vehicleOptions.vehicleType.has(String(vehicle.vehicleType))) missing.push('Tipo de veículo')
+      if (!vehicleOptions.transmission.has(String(vehicle.transmission))) missing.push('Câmbio')
+      if (!vehicleOptions.fuelType.has(String(vehicle.fuelType))) missing.push('Combustível')
+      if (!vehicleOptions.bodyType.has(String(vehicle.bodyType))) missing.push('Carroceria')
+      if (!vehicleOptions.condition.has(String(vehicle.condition))) missing.push('Condição do veículo')
+      if (!vehicleOptions.color.has(String(vehicle.exteriorColor))) missing.push('Cor externa')
+      if (!vehicleOptions.color.has(String(vehicle.interiorColor))) missing.push('Cor interna')
       if (!vehicle.description.trim()) missing.push('Descrição')
       if (!imageCount) missing.push('Fotos')
       if (missing.length) {
@@ -376,6 +457,17 @@ createServer(async (req, res) => {
       db.prepare("UPDATE vehicles SET status='Pronto',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(b.vehicleId),auth.organizationId)
       return send(res,201,{id:Number(result.lastInsertRowid)})
     }
+    if (req.method === 'PATCH' && url.pathname === '/api/publications/extension-visibility') {
+      const b=await jsonBody(req) as Record<string,unknown>
+      const ids=Array.isArray(b.ids)?[...new Set(b.ids.map(Number).filter(Number.isInteger))]:[]
+      if(!ids.length)return send(res,400,{error:'Selecione pelo menos um trabalho.'})
+      const placeholders=ids.map(()=>'?').join(',')
+      const owned=db.prepare(`SELECT id FROM publication_jobs WHERE organization_id=? AND id IN (${placeholders})`).all(auth.organizationId,...ids) as Array<{id:number}>
+      if(owned.length!==ids.length)return send(res,400,{error:'Um ou mais trabalhos não pertencem a esta empresa.'})
+      const visible=b.visible===true?1:0
+      db.prepare(`UPDATE publication_jobs SET extension_visible=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=? AND id IN (${placeholders})`).run(visible,auth.organizationId,...ids)
+      return send(res,200,{updated:ids.length,visible:Boolean(visible)})
+    }
     const publication = url.pathname.match(/^\/api\/publications\/(\d+)$/)
     if (req.method === 'PATCH' && publication) {
       const b = await jsonBody(req) as Record<string,unknown>
@@ -385,7 +477,7 @@ createServer(async (req, res) => {
       if(!job)return send(res,404,{error:'Publicação não encontrada.'})
       db.exec('BEGIN')
       try{
-        if(String(b.status)==='pending')db.prepare("UPDATE publication_jobs SET status='pending',error_code=NULL,fill_report='',started_at=NULL,filled_at=NULL,removed_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
+        if(String(b.status)==='pending')db.prepare("UPDATE publication_jobs SET status='pending',extension_visible=1,error_code=NULL,fill_report='',started_at=NULL,filled_at=NULL,removed_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
         else if(String(b.status)==='removed')db.prepare("UPDATE publication_jobs SET status='removed',removed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
         else db.prepare('UPDATE publication_jobs SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?').run(String(b.status),Number(publication[1]),auth.organizationId)
         if(String(b.status)==='completed')db.prepare("UPDATE vehicles SET status='Publicado',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(job.vehicleId,auth.organizationId)
@@ -396,7 +488,9 @@ createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/settings') {
       const organization = db.prepare('SELECT id,name FROM organizations WHERE id=?').get(auth.organizationId)
       const settings = db.prepare(`SELECT default_location defaultLocation,daily_limit dailyLimit,
-        require_confirmation requireConfirmation,description_template descriptionTemplate FROM organization_settings WHERE organization_id=?`).get(auth.organizationId)
+        require_confirmation requireConfirmation,description_template descriptionTemplate,auto_advance autoAdvance,
+        fill_groups fillGroups,target_groups targetGroups,auto_publish autoPublish FROM organization_settings WHERE organization_id=?`).get(auth.organizationId) as Record<string,unknown>
+      try { settings.targetGroups=JSON.parse(String(settings.targetGroups||'[]')) } catch { settings.targetGroups=[] }
       return send(res,200,{organization,settings})
     }
     if (req.method === 'PATCH' && url.pathname === '/api/settings') {
@@ -405,9 +499,16 @@ createServer(async (req, res) => {
       const b = await jsonBody(req) as Record<string,unknown>
       if (!String(b.organizationName||'').trim()) return send(res,400,{error:'O nome da empresa é obrigatório.'})
       const limit = Math.max(1,Math.min(50,Number(b.dailyLimit)||10))
+      const autoAdvance=b.autoAdvance===true
+      const fillGroups=b.fillGroups===true
+      const autoPublish=b.autoPublish===true
+      const targetGroups=Array.isArray(b.targetGroups)?[...new Set(b.targetGroups.map(value=>String(value).trim()).filter(Boolean))].slice(0,20):[]
+      if(fillGroups&&!autoAdvance)return send(res,400,{error:'Ative o avanço automático para selecionar grupos.'})
+      if(fillGroups&&!targetGroups.length)return send(res,400,{error:'Informe pelo menos um grupo para preencher.'})
+      if(autoPublish&&!autoAdvance)return send(res,400,{error:'Ative o avanço automático antes da publicação automática.'})
       db.prepare('UPDATE organizations SET name=? WHERE id=?').run(String(b.organizationName).trim(),auth.organizationId)
-      db.prepare(`UPDATE organization_settings SET default_location=?,daily_limit=?,require_confirmation=?,description_template=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=?`)
-        .run(String(b.defaultLocation||''),limit,b.requireConfirmation===false?0:1,String(b.descriptionTemplate||''),auth.organizationId)
+      db.prepare(`UPDATE organization_settings SET default_location=?,daily_limit=?,require_confirmation=?,description_template=?,auto_advance=?,fill_groups=?,target_groups=?,auto_publish=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=?`)
+        .run(String(b.defaultLocation||''),limit,autoPublish?0:1,String(b.descriptionTemplate||''),autoAdvance?1:0,fillGroups?1:0,JSON.stringify(targetGroups),autoPublish?1:0,auth.organizationId)
       return send(res,200,{ok:true})
     }
     if (req.method === 'POST' && url.pathname === '/api/team/users') {

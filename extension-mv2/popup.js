@@ -3,7 +3,7 @@ const $=id=>document.getElementById(id)
 let token='',activeAccountId=0,availableAccounts=[]
 function request(path,options={}){return fetch(API+path,{...options,headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,...options.headers}}).then(async r=>{const data=await r.json();if(!r.ok)throw new Error(data.error||'Falha na operação');return data})}
 function setConnected(connected,user){$('loginView').hidden=connected;$('queueView').hidden=!connected;$('apiState').className=connected?'online':'';if(user)$('userName').textContent=user.name}
-function statusLabel(status){return({pending:'Pendente',filling:'Preenchendo',error:'Revisar erro'})[status]||status}
+function statusLabel(status){return({pending:'Pendente',filling:'Preenchendo',error:'Revisar erro',awaiting_confirmation:'Preenchido'})[status]||status}
 function loadAccounts(){
   $('queue').innerHTML='<div class="empty">Carregando perfis...</div>'
   return request('/extension/accounts').then(({accounts})=>{availableAccounts=accounts;return new Promise(resolve=>chrome.storage.local.get('activeAccountId',data=>resolve(data.activeAccountId)))}).then(saved=>{
@@ -18,10 +18,16 @@ function updateProfileMeta(account){$('profileMeta').textContent=`Perfil local: 
 function loadQueue(){
   if(!activeAccountId)return
   $('queue').innerHTML='<div class="empty">Carregando...</div>'
-  request('/extension/queue?accountId='+encodeURIComponent(activeAccountId)).then(({jobs,account})=>{
+  request('/extension/queue?accountId='+encodeURIComponent(activeAccountId)).then(({jobs,account,automation})=>{
     if(account)updateProfileMeta({...account,status:'connected'})
-    $('queue').innerHTML=jobs.length?'':'<div class="empty">Nenhum trabalho pendente para este perfil.</div>'
-    jobs.forEach(job=>{const card=document.createElement('div');card.className=`vehicle ${job.jobStatus==='error'?'error-job':job.jobStatus==='filling'?'filling-job':''}`;card.innerHTML=`<div class="vehicle-top"><strong>${job.year} ${escapeHtml(job.make)} ${escapeHtml(job.model)}</strong><span class="status ${job.jobStatus}">${statusLabel(job.jobStatus)}</span></div><small>${Number(job.km).toLocaleString('pt-BR')} km · ${Number(job.price).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0})} · ${Number(job.imageCount||0)} fotos</small><div class="job-meta">Trabalho #${job.jobId} · ${escapeHtml(job.accountLabel)}${job.errorCode?' · '+escapeHtml(job.errorCode):''}</div><button data-id="${job.jobId}">${job.jobStatus==='pending'?'Abrir e preencher':'Retomar preenchimento'}</button>`;card.querySelector('button').onclick=()=>prepare(job.jobId);$('queue').appendChild(card)})
+    const steps=['Preencher dados']
+    if(automation?.autoAdvance)steps.push('Avançar')
+    if(automation?.fillGroups)steps.push(`${automation.targetGroups?.length||0} grupos`)
+    if(automation?.autoPublish)steps.push('Publicar')
+    $('automationTitle').textContent=automation?.autoPublish?'Publicação automática ativa':'Confirmação final manual'
+    $('automationSummary').textContent=steps.join(' → ')+(automation?.autoPublish?'':' → revisar e publicar manualmente')
+    $('queue').innerHTML=jobs.length?'':'<div class="empty">Nenhum trabalho pendente para este perfil.<br><small>No painel, use ⋯ → Adicionar à fila e escolha este perfil.</small></div>'
+    jobs.forEach(job=>{const card=document.createElement('div');card.className=`vehicle ${job.jobStatus==='error'?'error-job':job.jobStatus==='filling'?'filling-job':job.jobStatus==='awaiting_confirmation'?'filled-job':''}`;const action=job.jobStatus==='pending'?'Abrir e preencher':job.jobStatus==='awaiting_confirmation'?'Preencher novamente':'Retomar preenchimento';card.innerHTML=`<div class="vehicle-top"><strong>${job.year} ${escapeHtml(job.make)} ${escapeHtml(job.model)}</strong><span class="status ${job.jobStatus}">${statusLabel(job.jobStatus)}</span></div><small>${Number(job.km).toLocaleString('pt-BR')} km · ${Number(job.price).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0})} · ${Number(job.imageCount||0)} fotos</small><div class="job-meta">Trabalho #${job.jobId} · ${escapeHtml(job.accountLabel)}${job.errorCode?' · '+escapeHtml(job.errorCode):''}</div><button data-id="${job.jobId}">${action}</button>`;card.querySelector('button').onclick=()=>prepare(job.jobId);$('queue').appendChild(card)})
   }).catch(error=>$('queue').innerHTML=`<div class="empty">${escapeHtml(error.message)}</div>`)
 }
 function prepare(jobId){request('/extension/jobs/'+jobId+'/prepare',{method:'POST',body:JSON.stringify({accountId:activeAccountId})}).then(task=>chrome.storage.local.set({pendingJob:task},()=>chrome.tabs.create({url:'https://www.facebook.com/marketplace/create/vehicle'}))).catch(error=>alert(error.message))}

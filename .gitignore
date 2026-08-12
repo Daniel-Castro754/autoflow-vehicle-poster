@@ -8,5 +8,6 @@ data/uploads/
 .env
 *.tsbuildinfo
 work/
+.tmp-*/
 vite.config.js
 vite.config.d.ts
