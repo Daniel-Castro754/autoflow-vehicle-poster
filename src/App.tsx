@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BarChart3, Bell, Building2, Car, Check, ChevronDown, CircleAlert, Clock3, LayoutDashboard, Laptop, Menu, Moon, MoreHorizontal, Plus, Search, Send, Settings, ShieldCheck, Sun, UserPlus, Users, X } from 'lucide-react'
+import { BarChart3, Bell, Car, Check, CheckCheck, ChevronDown, CircleAlert, LayoutDashboard, Laptop, Menu, Moon, MoreHorizontal, Plus, Send, Settings, ShieldCheck, Sun, Trash2, UserPlus, Users, X } from 'lucide-react'
 import { OverviewView, PublicationsView, ReportsView, SettingsView } from './Views'
 import VehiclesView, { type VehicleRecord } from './Vehicles'
 
-type Status = 'Pronto' | 'Publicado' | 'Rascunho' | 'Atenção' | 'Vendido'
 type Vehicle = VehicleRecord & {updated?:string}
 type TeamUser = { id:number; name:string; email:string; role:'admin'|'seller' }
 type SocialAccount = { id:number; userId:number; label:string; platform:string; status:string; browserProfile:string; lastSeenAt?:string }
@@ -16,19 +15,14 @@ const seed: Vehicle[] = [
   { id:5, year:2024, make:'Chevrolet', model:'Tracker', trim:'Premier', price:154900, km:8900, seller:'Rafael Lima', initials:'RL', status:'Pronto', color:'#d9e0df', updated:'há 3h' },
 ]
 
-const money = new Intl.NumberFormat('pt-BR', { style:'currency', currency:'BRL', maximumFractionDigits:0 })
 const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:3333/api'
 const nav = [
   ['Visão geral', LayoutDashboard], ['Veículos', Car], ['Publicações', Send], ['Equipe e contas', Users], ['Relatórios', BarChart3],
 ] as const
 
-function Badge({status}:{status:Status}) {
-  const icon = status === 'Publicado' ? <Check size={13}/> : status === 'Atenção' ? <CircleAlert size={13}/> : status === 'Rascunho' ? <Clock3 size={13}/> : <span className="dot"/>
-  return <span className={`badge ${status.toLowerCase().replace('ç','c')}`}>{icon}{status}</span>
-}
-
-function CarThumb({color}:{color:string}) {
-  return <div className="car-thumb" style={{background:color}}><Car size={30} strokeWidth={1.4}/></div>
+function storedStringList(key:string) {
+  try { const value=JSON.parse(localStorage.getItem(key)||'[]'); return Array.isArray(value)?value.filter(item=>typeof item==='string'):[] }
+  catch { return [] }
 }
 
 export default function App() {
@@ -42,7 +36,8 @@ export default function App() {
   const [theme, setTheme] = useState<'light'|'dark'>(() => localStorage.getItem('autoflow_theme') === 'dark' ? 'dark' : 'light')
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const [readSignature, setReadSignature] = useState(() => localStorage.getItem('autoflow_notifications_read') || '')
+  const [readNotificationIds, setReadNotificationIds] = useState<string[]>(() => storedStringList('autoflow_notifications_read_ids'))
+  const [dismissedNotificationIds, setDismissedNotificationIds] = useState<string[]>(() => storedStringList('autoflow_notifications_dismissed_ids'))
   const [team, setTeam] = useState<TeamUser[]>([])
   const [accounts, setAccounts] = useState<SocialAccount[]>([])
 
@@ -89,12 +84,14 @@ export default function App() {
     if (waiting) items.push({id:`profiles-${waiting}`,title:`${waiting} perfil${waiting>1?'s':''} aguardando extensão`,detail:'Abra a extensão no Brave para confirmar a conexão.',page:'Equipe e contas',tone:'blue'})
     return items
   },[vehicles,accounts])
-  const notificationSignature = notifications.map(n=>n.id).join('|')
-  const unreadCount = notificationSignature && notificationSignature !== readSignature ? notifications.length : 0
-  function toggleNotifications() {
-    const next = !notificationsOpen; setNotificationsOpen(next)
-    if (next) { setReadSignature(notificationSignature); localStorage.setItem('autoflow_notifications_read',notificationSignature) }
-  }
+  const visibleNotifications = notifications.filter(item=>!dismissedNotificationIds.includes(item.id))
+  const unreadCount = visibleNotifications.filter(item=>!readNotificationIds.includes(item.id)).length
+  function saveRead(ids:string[]) { setReadNotificationIds(ids); localStorage.setItem('autoflow_notifications_read_ids',JSON.stringify(ids)) }
+  function saveDismissed(ids:string[]) { setDismissedNotificationIds(ids); localStorage.setItem('autoflow_notifications_dismissed_ids',JSON.stringify(ids)) }
+  function markNotificationRead(id:string) { if(!readNotificationIds.includes(id)) saveRead([...readNotificationIds,id]) }
+  function markAllNotificationsRead() { saveRead([...new Set([...readNotificationIds,...visibleNotifications.map(item=>item.id)])]) }
+  function dismissNotification(id:string) { if(!dismissedNotificationIds.includes(id)) saveDismissed([...dismissedNotificationIds,id]) }
+  function dismissAllNotifications() { saveDismissed([...new Set([...dismissedNotificationIds,...visibleNotifications.map(item=>item.id)])]) }
 
   async function addUser(e:React.FormEvent<HTMLFormElement>) {
     e.preventDefault(); const form = new FormData(e.currentTarget)
@@ -138,15 +135,21 @@ export default function App() {
     {mobileMenuOpen&&<button className="mobile-overlay" onClick={()=>setMobileMenuOpen(false)} aria-label="Fechar menu"/>}
 
     <main>
-      <header><button className="mobile-menu" onClick={()=>setMobileMenuOpen(true)} aria-label="Abrir menu"><Menu/></button><div className="crumb"><span>AutoFlow</span><b>/</b><strong>{active}</strong></div><div className="header-actions"><button className="theme-quick" onClick={()=>changeTheme(theme==='light'?'dark':'light')} aria-label={theme==='light'?'Ativar tema escuro':'Ativar tema claro'} title={theme==='light'?'Tema escuro':'Tema claro'}>{theme==='light'?<Moon size={17}/>:<Sun size={17}/>}</button><div className="notification-wrap"><button className="icon-btn" onClick={toggleNotifications} aria-label="Abrir notificações" aria-expanded={notificationsOpen}><Bell size={19}/>{unreadCount>0&&<span className="notification-count">{unreadCount}</span>}</button>{notificationsOpen&&<NotificationCenter notifications={notifications} onClose={()=>setNotificationsOpen(false)} onNavigate={page=>{setActive(page);setNotificationsOpen(false)}}/>}</div><span className="sync"><i/>Sincronizado agora</span></div></header>
+      <header><button className="mobile-menu" onClick={()=>setMobileMenuOpen(true)} aria-label="Abrir menu"><Menu/></button><div className="crumb"><span>AutoFlow</span><b>/</b><strong>{active}</strong></div><div className="header-actions"><button className="theme-quick" onClick={()=>changeTheme(theme==='light'?'dark':'light')} aria-label={theme==='light'?'Ativar tema escuro':'Ativar tema claro'} title={theme==='light'?'Tema escuro':'Tema claro'}>{theme==='light'?<Moon size={17}/>:<Sun size={17}/>}</button><div className="notification-wrap"><button className="icon-btn" onClick={()=>setNotificationsOpen(open=>!open)} aria-label="Abrir notificações" aria-expanded={notificationsOpen}><Bell size={19}/>{unreadCount>0&&<span className="notification-count">{unreadCount}</span>}</button>{notificationsOpen&&<NotificationCenter notifications={visibleNotifications} readIds={readNotificationIds} onClose={()=>setNotificationsOpen(false)} onReadAll={markAllNotificationsRead} onDismiss={dismissNotification} onDismissAll={dismissAllNotifications} onNavigate={(id,page)=>{markNotificationRead(id);setActive(page);setNotificationsOpen(false)}}/>}</div><span className="sync"><i/>Sincronizado agora</span></div></header>
       {active === 'Visão geral' ? <OverviewView api={api} vehicles={vehicles} navigate={setActive}/> : active === 'Publicações' ? <PublicationsView api={api} vehicles={vehicles} reload={loadVehicles}/> : active === 'Equipe e contas' ? <TeamView team={team} accounts={accounts} onAddUser={addUser} onAddAccount={addAccount}/> : active === 'Relatórios' ? <ReportsView api={api} vehicles={vehicles}/> : active === 'Configurações' ? <SettingsView api={api} onSaved={loadOrganizationName} theme={theme} onThemeChange={changeTheme}/> : <VehiclesView api={api} vehicles={vehicles} accounts={accounts} reload={loadVehicles} notify={message=>{setToast(message);setTimeout(()=>setToast(''),3000)}}/>}
     </main>
     {toast&&<div className="toast"><Check size={17}/>{toast}</div>}
   </div>
 }
 
-function NotificationCenter({notifications,onClose,onNavigate}:{notifications:{id:string;title:string;detail:string;page:string;tone:string}[];onClose:()=>void;onNavigate:(page:string)=>void}) {
-  return <div className="notification-panel"><div className="notification-head"><div><strong>Notificações</strong><span>{notifications.length ? 'Atualizações da operação' : 'Tudo em ordem'}</span></div><button onClick={onClose} aria-label="Fechar notificações"><X/></button></div><div className="notification-list">{notifications.map(item=><button key={item.id} onClick={()=>onNavigate(item.page)}><i className={item.tone}/><div><strong>{item.title}</strong><span>{item.detail}</span></div><ChevronDown className="notification-arrow"/></button>)}{!notifications.length&&<div className="notification-empty"><Check/><strong>Nenhuma pendência</strong><span>Você receberá avisos importantes aqui.</span></div>}</div><div className="notification-foot">Atualizado com os dados do painel</div></div>
+function NotificationCenter({notifications,readIds,onClose,onReadAll,onDismiss,onDismissAll,onNavigate}:{notifications:{id:string;title:string;detail:string;page:string;tone:string}[];readIds:string[];onClose:()=>void;onReadAll:()=>void;onDismiss:(id:string)=>void;onDismissAll:()=>void;onNavigate:(id:string,page:string)=>void}) {
+  const unread = notifications.filter(item=>!readIds.includes(item.id)).length
+  return <div className="notification-panel">
+    <div className="notification-head"><div><strong>Notificações</strong><span>{notifications.length ? `${unread} não lida${unread===1?'':'s'}` : 'Tudo em ordem'}</span></div><button onClick={onClose} aria-label="Fechar notificações"><X/></button></div>
+    <div className="notification-actions"><button onClick={onReadAll} disabled={!unread}><CheckCheck/>Marcar todas como lidas</button><button onClick={onDismissAll} disabled={!notifications.length}><Trash2/>Limpar todas</button></div>
+    <div className="notification-list">{notifications.map(item=><article key={item.id} className={readIds.includes(item.id)?'read':''}><button className="notification-main" onClick={()=>onNavigate(item.id,item.page)}><i className={item.tone}/><div><strong>{item.title}</strong><span>{item.detail}</span></div><ChevronDown className="notification-arrow"/></button><button className="notification-delete" onClick={()=>onDismiss(item.id)} aria-label={`Excluir notificação: ${item.title}`} title="Excluir notificação"><Trash2/></button></article>)}{!notifications.length&&<div className="notification-empty"><Check/><strong>Nenhuma pendência</strong><span>Você receberá avisos importantes aqui.</span></div>}</div>
+    <div className="notification-foot">Atualizado com os dados do painel</div>
+  </div>
 }
 
 function TeamView({team,accounts,onAddUser,onAddAccount}:{team:TeamUser[];accounts:SocialAccount[];onAddUser:(e:React.FormEvent<HTMLFormElement>)=>void;onAddAccount:(e:React.FormEvent<HTMLFormElement>)=>void}) {
