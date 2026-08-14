@@ -6,7 +6,11 @@
   const randomDelay=(min,max)=>sleep(min+Math.random()*(max-min))
   const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()
   const visible=element=>{const box=element.getBoundingClientRect();const style=getComputedStyle(element);return box.width>0&&box.height>0&&style.visibility!=='hidden'&&style.display!=='none'}
-  const attributeText=element=>normalize([element.getAttribute?.('aria-label'),element.getAttribute?.('placeholder'),element.getAttribute?.('name'),element.getAttribute?.('data-testid')].filter(Boolean).join(' '))
+  const attributeText=element=>{
+    const labelledBy=String(element.getAttribute?.('aria-labelledby')||'').split(/\s+/).filter(Boolean).map(id=>document.getElementById(id)?.textContent||'')
+    const ownLabel=element.id?document.querySelector(`label[for="${CSS.escape(element.id)}"]`)?.textContent:''
+    return normalize([element.getAttribute?.('aria-label'),element.getAttribute?.('placeholder'),element.getAttribute?.('name'),element.getAttribute?.('data-testid'),ownLabel,...labelledBy].filter(Boolean).join(' '))
+  }
   const exactOrPrefix=(text,key)=>text===key||text.startsWith(key+' ')||text.endsWith(' '+key)
   const fuzzyMatch=(text,value)=>{const a=normalize(text),b=normalize(value);if(!a||!b)return false;if(a===b||a.includes(b)||b.includes(a))return true;const tokens=b.split(' ').filter(token=>token.length>2);return tokens.length>0&&tokens.every(token=>a.includes(token))}
 
@@ -25,9 +29,33 @@
     const proto=input instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype
     const setter=Object.getOwnPropertyDescriptor(proto,'value')?.set
     setter?.call(input,String(value))
+    input.focus()
+    input.dispatchEvent(new KeyboardEvent('keydown',{key:'Unidentified',bubbles:true}))
     input.dispatchEvent(new Event('input',{bubbles:true}))
     input.dispatchEvent(new Event('change',{bubbles:true}))
+    input.dispatchEvent(new KeyboardEvent('keyup',{key:'Unidentified',bubbles:true}))
     input.dispatchEvent(new Event('blur',{bubbles:true}))
+  }
+
+  function valueMatches(actual,expected){
+    const current=normalize(actual),wanted=normalize(expected)
+    if(!current||!wanted)return false
+    const currentDigits=current.replace(/\D/g,''),wantedDigits=wanted.replace(/\D/g,'')
+    if(wantedDigits.length>=3&&currentDigits)return currentDigits===wantedDigits
+    return valuesFor(expected).some(candidate=>fuzzyMatch(current,candidate))
+  }
+
+  function fieldValue(element){
+    if(element instanceof HTMLSelectElement)return element.selectedOptions[0]?.textContent||element.value
+    if(element instanceof HTMLInputElement||element instanceof HTMLTextAreaElement)return element.value
+    return [element.getAttribute?.('aria-valuetext'),element.getAttribute?.('data-value'),element.innerText,element.textContent].filter(Boolean).join(' ')
+  }
+
+  async function confirmField(labels,value,selector){
+    return Boolean(await waitForDom(()=>{
+      const current=findField(labels,selector)
+      return current&&valueMatches(fieldValue(current),value)
+    },2200))
   }
 
   function labelNodes(labels){
@@ -85,7 +113,16 @@
     if(!element)return false
     element.scrollIntoView({block:'center',behavior:'auto'})
     await sleep(180)
-    if(element instanceof HTMLInputElement||element instanceof HTMLTextAreaElement)setNative(element,value)
+    if(element instanceof HTMLInputElement||element instanceof HTMLTextAreaElement){
+      setNative(element,value)
+      if(await confirmField(labels,value,'input:not([type="file"]),textarea,[contenteditable="true"],[role="textbox"]'))return true
+      element.focus()
+      element.select?.()
+      document.execCommand('insertText',false,String(value))
+      element.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:String(value)}))
+      element.dispatchEvent(new Event('change',{bubbles:true}))
+      element.blur()
+    }
     else{
       element.focus()
       document.execCommand('selectAll',false)
@@ -94,7 +131,7 @@
       element.dispatchEvent(new Event('change',{bubbles:true}))
       element.dispatchEvent(new Event('blur',{bubbles:true}))
     }
-    return true
+    return confirmField(labels,value,'input:not([type="file"]),textarea,[contenteditable="true"],[role="textbox"]')
   }
 
   function optionCandidates(trigger){
@@ -128,8 +165,10 @@
       const option=[...trigger.options].find(item=>wanted.some(candidate=>fuzzyMatch(item.textContent,candidate)))
       if(!option)return false
       trigger.value=option.value
+      trigger.dispatchEvent(new Event('input',{bubbles:true}))
       trigger.dispatchEvent(new Event('change',{bubbles:true}))
-      return true
+      trigger.dispatchEvent(new Event('blur',{bubbles:true}))
+      return confirmField(labels,value,'select,[role="combobox"],[aria-haspopup="listbox"],input[aria-autocomplete]')
     }
     trigger.scrollIntoView({block:'center',behavior:'auto'})
     await sleep(180)
@@ -141,14 +180,25 @@
       const match=exact||options.find(option=>wanted.some(candidate=>fuzzyMatch(option.textContent,candidate)))
       if(match){
         match.scrollIntoView({block:'nearest',behavior:'auto'})
-        match.click()
+        firePointerClick(match)
         await sleep(420)
-        return true
+        if(await confirmField(labels,value,'select,[role="combobox"],[aria-haspopup="listbox"],input[aria-autocomplete]'))return true
+        const checked=match.getAttribute('aria-selected')==='true'||match.getAttribute('aria-checked')==='true'
+        if(checked)return true
       }
       if(attempt>0&&attempt%3===0)scrollOpenList(trigger)
       await sleep(140)
     }
     trigger.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true}))
+    if(trigger instanceof HTMLInputElement){
+      trigger.focus()
+      setNative(trigger,wanted[0])
+      await sleep(500)
+      trigger.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',code:'ArrowDown',bubbles:true}))
+      trigger.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}))
+      trigger.dispatchEvent(new KeyboardEvent('keyup',{key:'Enter',code:'Enter',bubbles:true}))
+      if(await confirmField(labels,value,'select,[role="combobox"],[aria-haspopup="listbox"],input[aria-autocomplete]'))return true
+    }
     return false
   }
 
@@ -159,8 +209,8 @@
     await sleep(500)
     const suggestions=[...document.querySelectorAll('[role="option"]')].filter(visible)
     const match=suggestions.find(option=>valuesFor(value).some(candidate=>fuzzyMatch(option.textContent,candidate)))
-    if(match){match.click();await sleep(320)}
-    return true
+    if(match){firePointerClick(match);await sleep(320)}
+    return confirmField(labels,value,'input:not([type="file"]),textarea,[contenteditable="true"],[role="textbox"],[role="combobox"]')
   }
 
   function runtimeMessage(message){
@@ -234,18 +284,52 @@
     return 0
   }
 
-  function exactButton(names){
-    const keys=names.map(normalize)
-    return [...document.querySelectorAll('button,[role="button"]')].filter(visible).find(button=>{
-      const text=normalize(button.innerText||button.textContent||button.getAttribute('aria-label'))
-      return keys.includes(text)&&button.getAttribute('aria-disabled')!=='true'&&!button.disabled
-    })
+  function controlText(element){return normalize([element.innerText,element.textContent,element.getAttribute?.('aria-label'),element.getAttribute?.('title')].filter(Boolean).join(' '))}
+  function controlEnabled(element){
+    return Boolean(element&&visible(element)&&element.getAttribute('aria-disabled')!=='true'&&!element.disabled&&!element.closest('[aria-disabled="true"]'))
   }
 
-  async function waitUntil(test,timeout=20000){
-    const deadline=Date.now()+timeout
-    while(Date.now()<deadline){const value=test();if(value)return value;await sleep(300)}
-    return null
+  function actionButton(names){
+    const keys=names.map(normalize)
+    const candidates=[...document.querySelectorAll('button,[role="button"],input[type="button"],input[type="submit"]')].filter(controlEnabled)
+    let best=null,bestScore=-Infinity
+    for(const button of candidates){
+      const text=controlText(button)||normalize(button.value)
+      const exact=keys.some(key=>text===key)
+      const contained=keys.some(key=>exactOrPrefix(text,key)||text.includes(key))
+      if(!exact&&!contained)continue
+      const box=button.getBoundingClientRect()
+      let score=exact?1000:500
+      if(box.left<window.innerWidth*.42)score+=180
+      if(box.top>window.innerHeight*.55)score+=120
+      if(button.tagName==='BUTTON')score+=40
+      if(score>bestScore){best=button;bestScore=score}
+    }
+    return best
+  }
+
+  function firePointerClick(element){
+    element.focus?.({preventScroll:true})
+    const init={bubbles:true,cancelable:true,composed:true,view:window,button:0,buttons:1}
+    try{element.dispatchEvent(new PointerEvent('pointerdown',{...init,pointerId:1,pointerType:'mouse',isPrimary:true}))}catch{/* navegador sem PointerEvent */}
+    element.dispatchEvent(new MouseEvent('mousedown',init))
+    try{element.dispatchEvent(new PointerEvent('pointerup',{...init,buttons:0,pointerId:1,pointerType:'mouse',isPrimary:true}))}catch{/* navegador sem PointerEvent */}
+    element.dispatchEvent(new MouseEvent('mouseup',{...init,buttons:0}))
+    element.click()
+  }
+
+  function waitForDom(test,timeout=20000){
+    const current=test()
+    if(current)return Promise.resolve(current)
+    return new Promise(resolve=>{
+      let settled=false
+      const finish=value=>{if(settled)return;settled=true;observer.disconnect();clearInterval(poll);clearTimeout(deadline);resolve(value)}
+      const check=()=>{const value=test();if(value)finish(value)}
+      const observer=new MutationObserver(check)
+      observer.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['aria-disabled','aria-checked','disabled','href']})
+      const poll=setInterval(check,350)
+      const deadline=setTimeout(()=>finish(null),timeout)
+    })
   }
 
   function hasHumanChallenge(){
@@ -253,33 +337,62 @@
     return ['captcha','confirme que voce e humano','verificacao de seguranca','security check'].some(value=>text.includes(value))
   }
 
-  async function advanceToGroups(){
-    const button=await waitUntil(()=>exactButton(['Avançar','Next']),12000)
-    if(!button)return false
-    button.scrollIntoView({block:'center',behavior:'auto'})
-    await sleep(250)
-    button.click()
-    return Boolean(await waitUntil(()=>{
-      const text=normalize(document.body.innerText)
-      return text.includes('anunciar em mais locais')||text.includes('anunciar nos seus grupos')||exactButton(['Publicar','Publish'])
-    },20000))
+  function marketplaceStage(){
+    const text=normalize(document.body.innerText)
+    if(/\/marketplace\/item\//.test(location.pathname)||text.includes('seu classificado foi publicado'))return 'published'
+    if(text.includes('anunciar em mais locais')||text.includes('anunciar nos seus grupos')||actionButton(['Publicar','Publish']))return 'groups'
+    if(actionButton(['Avançar','Next']))return 'details'
+    return 'unknown'
   }
 
-  function groupCheckbox(groupName){
-    const wanted=normalize(groupName)
-    const labels=[...document.querySelectorAll('span,div,label')].filter(element=>{
-      if(!visible(element))return false
-      const text=normalize(element.innerText||element.textContent)
-      return text===wanted&&text.length>0
-    }).sort((a,b)=>(a.innerText||a.textContent).length-(b.innerText||b.textContent).length)
-    for(const label of labels){
-      let node=label
-      for(let depth=0;node&&depth<8;depth++,node=node.parentElement){
-        const checkbox=node.querySelector('input[type="checkbox"],[role="checkbox"]')
-        if(checkbox&&visible(checkbox))return checkbox
+  async function advanceToGroups(repair){
+    if(marketplaceStage()==='groups')return true
+    for(let attempt=0;attempt<3;attempt++){
+      let button=await waitForDom(()=>actionButton(['Avançar','Next']),attempt===0?8000:5000)
+      if(!button&&repair){
+        await repair(attempt)
+        button=await waitForDom(()=>actionButton(['Avançar','Next']),6000)
+      }
+      if(!button)continue
+      button.scrollIntoView({block:'center',inline:'center',behavior:'auto'})
+      await sleep(350)
+      firePointerClick(button)
+      const advanced=await waitForDom(()=>marketplaceStage()==='groups',9000)
+      if(advanced)return true
+      if(repair)await repair(attempt)
+      await sleep(700)
+    }
+    return false
+  }
+
+  function groupTarget(raw){
+    const value=String(raw||'').trim()
+    const parts=value.split('|').map(part=>part.trim()).filter(Boolean)
+    const urlPart=parts.find(part=>/facebook\.com\/groups\//i.test(part))||(/facebook\.com\/groups\//i.test(value)?value:'')
+    const idMatch=urlPart.match(/facebook\.com\/groups\/([^/?#]+)/i)
+    const name=parts.find(part=>part!==urlPart)||(!urlPart?value:'')
+    return {raw:value,name,normalizedName:normalize(name),groupId:normalize(idMatch?.[1]||'')}
+  }
+
+  function checkboxState(checkbox){return checkbox instanceof HTMLInputElement?checkbox.checked:checkbox.getAttribute('aria-checked')==='true'}
+
+  function groupRow(target){
+    const candidates=[...document.querySelectorAll('input[type="checkbox"],[role="checkbox"]')].filter(visible)
+    let best=null,bestScore=-Infinity
+    for(const checkbox of candidates){
+      let node=checkbox
+      for(let depth=0;node&&depth<9;depth++,node=node.parentElement){
+        const text=normalize(node.innerText||node.textContent)
+        const links=[...node.querySelectorAll('a[href*="/groups/"]')].map(link=>normalize(link.getAttribute('href')))
+        const idMatch=target.groupId&&links.some(href=>href.includes(`groups ${target.groupId}`)||href.includes(target.groupId))
+        const nameMatch=target.normalizedName&&(text===target.normalizedName||text.startsWith(target.normalizedName+' ')||text.includes(target.normalizedName))
+        if(!idMatch&&!nameMatch)continue
+        let score=(idMatch?1200:0)+(nameMatch?600:0)-depth*25-Math.max(0,text.length-target.normalizedName.length)*.15
+        if(node.querySelectorAll('input[type="checkbox"],[role="checkbox"]').length===1)score+=120
+        if(score>bestScore){best={checkbox,row:node};bestScore=score}
       }
     }
-    return null
+    return best
   }
 
   function groupsScroller(){
@@ -293,82 +406,133 @@
 
   async function selectConfiguredGroups(groups){
     const selected=[],missing=[]
-    const scroller=groupsScroller()
-    for(const group of groups.slice(0,20)){
+    for(const configured of groups.slice(0,20)){
+      const target=groupTarget(configured)
+      let scroller=groupsScroller(),match=null,lastTop=-1
       if(scroller)scroller.scrollTop=0
-      let checkbox=null,lastTop=-1
-      for(let attempt=0;attempt<80&&!checkbox;attempt++){
-        checkbox=groupCheckbox(group)
-        if(checkbox)break
+      for(let attempt=0;attempt<90&&!match;attempt++){
+        match=groupRow(target)
+        if(match)break
+        scroller=groupsScroller()
         if(!scroller)break
         const before=scroller.scrollTop
-        scroller.scrollTop=Math.min(scroller.scrollHeight,scroller.scrollTop+Math.max(220,scroller.clientHeight*.65))
+        scroller.scrollTop=Math.min(scroller.scrollHeight,scroller.scrollTop+Math.max(180,scroller.clientHeight*.58))
         scroller.dispatchEvent(new Event('scroll',{bubbles:true}))
-        await sleep(180)
+        await waitForDom(()=>groupRow(target),350)
         if(scroller.scrollTop===before||scroller.scrollTop===lastTop)break
         lastTop=scroller.scrollTop
       }
-      if(!checkbox){missing.push(group);continue}
-      const checked=checkbox instanceof HTMLInputElement?checkbox.checked:checkbox.getAttribute('aria-checked')==='true'
-      if(!checked){checkbox.scrollIntoView({block:'center',behavior:'auto'});await sleep(140);checkbox.click();await sleep(220)}
-      const confirmed=checkbox instanceof HTMLInputElement?checkbox.checked:checkbox.getAttribute('aria-checked')==='true'
-      if(confirmed)selected.push(group);else missing.push(group)
+      if(!match){missing.push(target.raw);continue}
+      if(!checkboxState(match.checkbox)){
+        match.row.scrollIntoView({block:'center',behavior:'auto'})
+        await sleep(180)
+        for(let attempt=0;attempt<2&&!checkboxState(match.checkbox);attempt++){
+          firePointerClick(match.checkbox)
+          await waitForDom(()=>checkboxState(match.checkbox),1500)
+        }
+      }
+      if(checkboxState(match.checkbox))selected.push(target.raw);else missing.push(target.raw)
     }
     return {selected,missing}
   }
 
   async function publishListing(beforeClick){
     if(hasHumanChallenge())return false
-    const button=await waitUntil(()=>exactButton(['Publicar','Publish']),12000)
-    if(!button)return false
+    if(marketplaceStage()!=='groups')return false
+    const button=await waitForDom(()=>actionButton(['Publicar','Publish']),18000)
+    if(!button||marketplaceStage()!=='groups')return false
     const initialUrl=location.href
-    button.scrollIntoView({block:'center',behavior:'auto'})
-    await sleep(300)
+    button.scrollIntoView({block:'center',inline:'center',behavior:'auto'})
+    await sleep(400)
     if(beforeClick)await beforeClick()
-    button.click()
-    return Boolean(await waitUntil(()=>location.href!==initialUrl||!exactButton(['Publicar','Publish'])||hasHumanChallenge(),30000))&&!hasHumanChallenge()
+    if(hasHumanChallenge())return false
+    const current=actionButton(['Publicar','Publish'])||button
+    if(!controlEnabled(current))return false
+    firePointerClick(current)
+    return Boolean(await waitForDom(()=>{
+      if(hasHumanChallenge())return false
+      return location.href!==initialUrl&&/\/marketplace\/item\//.test(location.pathname)||marketplaceStage()==='published'
+    },45000))
   }
 
-  async function step(label,run){await randomDelay(260,560);try{return[label,await run()]}catch(error){console.warn(`AutoFlow: falha em ${label}`,error);return[label,false]}}
+  async function step(label,run){
+    for(let attempt=0;attempt<2;attempt++){
+      await randomDelay(attempt?420:260,attempt?760:560)
+      try{if(await run())return[label,true]}catch(error){console.warn(`AutoFlow: falha em ${label}`,error)}
+    }
+    return[label,false]
+  }
 
   async function fill(task){
     const vehicle=task.vehicle||task
     const jobId=task.jobId
     const automation=task.automation||{}
-    const results=[]
-    results.push(await step('Tipo de veículo',()=>selectCustom(['tipo de veiculo','vehicle type'],vehicle.vehicleType||'Carro/picape')))
-    const imageCount=await uploadImages(vehicle.images)
-    results.push(['Fotos',imageCount>0])
-    results.push(await step('Localização',()=>selectOrFill(['localizacao','location'],vehicle.location)))
-    results.push(await step('Ano',()=>selectCustom(['ano','year'],String(vehicle.year))))
-    results.push(await step('Fabricante',()=>selectOrFill(['fabricante','marca','make'],vehicle.make)))
-    results.push(await step('Modelo',()=>selectOrFill(['modelo','model'],vehicle.model)))
-    results.push(await step('Quilometragem',()=>fillText(['quilometragem','mileage','odometro'],vehicle.km)))
-    results.push(await step('Preço',()=>fillText(['preco','price'],vehicle.price)))
-    results.push(await step('Câmbio',()=>selectCustom(['cambio','transmissao','transmission'],vehicle.transmission)))
-    results.push(await step('Combustível',()=>selectCustom(['combustivel','fuel'],vehicle.fuelType)))
-    results.push(await step('Carroceria',()=>selectCustom(['estilo da carroceria','carroceria','body style','body type'],vehicle.bodyType)))
-    results.push(await step('Condição do veículo',()=>selectCustom(['condicao do veiculo','vehicle condition','condicao'],vehicle.condition)))
-    results.push(await step('Cor externa',()=>selectCustom(['cor externa','exterior color'],vehicle.exteriorColor)))
-    results.push(await step('Cor interna',()=>selectCustom(['cor interna','interior color'],vehicle.interiorColor)))
-    results.push(await step('Descrição',()=>fillText(['descricao','description'],vehicle.description)))
-    const missing=results.filter(item=>!item[1]).map(item=>item[0])
-    let advanced=false,selectedGroups=[],missingGroups=[],published=false
-    if(automation.autoAdvance&&missing.length===0){
-      advanced=await advanceToGroups()
-      if(advanced&&automation.fillGroups){
-        const groupResult=await selectConfiguredGroups(Array.isArray(automation.targetGroups)?automation.targetGroups:[])
-        selectedGroups=groupResult.selected
-        missingGroups=groupResult.missing
+    const fieldSteps=[
+      {label:'Tipo de veículo',run:()=>selectCustom(['tipo de veiculo','vehicle type'],vehicle.vehicleType||'Carro/picape'),critical:true},
+      {label:'Localização',run:()=>selectOrFill(['localizacao','location'],vehicle.location),critical:true},
+      {label:'Ano',run:()=>selectCustom(['ano','year'],String(vehicle.year)),critical:true},
+      {label:'Fabricante',run:()=>selectOrFill(['fabricante','marca','make'],vehicle.make),critical:true},
+      {label:'Modelo',run:()=>selectOrFill(['modelo','model'],vehicle.model),critical:true},
+      {label:'Quilometragem',run:()=>fillText(['quilometragem','mileage','odometro'],vehicle.km),critical:true},
+      {label:'Preço',run:()=>fillText(['preco','price'],vehicle.price),critical:true},
+      {label:'Câmbio',run:()=>selectCustom(['cambio','transmissao','transmission'],vehicle.transmission),critical:true},
+      {label:'Combustível',run:()=>selectCustom(['combustivel','fuel'],vehicle.fuelType),critical:true},
+      {label:'Carroceria',run:()=>selectCustom(['estilo da carroceria','carroceria','body style','body type'],vehicle.bodyType),critical:true},
+      {label:'Condição do veículo',run:()=>selectCustom(['condicao do veiculo','vehicle condition','condicao'],vehicle.condition),critical:true},
+      {label:'Cor externa',run:()=>selectCustom(['cor externa','exterior color'],vehicle.exteriorColor),critical:false},
+      {label:'Cor interna',run:()=>selectCustom(['cor interna','interior color'],vehicle.interiorColor),critical:false},
+      {label:'Descrição',run:()=>fillText(['descricao','description'],vehicle.description),critical:true},
+    ]
+    const resultMap=new Map()
+    for(const field of fieldSteps)resultMap.set(field.label,await step(field.label,field.run))
+    let imageCount=await uploadImages(vehicle.images)
+    resultMap.set('Fotos',['Fotos',imageCount>0])
+    const repairFields=async attempt=>{
+      const failed=fieldSteps.filter(field=>!resultMap.get(field.label)?.[1])
+      const candidates=failed.length?failed:fieldSteps.filter(field=>field.critical)
+      for(const field of candidates){
+        const retried=await step(field.label,field.run)
+        if(retried[1])resultMap.set(field.label,retried)
       }
-      if(advanced&&automation.autoPublish&&missingGroups.length===0&&jobId){
-        const reportBeforePublish={filledCount:results.length,totalCount:results.length,imageCount,missing:[],fields:results.map(item=>({name:item[0],ok:Boolean(item[1])})),advanced,selectedGroups,missingGroups:[]}
-        published=await publishListing(()=>runtimeMessage({type:'AUTOFLOW_PUBLISH_STARTED',jobId,report:reportBeforePublish}))
+      if(imageCount===0&&attempt===0){
+        imageCount=await uploadImages(vehicle.images)
+        if(imageCount>0)resultMap.set('Fotos',['Fotos',true])
       }
     }
-    showNotice(results,vehicle,{automation,advanced,selectedGroups,missingGroups,published})
+    let advanced=false,selectedGroups=[],missingGroups=[],published=false,publishAttempted=false
+    const flowIssues=[]
+    if(automation.autoAdvance){
+      advanced=await advanceToGroups(repairFields)
+      if(!advanced)flowIssues.push('O Facebook não liberou a segunda etapa após as tentativas de preenchimento e correção.')
+      if(advanced&&automation.fillGroups){
+        const configuredGroups=Array.isArray(automation.targetGroups)?automation.targetGroups:[]
+        if(!configuredGroups.length)flowIssues.push('Nenhum grupo foi configurado.')
+        else{
+          const groupResult=await selectConfiguredGroups(configuredGroups)
+          selectedGroups=groupResult.selected
+          missingGroups=groupResult.missing
+          if(missingGroups.length)flowIssues.push('A seleção de todos os grupos não foi confirmada.')
+        }
+      }
+      const groupsReady=!automation.fillGroups||(selectedGroups.length>0&&missingGroups.length===0)
+      if(advanced&&automation.autoPublish&&groupsReady&&jobId){
+        publishAttempted=true
+        const currentResults=[...resultMap.values()]
+        const reportBeforePublish={filledCount:currentResults.filter(item=>item[1]).length,totalCount:currentResults.length,imageCount,missing:currentResults.filter(item=>!item[1]).map(item=>item[0]),fields:currentResults.map(item=>({name:item[0],ok:Boolean(item[1])})),advanced,selectedGroups,missingGroups:[],flowIssues:[],publishAttempted:true}
+        published=await publishListing(()=>runtimeMessage({type:'AUTOFLOW_PUBLISH_STARTED',jobId,report:reportBeforePublish}))
+        if(!published){
+          flowIssues.push('O clique em Publicar foi feito, mas o Facebook não confirmou o resultado. Verifique Seus classificados antes de liberar uma nova tentativa.')
+          chrome.runtime.sendMessage({type:'AUTOFLOW_PUBLISH_ABORTED',jobId})
+        }
+      }else if(automation.autoPublish&&!advanced)flowIssues.push('Publicação bloqueada porque a etapa de grupos não foi aberta.')
+      else if(automation.autoPublish&&!groupsReady)flowIssues.push('Publicação bloqueada porque os grupos não foram confirmados.')
+    }
+    const results=[...resultMap.values()]
+    const missing=results.filter(item=>!item[1]).map(item=>item[0])
+    if(advanced&&missing.length)flowIssues.push(`O Facebook aceitou o avanço, mas o diagnóstico interno não confirmou: ${missing.join(', ')}.`)
+    showNotice(results,vehicle,{automation,advanced,selectedGroups,missingGroups,published,flowIssues})
     if(jobId){
-      chrome.runtime.sendMessage({type:'AUTOFLOW_FILL_RESULT',jobId,report:{filledCount:results.length-missing.length,totalCount:results.length,imageCount,missing,fields:results.map(item=>({name:item[0],ok:Boolean(item[1])})),advanced,selectedGroups,missingGroups,published,resultUrl:published?location.href:''}})
+      chrome.runtime.sendMessage({type:'AUTOFLOW_FILL_RESULT',jobId,report:{filledCount:results.length-missing.length,totalCount:results.length,imageCount,missing,fields:results.map(item=>({name:item[0],ok:Boolean(item[1])})),advanced,selectedGroups,missingGroups,published,publishAttempted,flowIssues,resultUrl:published?location.href:''}})
     }
   }
 
@@ -386,6 +550,7 @@
     if(flow.automation.fillGroups)details.push(flow.missingGroups.length?'Grupos não encontrados: '+flow.missingGroups.join(', ')+'.':`${flow.selectedGroups.length} grupo(s) selecionado(s).`)
     if(flow.automation.autoPublish)details.push(flow.published?'Publicação confirmada.':'Publicação automática interrompida; revise manualmente.')
     else details.push('Publicação final manual.')
+    if(flow.flowIssues?.length)details.push(flow.flowIssues.join(' '))
     box.innerHTML=`<strong style="display:block;margin-bottom:4px">AutoFlow: ${count}/${results.length} campos preenchidos</strong><span style="color:#b9d2cc">${vehicle.year} ${vehicle.make} ${vehicle.model}. ${details.join(' ')}</span><button style="float:right;margin-top:10px;border:0;background:#36d09b;color:#12382f;border-radius:5px;padding:6px 9px;cursor:pointer">Entendi</button>`
     box.querySelector('button').onclick=()=>box.remove()
     document.body.appendChild(box)
