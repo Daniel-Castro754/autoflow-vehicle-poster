@@ -15,14 +15,11 @@ export default tseslint.config(
     rules:{
       ...reactHooks.configs.recommended.rules,
       ...reactRefresh.configs.vite.rules,
-      '@typescript-eslint/no-explicit-any':'off',
-      'react-hooks/exhaustive-deps':'off',
-      'react-hooks/set-state-in-effect':'off',
+      'react-hooks/purity':'off',
     },
   },
   {
     files:['server/**/*.ts','tests/**/*.mjs','extension-mv2/**/*.js'],
     languageOptions:{ ecmaVersion:2022, globals:{...globals.node,...globals.browser,...globals.webextensions} },
-    rules:{ '@typescript-eslint/no-explicit-any':'off' },
   },
 )

@@ -551,8 +551,17 @@
     if(flow.automation.autoPublish)details.push(flow.published?'Publicação confirmada.':'Publicação automática interrompida; revise manualmente.')
     else details.push('Publicação final manual.')
     if(flow.flowIssues?.length)details.push(flow.flowIssues.join(' '))
-    box.innerHTML=`<strong style="display:block;margin-bottom:4px">AutoFlow: ${count}/${results.length} campos preenchidos</strong><span style="color:#b9d2cc">${vehicle.year} ${vehicle.make} ${vehicle.model}. ${details.join(' ')}</span><button style="float:right;margin-top:10px;border:0;background:#36d09b;color:#12382f;border-radius:5px;padding:6px 9px;cursor:pointer">Entendi</button>`
-    box.querySelector('button').onclick=()=>box.remove()
+    const title=document.createElement('strong')
+    title.style.cssText='display:block;margin-bottom:4px'
+    title.textContent=`AutoFlow: ${count}/${results.length} campos preenchidos`
+    const message=document.createElement('span')
+    message.style.color='#b9d2cc'
+    message.textContent=`${vehicle.year} ${vehicle.make} ${vehicle.model}. ${details.join(' ')}`
+    const button=document.createElement('button')
+    button.style.cssText='float:right;margin-top:10px;border:0;background:#36d09b;color:#12382f;border-radius:5px;padding:6px 9px;cursor:pointer'
+    button.textContent='Entendi'
+    button.onclick=()=>box.remove()
+    box.append(title,message,button)
     document.body.appendChild(box)
   }
 
