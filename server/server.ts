@@ -15,6 +15,13 @@ const uploadsDir = join(dataDir, 'uploads')
 mkdirSync(uploadsDir, { recursive: true })
 const db = new DatabaseSync(join(dataDir, 'autoflow.db'))
 const port = Number(process.env.PORT || 3333)
+if(!Number.isInteger(port)||port<1||port>65535)throw new Error('PORT deve ser um número inteiro entre 1 e 65535.')
+const host=String(process.env.HOST||'127.0.0.1').trim()||'127.0.0.1'
+const urlHost=host.includes(':')&&!host.startsWith('[')?`[${host}]`:host
+const publicOrigin=String(process.env.PUBLIC_ORIGIN||`http://${urlHost}:${port}`).trim().replace(/\/+$/,'')
+const parsedPublicOrigin=new URL(publicOrigin)
+if(!['http:','https:'].includes(parsedPublicOrigin.protocol)||parsedPublicOrigin.pathname!=='/')throw new Error('PUBLIC_ORIGIN deve conter apenas uma origem HTTP ou HTTPS válida.')
+const imageBaseUrl=`${publicOrigin}/uploads/`
 
 db.exec(`
   PRAGMA foreign_keys = ON;
@@ -363,10 +370,10 @@ createServer(async (req, res) => {
         COALESCE(u.name,'Não atribuído') seller,
         CASE WHEN u.name IS NULL THEN '—' ELSE substr(u.name,1,1)||substr(u.name,instr(u.name,' ')+1,1) END initials,
         v.updated_at updatedAt,(SELECT COUNT(*) FROM vehicle_images i WHERE i.vehicle_id=v.id) imageCount,
-        (SELECT 'http://127.0.0.1:3333/uploads/'||i.file_name FROM vehicle_images i WHERE i.vehicle_id=v.id ORDER BY i.position,i.id LIMIT 1) thumbnailUrl,
+        (SELECT ?||i.file_name FROM vehicle_images i WHERE i.vehicle_id=v.id ORDER BY i.position,i.id LIMIT 1) thumbnailUrl,
         (SELECT COUNT(*) FROM publication_jobs j WHERE j.vehicle_id=v.id AND j.status='completed') pendingRemovalCount
         FROM vehicles v LEFT JOIN users u ON u.id=v.assigned_user_id
-        WHERE v.organization_id=? ORDER BY v.updated_at DESC`).all(auth.organizationId)
+        WHERE v.organization_id=? ORDER BY v.updated_at DESC`).all(imageBaseUrl,auth.organizationId)
       return send(res,200,{vehicles:rows})
     }
     if (req.method === 'GET' && url.pathname === '/api/extension/accounts') {
@@ -425,7 +432,7 @@ createServer(async (req, res) => {
         CASE WHEN length(v.description)>0 THEN v.description ELSE printf('%d %s %s %s com %d km. Entre em contato para consultar disponibilidade e condições.',v.year,v.make,v.model,v.trim,v.km) END description
         FROM vehicles v WHERE v.id=? AND v.organization_id=?`).get(job.vehicleId,auth.organizationId) as Record<string,unknown>|undefined
       if (!vehicle) return send(res,404,{error:'Veículo não encontrado.'})
-      const images = db.prepare(`SELECT 'http://127.0.0.1:3333/uploads/'||file_name url,original_name name,mime_type mimeType FROM vehicle_images WHERE vehicle_id=? AND organization_id=? ORDER BY position,id LIMIT 20`).all(job.vehicleId,auth.organizationId)
+      const images = db.prepare(`SELECT ?||file_name url,original_name name,mime_type mimeType FROM vehicle_images WHERE vehicle_id=? AND organization_id=? ORDER BY position,id LIMIT 20`).all(imageBaseUrl,job.vehicleId,auth.organizationId)
       const settings=db.prepare(`SELECT auto_advance autoAdvance,fill_groups fillGroups,target_groups targetGroups,auto_publish autoPublish
         FROM organization_settings WHERE organization_id=?`).get(auth.organizationId) as Record<string,unknown>|undefined
       let targetGroups:string[]=[]
@@ -527,7 +534,7 @@ createServer(async (req, res) => {
     }
     const vehicleImagesRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)\/images$/)
     if (req.method === 'GET' && vehicleImagesRoute) {
-      const images = db.prepare(`SELECT id,original_name originalName,mime_type mimeType,position,'http://127.0.0.1:3333/uploads/'||file_name url FROM vehicle_images WHERE vehicle_id=? AND organization_id=? ORDER BY position,id`).all(Number(vehicleImagesRoute[1]),auth.organizationId)
+      const images = db.prepare(`SELECT id,original_name originalName,mime_type mimeType,position,?||file_name url FROM vehicle_images WHERE vehicle_id=? AND organization_id=? ORDER BY position,id`).all(imageBaseUrl,Number(vehicleImagesRoute[1]),auth.organizationId)
       return send(res,200,{images})
     }
     if (req.method === 'POST' && vehicleImagesRoute) {
@@ -544,7 +551,7 @@ createServer(async (req, res) => {
       writeFileSync(join(uploadsDir,fileName),bytes)
       const position = (db.prepare('SELECT COALESCE(MAX(position),-1)+1 next FROM vehicle_images WHERE vehicle_id=?').get(vehicleId) as {next:number}).next
       const result = db.prepare('INSERT INTO vehicle_images (organization_id,vehicle_id,file_name,original_name,mime_type,position,content_hash) VALUES (?,?,?,?,?,?,?)').run(auth.organizationId,vehicleId,fileName,String(b.name||fileName),mime,position,contentHash)
-      return send(res,201,{id:Number(result.lastInsertRowid),url:`http://127.0.0.1:3333/uploads/${fileName}`})
+      return send(res,201,{id:Number(result.lastInsertRowid),url:`${imageBaseUrl}${fileName}`})
     }
     const imageReorderRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)\/images\/reorder$/)
     if (req.method === 'PATCH' && imageReorderRoute) {
@@ -1004,4 +1011,4 @@ createServer(async (req, res) => {
   } catch (error) {
     console.error(error); return send(res,500,{error:'Erro interno da aplicação.'})
   }
-}).listen(port, () => console.log(`API AutoFlow em http://localhost:${port}`))
+}).listen(port,host,() => console.log(`API AutoFlow em ${publicOrigin}`))

@@ -1,4 +1,5 @@
-const API='http://localhost:3333/api'
+const API_ORIGIN='http://127.0.0.1:3333'
+const API=`${API_ORIGIN}/api`
 chrome.runtime.onInstalled.addListener(()=>console.info('AutoFlow instalado no Brave'))
 
 setInterval(()=>chrome.storage.local.get(['pendingJob','token'],data=>{
@@ -38,7 +39,7 @@ chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
     let imageUrl
     try{
       imageUrl=new URL(String(message.url||''))
-      if(!['http://localhost:3333','http://127.0.0.1:3333'].includes(imageUrl.origin)||!/^\/uploads\/[a-f0-9]{24}\.(?:jpg|jpeg|png|webp)$/.test(imageUrl.pathname))throw new Error('Endereço de imagem inválido.')
+      if(imageUrl.origin!==API_ORIGIN||!/^\/uploads\/[a-f0-9]{24}\.(?:jpg|jpeg|png|webp)$/.test(imageUrl.pathname))throw new Error('Endereço de imagem inválido.')
     }catch(error){sendResponse({ok:false,error:error.message||String(error)});return}
     fetch(imageUrl.href)
       .then(async response=>{

@@ -14,7 +14,7 @@ const adminEmail='admin-test@autoflow.local'
 const adminPassword='admin-test-password-strong'
 const sellerEmail='seller-test@autoflow.local'
 const sellerPassword='seller-test-password'
-const server=spawn(process.execPath,['server/server.ts'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),DATA_DIR:dataDir,AUTH_SECRET:'queue-test-secret-with-at-least-32-characters',INITIAL_ADMIN_NAME:'Administrador Teste',INITIAL_ADMIN_EMAIL:adminEmail,INITIAL_ADMIN_PASSWORD:adminPassword},stdio:['ignore','pipe','pipe']})
+const server=spawn(process.execPath,['server/server.ts'],{cwd:process.cwd(),env:{...process.env,HOST:'127.0.0.1',PORT:String(port),DATA_DIR:dataDir,AUTH_SECRET:'queue-test-secret-with-at-least-32-characters',INITIAL_ADMIN_NAME:'Administrador Teste',INITIAL_ADMIN_EMAIL:adminEmail,INITIAL_ADMIN_PASSWORD:adminPassword},stdio:['ignore','pipe','pipe']})
 let serverOutput=''
 server.stdout.on('data',chunk=>serverOutput+=chunk)
 server.stderr.on('data',chunk=>serverOutput+=chunk)
@@ -96,6 +96,7 @@ try{
   if(blockedVehicle.status!=='Atenção')throw new Error('O veículo incompleto não foi marcado como Atenção.')
 
   const imageOne=await call('/vehicles/1/images',adminToken,{method:'POST',body:JSON.stringify({name:'foto-1.jpg',mimeType:'image/jpeg',dataBase64:Buffer.from('foto-um').toString('base64')})})
+  if(new URL(imageOne.url).origin!==`http://127.0.0.1:${port}`)throw new Error('A URL da imagem ignorou HOST ou PORT da API.')
   const imageTwo=await call('/vehicles/1/images',adminToken,{method:'POST',body:JSON.stringify({name:'foto-2.jpg',mimeType:'image/jpeg',dataBase64:Buffer.from('foto-dois').toString('base64')})})
   const orderedBefore=(await call('/vehicles/1/images',adminToken)).images.map(item=>item.id)
   if(orderedBefore[0]!==imageOne.id||orderedBefore[1]!==imageTwo.id)throw new Error('A ordem inicial das fotos não respeitou o upload.')
@@ -256,7 +257,7 @@ try{
   if((await call('/reports/issues',adminToken)).issues.some(item=>item.jobId===publication.id))throw new Error('O relatório manteve eventos órfãos após excluir o veículo.')
   await expectStatus(404,()=>call('/vehicles',adminToken,{method:'DELETE',body:JSON.stringify({ids:[1]})}))
 
-  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
+  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
 }finally{
   server.kill()
   await new Promise(resolve=>server.once('exit',resolve))
