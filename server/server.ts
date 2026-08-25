@@ -129,6 +129,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_publication_jobs_vehicle_status ON publication_jobs (organization_id,vehicle_id,status);
   CREATE INDEX IF NOT EXISTS idx_publication_jobs_created ON publication_jobs (organization_id,social_account_id,created_at,status);
   CREATE INDEX IF NOT EXISTS idx_vehicles_org_updated ON vehicles (organization_id,updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_vehicles_status_updated ON vehicles (organization_id,status,updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_vehicle_images_vehicle_position ON vehicle_images (organization_id,vehicle_id,position,id);
   CREATE INDEX IF NOT EXISTS idx_social_accounts_org_user ON social_accounts (organization_id,user_id);
   CREATE INDEX IF NOT EXISTS idx_marketplace_groups_org_active_priority ON marketplace_groups (organization_id,active,priority,id);
@@ -157,6 +158,23 @@ const automationStatements={
     SUM(CASE WHEN status IN ('completed','removed') THEN 1 ELSE 0 END) successes,
     SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) failures
     FROM publication_jobs WHERE organization_id=? AND social_account_id IS NOT NULL GROUP BY social_account_id`),
+}
+
+const vehiclePageStatements={
+  count:db.prepare(`SELECT COUNT(*) total FROM vehicles v LEFT JOIN users u ON u.id=v.assigned_user_id
+    WHERE v.organization_id=? AND (?='' OR lower(v.make||' '||v.model||' '||CAST(v.year AS TEXT)||' '||COALESCE(u.name,'')) LIKE '%'||lower(?)||'%')
+    AND (?='Todos' OR v.status=?)`),
+  list:db.prepare(`SELECT v.id,v.year,v.make,v.model,v.trim,v.price,v.km,v.color,v.status,
+    v.vehicle_type vehicleType,v.location,v.transmission,v.fuel_type fuelType,v.body_type bodyType,
+    v.exterior_color exteriorColor,v.interior_color interiorColor,v.vehicle_condition condition,v.description,v.sold_at soldAt,
+    COALESCE(u.name,'Não atribuído') seller,
+    CASE WHEN u.name IS NULL THEN '—' ELSE substr(u.name,1,1)||substr(u.name,instr(u.name,' ')+1,1) END initials,
+    v.updated_at updatedAt,(SELECT COUNT(*) FROM vehicle_images i WHERE i.vehicle_id=v.id) imageCount,
+    (SELECT ?||i.file_name FROM vehicle_images i WHERE i.vehicle_id=v.id ORDER BY i.position,i.id LIMIT 1) thumbnailUrl,
+    (SELECT COUNT(*) FROM publication_jobs j WHERE j.vehicle_id=v.id AND j.status='completed') pendingRemovalCount
+    FROM vehicles v LEFT JOIN users u ON u.id=v.assigned_user_id
+    WHERE v.organization_id=? AND (?='' OR lower(v.make||' '||v.model||' '||CAST(v.year AS TEXT)||' '||COALESCE(u.name,'')) LIKE '%'||lower(?)||'%')
+    AND (?='Todos' OR v.status=?) ORDER BY v.updated_at DESC,v.id DESC LIMIT ? OFFSET ?`),
 }
 
 for(const image of db.prepare("SELECT id,file_name fileName FROM vehicle_images WHERE content_hash='' OR content_hash IS NULL").all() as Array<{id:number;fileName:string}>){
@@ -460,6 +478,16 @@ createServer(async (req, res) => {
     const auth = readToken(req)
     if (!auth) return send(res,401,{error:'Sessão inválida ou expirada.'})
     if (req.method === 'GET' && url.pathname === '/api/me') return send(res,200,{user:userById(auth.userId)})
+    if (req.method === 'GET' && url.pathname === '/api/vehicles/paged') {
+      const pageRaw=Number(url.searchParams.get('page')||1),pageSizeRaw=Number(url.searchParams.get('limit')||25)
+      if(!Number.isInteger(pageRaw)||pageRaw<1||!Number.isInteger(pageSizeRaw)||pageSizeRaw<1)return send(res,400,{error:'Parâmetros de paginação inválidos.'})
+      const pageSize=Math.min(100,pageSizeRaw),query=String(url.searchParams.get('query')||'').trim().slice(0,100),status=String(url.searchParams.get('status')||'Todos')
+      if(status!=='Todos'&&!vehicleOptions.status.has(status))return send(res,400,{error:'Status de veículo inválido.'})
+      const total=Number((vehiclePageStatements.count.get(auth.organizationId,query,query,status,status) as {total:number}).total)
+      const totalPages=Math.max(1,Math.ceil(total/pageSize)),currentPage=Math.min(pageRaw,totalPages),offset=(currentPage-1)*pageSize
+      const vehicles=vehiclePageStatements.list.all(imageBaseUrl,auth.organizationId,query,query,status,status,pageSize,offset)
+      return send(res,200,{vehicles,pagination:{totalItems:total,totalPages,currentPage,pageSize}})
+    }
     if (req.method === 'GET' && url.pathname === '/api/vehicles') {
       const rows = db.prepare(`SELECT v.id,v.year,v.make,v.model,v.trim,v.price,v.km,v.color,v.status,
         v.vehicle_type vehicleType,v.location,v.transmission,v.fuel_type fuelType,v.body_type bodyType,
