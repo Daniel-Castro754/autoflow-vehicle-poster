@@ -294,6 +294,15 @@ const vehicleOptions = {
   status:new Set(['Rascunho','Pronto','Publicado','Atenção','Vendido']),
 }
 
+const terminalVehicleStatuses=new Set(['Publicado','Vendido'])
+const manualPublicationTransitions:Record<string,ReadonlySet<string>>={
+  pending:new Set(['canceled']),
+  error:new Set(['pending','canceled']),
+  awaiting_confirmation:new Set(['pending','completed','canceled']),
+  completed:new Set(['removed']),
+  filling:new Set(),canceled:new Set(),removed:new Set(),
+}
+
 function validateVehicleBody(body:Record<string,unknown>) {
   const year=Number(body.year), price=Number(body.price), km=Number(body.km)
   if (!Number.isInteger(year)||year<1900||year>new Date().getFullYear()+1) return 'Selecione um ano válido.'
@@ -559,6 +568,7 @@ createServer(async (req, res) => {
       const b = await jsonBody(req) as Record<string,unknown>
       const validationError=validateVehicleBody(b)
       if (validationError) return send(res,400,{error:validationError})
+      if(terminalVehicleStatuses.has(String(b.status||'Rascunho')))return send(res,409,{error:'Use os fluxos de publicação ou venda para definir este status.'})
       const result = db.prepare(`INSERT INTO vehicles (organization_id,year,make,model,trim,price,km,status,assigned_user_id,vehicle_type,location,transmission,fuel_type,body_type,exterior_color,interior_color,vehicle_condition,description)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(auth.organizationId,Number(b.year),String(b.make),String(b.model).trim(),String(b.trim||''),Number(b.price),Number(b.km),String(b.status||'Rascunho'),auth.userId,String(b.vehicleType),String(b.location).trim(),String(b.transmission),String(b.fuelType),String(b.bodyType),String(b.exteriorColor),String(b.interiorColor),String(b.condition),String(b.description).trim())
       return send(res,201,{id:Number(result.lastInsertRowid)})
@@ -567,11 +577,14 @@ createServer(async (req, res) => {
     if (req.method === 'PATCH' && vehicleRoute) {
       const vehicleId=Number(vehicleRoute[1])
       if(!canWriteVehicle(vehicleId,auth))return send(res,403,{error:'Você não pode alterar este veículo.'})
+      const currentVehicle=db.prepare('SELECT status FROM vehicles WHERE id=? AND organization_id=?').get(vehicleId,auth.organizationId) as {status:string}
       const b = await jsonBody(req) as Record<string,unknown>
       const validationError=validateVehicleBody(b)
       if (validationError) return send(res,400,{error:validationError})
+      const requestedStatus=String(b.status||'Rascunho')
+      if((terminalVehicleStatuses.has(currentVehicle.status)||terminalVehicleStatuses.has(requestedStatus))&&requestedStatus!==currentVehicle.status)return send(res,409,{error:'Use os fluxos de publicação ou venda para alterar este status.'})
       const result = db.prepare(`UPDATE vehicles SET year=?,make=?,model=?,trim=?,price=?,km=?,vehicle_type=?,location=?,transmission=?,fuel_type=?,body_type=?,exterior_color=?,interior_color=?,vehicle_condition=?,description=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
-        .run(Number(b.year),String(b.make),String(b.model).trim(),String(b.trim||''),Number(b.price),Number(b.km),String(b.vehicleType),String(b.location).trim(),String(b.transmission),String(b.fuelType),String(b.bodyType),String(b.exteriorColor),String(b.interiorColor),String(b.condition),String(b.description).trim(),String(b.status||'Rascunho'),vehicleId,auth.organizationId)
+        .run(Number(b.year),String(b.make),String(b.model).trim(),String(b.trim||''),Number(b.price),Number(b.km),String(b.vehicleType),String(b.location).trim(),String(b.transmission),String(b.fuelType),String(b.bodyType),String(b.exteriorColor),String(b.interiorColor),String(b.condition),String(b.description).trim(),requestedStatus,vehicleId,auth.organizationId)
       return result.changes?send(res,200,{ok:true}):send(res,404,{error:'Veículo não encontrado.'})
     }
     const markSoldRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)\/mark-sold$/)
@@ -994,20 +1007,22 @@ createServer(async (req, res) => {
       const b = await jsonBody(req) as Record<string,unknown>
       const allowed = ['pending','filling','awaiting_confirmation','completed','error','canceled','removed']
       if (!allowed.includes(String(b.status))) return send(res,400,{error:'Status inválido.'})
-      const job=db.prepare('SELECT vehicle_id vehicleId,fill_report fillReport FROM publication_jobs WHERE id=? AND organization_id=?').get(Number(publication[1]),auth.organizationId) as {vehicleId:number;fillReport?:string}|undefined
+      const job=db.prepare('SELECT vehicle_id vehicleId,status,fill_report fillReport FROM publication_jobs WHERE id=? AND organization_id=?').get(Number(publication[1]),auth.organizationId) as {vehicleId:number;status:string;fillReport?:string}|undefined
       if(!job)return send(res,404,{error:'Publicação não encontrada.'})
       if(!canManageJobs([Number(publication[1])],auth))return send(res,403,{error:'Você não pode alterar trabalhos de outro perfil.'})
+      const nextStatus=String(b.status)
+      if(!manualPublicationTransitions[job.status]?.has(nextStatus))return send(res,409,{error:`A transição de ${job.status} para ${nextStatus} não é permitida por esta operação.`})
       let previousReport:Record<string,unknown>={}
       try{previousReport=job.fillReport?JSON.parse(job.fillReport):{}}catch{/* relatório antigo inválido */}
-      if(String(b.status)==='pending'&&previousReport.publishAttempted&&b.confirmNoPublication!==true)return send(res,409,{error:'Antes de repetir, verifique em “Seus classificados” se o anúncio foi criado. Confirme no painel que ele NÃO foi publicado para liberar uma nova tentativa.'})
+      if(nextStatus==='pending'&&previousReport.publishAttempted&&b.confirmNoPublication!==true)return send(res,409,{error:'Antes de repetir, verifique em “Seus classificados” se o anúncio foi criado. Confirme no painel que ele NÃO foi publicado para liberar uma nova tentativa.'})
       db.exec('BEGIN')
       try{
-        if(String(b.status)==='pending')db.prepare("UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',started_at=NULL,filled_at=NULL,removed_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
-        else if(String(b.status)==='removed')db.prepare("UPDATE publication_jobs SET status='removed',removed_at=CURRENT_TIMESTAMP,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
-        else db.prepare('UPDATE publication_jobs SET status=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?').run(String(b.status),Number(publication[1]),auth.organizationId)
-        if(String(b.status)==='completed')db.prepare("UPDATE vehicles SET status='Publicado',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(job.vehicleId,auth.organizationId)
+        if(nextStatus==='pending')db.prepare("UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',started_at=NULL,filled_at=NULL,removed_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
+        else if(nextStatus==='removed')db.prepare("UPDATE publication_jobs SET status='removed',removed_at=CURRENT_TIMESTAMP,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
+        else db.prepare('UPDATE publication_jobs SET status=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?').run(nextStatus,Number(publication[1]),auth.organizationId)
+        if(nextStatus==='completed')db.prepare("UPDATE vehicles SET status='Publicado',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(job.vehicleId,auth.organizationId)
         const eventType:Record<string,string>={pending:'retry_requested',filling:'filling_started',awaiting_confirmation:'filled_waiting_confirmation',completed:'confirmed_published',error:'fill_error',canceled:'canceled',removed:'marked_removed'}
-        recordJobEvent(auth.organizationId,Number(publication[1]),eventType[String(b.status)]||'status_changed',auth.userId,{status:String(b.status)})
+        recordJobEvent(auth.organizationId,Number(publication[1]),eventType[nextStatus]||'status_changed',auth.userId,{status:nextStatus})
         db.exec('COMMIT')
       }catch(error){db.exec('ROLLBACK');throw error}
       return send(res,200,{ok:true})
