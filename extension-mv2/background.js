@@ -1,13 +1,22 @@
 const API_ORIGIN='http://127.0.0.1:3333'
 const API=`${API_ORIGIN}/api`
-chrome.runtime.onInstalled.addListener(()=>console.info('AutoFlow instalado no Brave'))
+const HEARTBEAT_ALARM='autoflow-heartbeat'
 
-setInterval(()=>chrome.storage.local.get(['pendingJob','token'],data=>{
-  const job=data.pendingJob
-  if(!job?.jobId||!job?.leaseToken||!data.token)return
-  fetch(`${API}/extension/jobs/${job.jobId}/heartbeat`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+data.token},body:JSON.stringify({leaseToken:job.leaseToken})})
-    .then(response=>{if(response.status===409)chrome.storage.local.remove(['pendingJob','pendingPublish'])}).catch(()=>{})
-}),45000)
+function ensureHeartbeatAlarm(){
+  chrome.alarms.get(HEARTBEAT_ALARM,alarm=>{if(!alarm)chrome.alarms.create(HEARTBEAT_ALARM,{delayInMinutes:.5,periodInMinutes:1})})
+}
+function heartbeat(){
+  chrome.storage.local.get(['pendingJob','token'],data=>{
+    const job=data.pendingJob
+    if(!job?.jobId||!job?.leaseToken||!data.token)return
+    fetch(`${API}/extension/jobs/${job.jobId}/heartbeat`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+data.token},body:JSON.stringify({leaseToken:job.leaseToken})})
+      .then(response=>{if(response.status===409)chrome.storage.local.remove(['pendingJob','pendingPublish'])}).catch(()=>{})
+  })
+}
+chrome.runtime.onInstalled.addListener(()=>{console.info('AutoFlow instalado no Brave');ensureHeartbeatAlarm()})
+chrome.runtime.onStartup.addListener(ensureHeartbeatAlarm)
+chrome.alarms.onAlarm.addListener(alarm=>{if(alarm.name===HEARTBEAT_ALARM)heartbeat()})
+ensureHeartbeatAlarm()
 
 chrome.tabs.onUpdated.addListener((tabId,changeInfo)=>{
   if(!changeInfo.url||!/^https:\/\/(?:www\.)?facebook\.com\/marketplace\/item\//.test(changeInfo.url))return

@@ -32,7 +32,7 @@ O comando `npm run dev` inicia o painel em `http://localhost:5173` e a API em `h
 - Tela de equipe com criação de vendedores
 - Associação de responsáveis a perfis locais do Brave
 - Estado de conexão preparado para a extensão
-- Extensão experimental para Brave em `extension-mv2/`
+- Extensão Manifest V3 experimental para Brave em `extension-mv2/` (nome legado do diretório)
 - Fila da extensão e preenchimento assistido do Marketplace
 - Tema claro/escuro persistente por navegador
 - Central de notificações com atalhos operacionais

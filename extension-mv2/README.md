@@ -1,4 +1,4 @@
-# AutoFlow para Brave — Manifest V2
+# AutoFlow para Brave — Manifest V3
 
 ## Instalação local
 
@@ -15,4 +15,4 @@ Após atualizar os arquivos, abra `brave://extensions` e clique em **Recarregar*
 
 ## Compatibilidade
 
-Manifest V2 tem suporte limitado nas versões atuais do Brave. Se a instalação for recusada, será necessário gerar a variante Manifest V3 usando os mesmos arquivos de popup e conteúdo.
+A extensão usa um service worker do Manifest V3. O heartbeat da reserva é reativado por `chrome.alarms` mesmo depois que o navegador suspende o worker, e também é reconfigurado ao instalar ou iniciar o Brave.

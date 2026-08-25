@@ -49,6 +49,11 @@ try{
   if(deniedCors.status!==403||deniedCors.headers.has('access-control-allow-origin'))throw new Error('Uma origem externa recebeu acesso CORS à API.')
   const contentScript=await readFile('extension-mv2/content.js','utf8')
   if(/\.innerHTML\s*=/.test(contentScript))throw new Error('O content script voltou a inserir HTML dinâmico diretamente.')
+  const extensionManifest=JSON.parse(await readFile('extension-mv2/manifest.json','utf8'))
+  const extensionBackground=await readFile('extension-mv2/background.js','utf8')
+  if(extensionManifest.manifest_version!==3||extensionManifest.background?.service_worker!=='background.js'||!extensionManifest.action)throw new Error('A extensão não está configurada como Manifest V3.')
+  if(!extensionManifest.permissions?.includes('alarms')||!extensionManifest.host_permissions?.includes('http://127.0.0.1:3333/*'))throw new Error('As permissões do Manifest V3 estão incompletas.')
+  if(extensionBackground.includes('setInterval(')||!extensionBackground.includes('chrome.alarms.onAlarm'))throw new Error('O heartbeat ainda depende de um background persistente.')
   const serverSource=await readFile('server/server.ts','utf8')
   if(serverSource.includes('scryptSync'))throw new Error('O login voltou a usar derivação de senha síncrona.')
   const automationStart=serverSource.indexOf("if (req.method === 'GET' && url.pathname === '/api/automation/overview')")
@@ -301,7 +306,7 @@ try{
   if((await call('/reports/issues',adminToken)).issues.some(item=>item.jobId===publication.id))throw new Error('O relatório manteve eventos órfãos após excluir o veículo.')
   await expectStatus(404,()=>call('/vehicles',adminToken,{method:'DELETE',body:JSON.stringify({ids:[1]})}))
 
-  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,stateTransitions:true,terminalVehicleStatuses:true,sqliteWal:true,sqliteIndexes:true,aggregatedAutomationQueries:true,reusedAutomationStatements:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
+  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,stateTransitions:true,terminalVehicleStatuses:true,sqliteWal:true,sqliteIndexes:true,aggregatedAutomationQueries:true,reusedAutomationStatements:true,manifestV3:true,alarmHeartbeat:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
 }finally{
   if(server.exitCode===null){server.kill();await new Promise(resolve=>server.once('exit',resolve))}
   await rm(dataDir,{recursive:true,force:true})
