@@ -755,6 +755,22 @@ createServer(async (req, res) => {
         FROM social_accounts a JOIN users u ON u.id=a.user_id WHERE a.organization_id=? ORDER BY u.name,a.label`).all(auth.organizationId)
       return send(res,200,{users,accounts,canManageQueue:current?.role==='admin'})
     }
+    if (req.method === 'GET' && url.pathname === '/api/stats/global') {
+      const vehicles=db.prepare(`SELECT COUNT(*) total,
+        SUM(CASE WHEN status='Publicado' THEN 1 ELSE 0 END) published,
+        SUM(CASE WHEN status='Pronto' THEN 1 ELSE 0 END) ready,
+        SUM(CASE WHEN status='Atenção' THEN 1 ELSE 0 END) attention,
+        SUM(CASE WHEN status='Vendido' AND EXISTS(SELECT 1 FROM publication_jobs j WHERE j.vehicle_id=vehicles.id AND j.status='completed') THEN 1 ELSE 0 END) soldPendingRemoval
+        FROM vehicles WHERE organization_id=?`).get(auth.organizationId)
+      const publications=db.prepare(`SELECT COUNT(*) total,
+        SUM(CASE WHEN status IN ('pending','filling','awaiting_confirmation') THEN 1 ELSE 0 END) pending,
+        SUM(CASE WHEN status IN ('completed','removed') THEN 1 ELSE 0 END) completed,
+        SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) errors,
+        SUM(CASE WHEN status IN ('pending','filling','error','awaiting_confirmation') AND extension_visible=1 AND paused=0 AND (scheduled_at IS NULL OR datetime(scheduled_at)<=CURRENT_TIMESTAMP) THEN 1 ELSE 0 END) extensionAvailable,
+        SUM(CASE WHEN status IN ('pending','filling','error','awaiting_confirmation') AND scheduled_at IS NOT NULL AND datetime(scheduled_at)>CURRENT_TIMESTAMP THEN 1 ELSE 0 END) scheduled
+        FROM publication_jobs WHERE organization_id=?`).get(auth.organizationId)
+      return send(res,200,{vehicles,publications})
+    }
     if (req.method === 'GET' && url.pathname === '/api/overview') {
       const vehicleStats = db.prepare(`SELECT COUNT(*) total,
         SUM(CASE WHEN status='Publicado' THEN 1 ELSE 0 END) published,
