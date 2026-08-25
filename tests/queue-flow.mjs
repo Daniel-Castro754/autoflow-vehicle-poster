@@ -318,6 +318,10 @@ try{
   if(soldVehicle.pendingRemovalCount!==0)throw new Error('O veículo continuou marcado como pendente de remoção após confirmar a remoção do anúncio.')
   const uploadedFile=join(dataDir,'uploads',new URL(imageOne.url).pathname.split('/').pop())
   if(!existsSync(uploadedFile))throw new Error('A foto de teste não existia antes da exclusão do veículo.')
+  const globalStats=await call('/stats/global',adminToken)
+  const overviewStats=await call('/overview',adminToken)
+  const allJobs=(await call('/publications',adminToken)).jobs
+  if(globalStats.vehicles.total!==overviewStats.vehicleStats.total||globalStats.vehicles.published!==overviewStats.vehicleStats.published||globalStats.publications.total!==allJobs.length||globalStats.publications.errors!==allJobs.filter(item=>item.status==='error').length)throw new Error('Os indicadores globais divergiram dos dados operacionais.')
   const deletion=await call('/vehicles',adminToken,{method:'DELETE',body:JSON.stringify({ids:[1,1]})})
   if(deletion.deleted!==1||deletion.removedJobs!==1)throw new Error('A exclusão não informou corretamente o veículo e o histórico removidos.')
   if(existsSync(uploadedFile))throw new Error('O arquivo da foto permaneceu no disco após excluir o veículo.')
@@ -326,7 +330,7 @@ try{
   if((await call('/reports/issues',adminToken)).issues.some(item=>item.jobId===publication.id))throw new Error('O relatório manteve eventos órfãos após excluir o veículo.')
   await expectStatus(404,()=>call('/vehicles',adminToken,{method:'DELETE',body:JSON.stringify({ids:[1]})}))
 
-  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,stateTransitions:true,terminalVehicleStatuses:true,sqliteWal:true,sqliteIndexes:true,aggregatedAutomationQueries:true,reusedAutomationStatements:true,manifestV3:true,alarmHeartbeat:true,issueCursorPagination:true,vehiclePagination:true,serverVehicleSearch:true,publicationPagination:true,serverPublicationFilters:true,localBusinessDay:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
+  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,stateTransitions:true,terminalVehicleStatuses:true,sqliteWal:true,sqliteIndexes:true,aggregatedAutomationQueries:true,reusedAutomationStatements:true,manifestV3:true,alarmHeartbeat:true,issueCursorPagination:true,vehiclePagination:true,serverVehicleSearch:true,publicationPagination:true,serverPublicationFilters:true,localBusinessDay:true,globalStatsEndpoint:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
 }finally{
   if(server.exitCode===null){server.kill();await new Promise(resolve=>server.once('exit',resolve))}
   await rm(dataDir,{recursive:true,force:true})
