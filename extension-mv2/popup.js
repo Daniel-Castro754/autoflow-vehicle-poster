@@ -1,4 +1,4 @@
-const API='http://localhost:3333/api'
+const API='http://127.0.0.1:3333/api'
 const $=id=>document.getElementById(id)
 let token='',activeAccountId=0,availableAccounts=[]
 let instanceId=''

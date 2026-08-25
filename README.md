@@ -14,7 +14,9 @@ npm run dev
 
 Na primeira execução com um banco vazio, `INITIAL_ADMIN_EMAIL` e `INITIAL_ADMIN_PASSWORD` criam o administrador inicial. A senha deve ter pelo menos 12 caracteres. Nas execuções seguintes, somente `AUTH_SECRET` continua obrigatório. Use `CORS_ORIGINS` para liberar origens adicionais do painel, separadas por vírgula; por padrão, somente `http://localhost:5173`, `http://127.0.0.1:5173` e extensões do Chromium podem acessar a API.
 
-O comando `npm run dev` inicia o painel em `http://localhost:5173` e a API em `http://localhost:3333`.
+A API escuta somente em `127.0.0.1` por padrão. `HOST` altera a interface de rede conscientemente, e `PUBLIC_ORIGIN` define a origem usada nas URLs de imagens quando ela for diferente de `http://HOST:PORT`. A extensão local espera a API em `http://127.0.0.1:3333`.
+
+O comando `npm run dev` inicia o painel em `http://localhost:5173` e a API em `http://127.0.0.1:3333`.
 
 ## Escopo atual
 
@@ -49,4 +51,4 @@ As lacunas encontradas na comparação com ferramentas similares e o roadmap rec
 
 O banco de desenvolvimento fica em `data/autoflow.db` e não deve ser versionado. Antes de produção, migre o banco para PostgreSQL. Nenhuma credencial ou sessão do Facebook é armazenada.
 
-Para testes isolados, `DATA_DIR` permite escolher outra pasta de banco e uploads, e `PORT` altera a porta da API.
+Para testes isolados, `DATA_DIR` permite escolher outra pasta de banco e uploads, e `PORT` altera a porta da API e as URLs de imagens retornadas pelo servidor. A extensão permanece configurada para a porta padrão `3333`.
