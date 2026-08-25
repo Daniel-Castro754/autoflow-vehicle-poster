@@ -81,12 +81,14 @@ try{
   await expectStatus(403,()=>call(`/extension/queue?accountId=${first.id}`,sellerToken))
 
   const sellerVehiclePayload={year:2022,make:'Honda',model:'City',trim:'EXL',price:89900,km:31000,vehicleType:'Carro/picape',location:'São Paulo, SP',transmission:'Automático',fuelType:'Flex',bodyType:'Sedã',condition:'Excelente',exteriorColor:'Prateado',interiorColor:'Preto',description:'Veículo do vendedor para validar permissões.',status:'Pronto'}
+  await expectStatus(409,()=>call('/vehicles',sellerToken,{method:'POST',body:JSON.stringify({...sellerVehiclePayload,status:'Publicado'})}))
   await expectStatus(403,()=>call('/vehicles/1',sellerToken,{method:'PATCH',body:JSON.stringify(sellerVehiclePayload)}))
   await expectStatus(403,()=>call('/vehicles/1/mark-sold',sellerToken,{method:'POST'}))
   await expectStatus(403,()=>call('/vehicles/1/images',sellerToken,{method:'POST',body:JSON.stringify({name:'proibida.jpg',mimeType:'image/jpeg',dataBase64:jpegBase64('proibida')})}))
   await expectStatus(403,()=>call('/vehicles',sellerToken,{method:'DELETE',body:JSON.stringify({ids:[1]})}))
   await expectStatus(403,()=>call('/publications',sellerToken,{method:'POST',body:JSON.stringify({vehicleId:1,accountId:second.id})}))
   const sellerVehicle=await call('/vehicles',sellerToken,{method:'POST',body:JSON.stringify(sellerVehiclePayload)})
+  await expectStatus(409,()=>call(`/vehicles/${sellerVehicle.id}`,sellerToken,{method:'PATCH',body:JSON.stringify({...sellerVehiclePayload,status:'Vendido'})}))
   await call(`/vehicles/${sellerVehicle.id}`,sellerToken,{method:'PATCH',body:JSON.stringify({...sellerVehiclePayload,km:30500})})
   await expectStatus(400,()=>call(`/vehicles/${sellerVehicle.id}/images`,sellerToken,{method:'POST',body:JSON.stringify({name:'invalida.jpg',mimeType:'image/jpeg',dataBase64:'%%%%'})}))
   await expectStatus(400,()=>call(`/vehicles/${sellerVehicle.id}/images`,sellerToken,{method:'POST',body:JSON.stringify({name:'mime-falso.png',mimeType:'image/png',dataBase64:jpegBase64('mime-falso')})}))
@@ -101,7 +103,11 @@ try{
   await call(`/publications/${sellerPublication.id}/schedule`,sellerToken,{method:'PATCH',body:JSON.stringify({scheduledAt:null})})
   await call('/publications/extension-visibility',sellerToken,{method:'PATCH',body:JSON.stringify({ids:[sellerPublication.id],visible:false})})
   await call('/publications/extension-visibility',sellerToken,{method:'PATCH',body:JSON.stringify({ids:[sellerPublication.id],visible:true})})
-  await call(`/publications/${sellerPublication.id}`,sellerToken,{method:'PATCH',body:JSON.stringify({status:'canceled'})})
+  const sellerPrepared=await call(`/extension/jobs/${sellerPublication.id}/prepare`,sellerToken,{method:'POST',body:JSON.stringify({accountId:second.id,instanceId:extensionTwo})})
+  await call(`/extension/jobs/${sellerPublication.id}/fill-result`,sellerToken,{method:'PATCH',body:JSON.stringify({leaseToken:sellerPrepared.leaseToken,filledCount:15,totalCount:15,imageCount:1,missing:[],fields:[],advanced:false,selectedGroups:[],missingGroups:[],flowIssues:[],published:false,publishAttempted:false,extensionVersion:'0.12.1'})})
+  await call(`/publications/${sellerPublication.id}`,sellerToken,{method:'PATCH',body:JSON.stringify({status:'completed'})})
+  await expectStatus(409,()=>call(`/publications/${sellerPublication.id}`,sellerToken,{method:'PATCH',body:JSON.stringify({status:'pending'})}))
+  await call(`/publications/${sellerPublication.id}`,sellerToken,{method:'PATCH',body:JSON.stringify({status:'removed'})})
   await call(`/vehicle-images/${sellerImage.id}`,sellerToken,{method:'DELETE'})
   await call(`/vehicles/${sellerVehicle.id}/mark-sold`,sellerToken,{method:'POST'})
   await expectStatus(403,()=>call('/vehicles',sellerToken,{method:'DELETE',body:JSON.stringify({ids:[sellerVehicle.id]})}))
@@ -133,6 +139,8 @@ try{
   await call('/vehicles/1',adminToken,{method:'PATCH',body:JSON.stringify({...vehicleOne,condition:'Excelente',exteriorColor:'Prateado',interiorColor:'Preto',status:'Pronto'})})
 
   const publication=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:1,accountId:first.id})})
+  await expectStatus(409,()=>call(`/publications/${publication.id}`,adminToken,{method:'PATCH',body:JSON.stringify({status:'completed'})}))
+  await expectStatus(409,()=>call(`/publications/${publication.id}`,adminToken,{method:'PATCH',body:JSON.stringify({status:'filling'})}))
   await expectStatus(403,()=>call('/publications/queue-state',sellerToken,{method:'PATCH',body:JSON.stringify({ids:[publication.id],action:'pause'})}))
   await expectStatus(403,()=>call('/publications/extension-visibility',sellerToken,{method:'PATCH',body:JSON.stringify({ids:[publication.id],visible:false})}))
   await expectStatus(403,()=>call(`/publications/${publication.id}/priority`,sellerToken,{method:'PATCH',body:JSON.stringify({direction:'up'})}))
@@ -189,6 +197,7 @@ try{
   if(!reassignedQueue.jobs.some(item=>item.jobId===priorityPublication.id))throw new Error('O trabalho nÃ£o voltou ao perfil original apÃ³s nova redistribuiÃ§Ã£o.')
   await expectStatus(400,()=>call('/publications/reassign',adminToken,{method:'PATCH',body:JSON.stringify({ids:[priorityPublication.id],accountId:first.id})}))
   await call(`/publications/${priorityPublication.id}`,adminToken,{method:'PATCH',body:JSON.stringify({status:'canceled'})})
+  await expectStatus(409,()=>call(`/publications/${priorityPublication.id}`,adminToken,{method:'PATCH',body:JSON.stringify({status:'pending'})}))
   const priorityTimeline=await call(`/publications/${priorityPublication.id}/timeline`,adminToken)
   const priorityEvents=new Set(priorityTimeline.events.map(event=>event.eventType))
   for(const type of ['created','batch_scheduled','priority_changed','paused','resumed','scheduled','schedule_removed','reassigned','canceled'])if(!priorityEvents.has(type))throw new Error(`O histórico da fila não registrou o evento ${type}.`)
@@ -252,6 +261,7 @@ try{
   job=(await call('/publications',adminToken)).jobs.find(item=>item.id===publication.id)
   const vehicle=(await call('/vehicles',adminToken)).vehicles.find(item=>item.id===1)
   if(job.status!=='completed'||vehicle.status!=='Publicado'||!job.fillReport?.published||job.fillReport?.selectedGroups?.length!==2)throw new Error('A publicação automática não encerrou o trabalho e o veículo.')
+  await expectStatus(409,()=>call(`/publications/${publication.id}`,adminToken,{method:'PATCH',body:JSON.stringify({status:'pending'})}))
   issueReport=await call('/reports/issues',adminToken)
   if(!issueReport.issues.some(item=>item.jobId===publication.id&&item.category==='recovery')||issueReport.issues.some(item=>item.jobId===publication.id&&item.active))throw new Error('O relatório não preservou o histórico ou deixou pendências após a conclusão.')
   const completedTimeline=await call(`/publications/${publication.id}/timeline`,adminToken)
@@ -281,7 +291,7 @@ try{
   if((await call('/reports/issues',adminToken)).issues.some(item=>item.jobId===publication.id))throw new Error('O relatório manteve eventos órfãos após excluir o veículo.')
   await expectStatus(404,()=>call('/vehicles',adminToken,{method:'DELETE',body:JSON.stringify({ids:[1]})}))
 
-  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
+  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,stateTransitions:true,terminalVehicleStatuses:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
 }finally{
   if(server.exitCode===null){server.kill();await new Promise(resolve=>server.once('exit',resolve))}
   await rm(dataDir,{recursive:true,force:true})
