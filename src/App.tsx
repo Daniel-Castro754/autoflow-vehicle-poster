@@ -16,6 +16,15 @@ const seed: Vehicle[] = [
 ]
 
 const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:3333/api'
+class ApiError extends Error {
+  constructor(message:string,readonly status:number,readonly missing?:unknown){super(message)}
+}
+async function request<T>(token:string,path:string,options:RequestInit={}) {
+  const response=await fetch(`${API}${path}`,{...options,headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`,...options.headers}})
+  const data=await response.json().catch(()=>({})) as {error?:string;missing?:unknown}
+  if(!response.ok)throw new ApiError(data.error||'Não foi possível concluir a operação.',response.status,data.missing)
+  return data as T
+}
 const nav = [
   ['Visão geral', LayoutDashboard], ['Veículos', Car], ['Publicações', Send], ['Equipe e contas', Users], ['Relatórios', BarChart3],
 ] as const
@@ -41,18 +50,25 @@ export default function App() {
   const [team, setTeam] = useState<TeamUser[]>([])
   const [accounts, setAccounts] = useState<SocialAccount[]>([])
 
-  const api=useCallback(async <T=Record<string,unknown>,>(path:string, options:RequestInit = {}):Promise<T> => {
-    const response = await fetch(`${API}${path}`, { ...options, headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`, ...options.headers} })
-    const data = await response.json()
-    if (!response.ok) throw Object.assign(new Error(data.error || 'Não foi possível concluir a operação.'), {missing: data.missing})
-    return data as T
-  },[token])
+  const clearSession=useCallback((message='')=>{
+    localStorage.removeItem('autoflow_token')
+    setToken('');setLoading(false);setVehicles([]);setTeam([]);setAccounts([]);setAuthError(message)
+  },[])
 
-  const loadVehicles=useCallback(async (activeToken = token) => {
-    const response = await fetch(`${API}/vehicles`, { headers:{Authorization:`Bearer ${activeToken}`} })
-    if (response.status === 401) { localStorage.removeItem('autoflow_token'); setToken(''); setLoading(false); return }
-    const data = await response.json(); setVehicles(data.vehicles); setLoading(false)
-  },[token])
+  const api=useCallback(async <T=Record<string,unknown>,>(path:string, options:RequestInit = {}):Promise<T> => {
+    try{return await request<T>(token,path,options)}
+    catch(error){
+      if(error instanceof ApiError&&error.status===401){const message='Sua sessão expirou. Entre novamente.';clearSession(message);throw new Error(message,{cause:error})}
+      if(error instanceof ApiError)throw Object.assign(error,{missing:error.missing})
+      throw error
+    }
+  },[token,clearSession])
+
+  const loadVehicles=useCallback(async () => {
+    try{const data=await api<{vehicles:Vehicle[]}>('/vehicles');setVehicles(data.vehicles)}
+    catch(error){if(token)setToast(error instanceof Error?error.message:'Não foi possível atualizar o estoque.')}
+    finally{setLoading(false)}
+  },[api,token])
 
   const loadTeam=useCallback(async () => {
     try { const data = await api<{users:TeamUser[];accounts:SocialAccount[]}>('/team'); setTeam(data.users); setAccounts(data.accounts) }
@@ -65,19 +81,21 @@ export default function App() {
 
   useEffect(() => {
     if(!token)return
-    void fetch(`${API}/vehicles`,{headers:{Authorization:`Bearer ${token}`}}).then(async response=>{
-      if(response.status===401){localStorage.removeItem('autoflow_token');setToken('');setLoading(false);return}
-      const data=await response.json();setVehicles(data.vehicles);setLoading(false)
-    })
-  },[token])
-  useEffect(() => {
-    if(!token)return
-    void api<{organization:{name:string}}>('/settings').then(data=>setOrganizationName(data.organization.name)).catch(()=>{})
-  },[token,api])
-  useEffect(() => {
-    if(!token)return
-    void api<{users:TeamUser[];accounts:SocialAccount[]}>('/team').then(data=>{setTeam(data.users);setAccounts(data.accounts)}).catch(error=>setToast(error instanceof Error?error.message:'Erro ao carregar equipe'))
-  },[token,api])
+    let active=true
+    void Promise.all([
+      request<{vehicles:Vehicle[]}>(token,'/vehicles'),
+      request<{organization:{name:string}}>(token,'/settings'),
+      request<{users:TeamUser[];accounts:SocialAccount[]}>(token,'/team'),
+    ]).then(([stock,settings,teamData])=>{
+      if(!active)return
+      setVehicles(stock.vehicles);setOrganizationName(settings.organization.name);setTeam(teamData.users);setAccounts(teamData.accounts)
+    }).catch(error=>{
+      if(!active)return
+      if(error instanceof ApiError&&error.status===401)clearSession('Sua sessão expirou. Entre novamente.')
+      else setToast(error instanceof Error?error.message:'Não foi possível carregar os dados do painel.')
+    }).finally(()=>{if(active)setLoading(false)})
+    return()=>{active=false}
+  },[token,clearSession])
 
   function changeTheme(next:'light'|'dark') {
     setTheme(next); localStorage.setItem('autoflow_theme',next)
@@ -108,17 +126,17 @@ export default function App() {
   async function addUser(e:React.FormEvent<HTMLFormElement>) {
     e.preventDefault(); const form = new FormData(e.currentTarget)
     try {
-      await api('/team/users',{method:'POST',body:JSON.stringify(Object.fromEntries(form))}); e.currentTarget.reset(); await loadTeam()
-      setToast('Vendedor adicionado'); setTimeout(()=>setToast(''),2500)
-    } catch (error) { setToast(error instanceof Error ? error.message : 'Erro ao adicionar usuário'); setTimeout(()=>setToast(''),3000) }
+      await api('/team/users',{method:'POST',body:JSON.stringify(Object.fromEntries(form))}); await loadTeam()
+      setToast('Vendedor adicionado'); setTimeout(()=>setToast(''),2500);return true
+    } catch (error) { setToast(error instanceof Error ? error.message : 'Erro ao adicionar usuário'); setTimeout(()=>setToast(''),3000);return false }
   }
 
   async function addAccount(e:React.FormEvent<HTMLFormElement>) {
     e.preventDefault(); const form = new FormData(e.currentTarget)
     try {
-      await api('/social-accounts',{method:'POST',body:JSON.stringify({userId:Number(form.get('userId')),label:form.get('label'),browserProfile:form.get('browserProfile')})}); e.currentTarget.reset(); await loadTeam()
-      setToast('Perfil local associado'); setTimeout(()=>setToast(''),2500)
-    } catch (error) { setToast(error instanceof Error ? error.message : 'Erro ao associar perfil'); setTimeout(()=>setToast(''),3000) }
+      await api('/social-accounts',{method:'POST',body:JSON.stringify({userId:Number(form.get('userId')),label:form.get('label'),browserProfile:form.get('browserProfile')})}); await loadTeam()
+      setToast('Perfil local associado'); setTimeout(()=>setToast(''),2500);return true
+    } catch (error) { setToast(error instanceof Error ? error.message : 'Erro ao associar perfil'); setTimeout(()=>setToast(''),3000);return false }
   }
 
   async function login(e:React.FormEvent<HTMLFormElement>) {
@@ -131,7 +149,7 @@ export default function App() {
     } catch (error) { setAuthError(error instanceof Error ? error.message : 'Falha no acesso.'); setLoading(false) }
   }
 
-  function logout() { localStorage.removeItem('autoflow_token'); setToken(''); setVehicles([]) }
+  function logout() { clearSession() }
 
 
   if (!token) return <Login onSubmit={login} error={authError} loading={loading} theme={theme}/>
@@ -164,7 +182,7 @@ function NotificationCenter({notifications,readIds,onClose,onReadAll,onDismiss,o
   </div>
 }
 
-function TeamView({team,accounts,onAddUser,onAddAccount}:{team:TeamUser[];accounts:SocialAccount[];onAddUser:(e:React.FormEvent<HTMLFormElement>)=>void;onAddAccount:(e:React.FormEvent<HTMLFormElement>)=>void}) {
+function TeamView({team,accounts,onAddUser,onAddAccount}:{team:TeamUser[];accounts:SocialAccount[];onAddUser:(e:React.FormEvent<HTMLFormElement>)=>Promise<boolean>;onAddAccount:(e:React.FormEvent<HTMLFormElement>)=>Promise<boolean>}) {
   const [modal,setModal] = useState<'user'|'account'|null>(null)
   return <section className="content team-page">
     <div className="title-row"><div><h1>Equipe e contas</h1><p>Defina quem publica e qual perfil local do Brave cada pessoa utiliza.</p></div><div className="title-actions"><button className="secondary" onClick={()=>setModal('account')}><Laptop size={17}/>Associar perfil</button><button className="primary" onClick={()=>setModal('user')}><UserPlus size={18}/>Adicionar vendedor</button></div></div>
@@ -173,7 +191,7 @@ function TeamView({team,accounts,onAddUser,onAddAccount}:{team:TeamUser[];accoun
       <article className="team-panel"><div className="panel-heading"><div><h2>Pessoas</h2><span>{team.length} membros</span></div></div><div className="people-list">{team.map(user=><div className="person-row" key={user.id}><span className="person-avatar">{user.name.split(' ').map(n=>n[0]).slice(0,2).join('')}</span><div><strong>{user.name}</strong><small>{user.email}</small></div><span className={`role ${user.role}`}>{user.role==='admin'?'Administrador':'Vendedor'}</span></div>)}</div></article>
       <article className="team-panel"><div className="panel-heading"><div><h2>Perfis de publicação</h2><span>{accounts.length} associados</span></div><button className="small-add" onClick={()=>setModal('account')}><Plus size={16}/></button></div>{accounts.length ? <div className="account-list">{accounts.map(account=>{const owner=team.find(u=>u.id===account.userId);return <div className="account-card" key={account.id}><span className="browser-icon"><Laptop/></span><div><strong>{account.label}</strong><small>{account.browserProfile} · {owner?.name||'Sem responsável'}</small></div><span className="connection"><i/>Aguardando extensão</span></div>})}</div>:<div className="account-empty"><Laptop/><h3>Nenhum perfil associado</h3><p>Cadastre o perfil do Brave usado por cada vendedor. A conexão será confirmada pela extensão.</p><button className="secondary" onClick={()=>setModal('account')}>Associar primeiro perfil</button></div>}</article>
     </div>
-    {modal&&<div className="overlay" onMouseDown={()=>setModal(null)}><aside className="drawer" onMouseDown={e=>e.stopPropagation()}><button className="close" onClick={()=>setModal(null)}><X/></button>{modal==='user'?<><span className="eyebrow">NOVA PESSOA</span><h2>Adicionar vendedor</h2><p>Crie um acesso individual. A senha é temporária e deve ser enviada ao vendedor por um canal seguro.</p><form onSubmit={e=>{onAddUser(e);setModal(null)}}><label>Nome completo<input name="name" required/></label><label>E-mail<input name="email" type="email" required/></label><label>Senha temporária<input name="password" type="password" minLength={8} required/></label><label>Função<select name="role"><option value="seller">Vendedor</option><option value="admin">Administrador</option></select></label><button className="primary">Criar acesso</button></form></>:<><span className="eyebrow">PERFIL LOCAL</span><h2>Associar perfil do Brave</h2><p>Use um perfil separado para cada pessoa. Não informe e-mail, senha ou cookie do Facebook.</p><form onSubmit={e=>{onAddAccount(e);setModal(null)}}><label>Identificação<input name="label" placeholder="Ex.: Facebook — Marina" required/></label><label>Responsável<select name="userId" required><option value="">Selecione</option>{team.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></label><label>Nome do perfil no Brave<input name="browserProfile" placeholder="Ex.: Perfil 2" required/></label><button className="primary">Associar perfil</button></form></>}</aside></div>}
+    {modal&&<div className="overlay" onMouseDown={()=>setModal(null)}><aside className="drawer" onMouseDown={e=>e.stopPropagation()}><button className="close" onClick={()=>setModal(null)}><X/></button>{modal==='user'?<><span className="eyebrow">NOVA PESSOA</span><h2>Adicionar vendedor</h2><p>Crie um acesso individual. A senha é temporária e deve ser enviada ao vendedor por um canal seguro.</p><form onSubmit={async e=>{if(await onAddUser(e))setModal(null)}}><label>Nome completo<input name="name" required/></label><label>E-mail<input name="email" type="email" required/></label><label>Senha temporária<input name="password" type="password" minLength={8} required/></label><label>Função<select name="role"><option value="seller">Vendedor</option><option value="admin">Administrador</option></select></label><button className="primary">Criar acesso</button></form></>:<><span className="eyebrow">PERFIL LOCAL</span><h2>Associar perfil do Brave</h2><p>Use um perfil separado para cada pessoa. Não informe e-mail, senha ou cookie do Facebook.</p><form onSubmit={async e=>{if(await onAddAccount(e))setModal(null)}}><label>Identificação<input name="label" placeholder="Ex.: Facebook — Marina" required/></label><label>Responsável<select name="userId" required><option value="">Selecione</option>{team.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></label><label>Nome do perfil no Brave<input name="browserProfile" placeholder="Ex.: Perfil 2" required/></label><button className="primary">Associar perfil</button></form></>}</aside></div>}
   </section>
 }
 
