@@ -798,6 +798,32 @@ createServer(async (req, res) => {
       })
       return send(res,200,{profiles,serverNow:new Date().toISOString(),onlineWindowSeconds:300})
     }
+    if (req.method === 'GET' && url.pathname === '/api/publications/paged') {
+      const pageRaw=Number(url.searchParams.get('page')||1),pageSizeRaw=Number(url.searchParams.get('limit')||25)
+      if(!Number.isInteger(pageRaw)||pageRaw<1||!Number.isInteger(pageSizeRaw)||pageSizeRaw<1)return send(res,400,{error:'Parâmetros de paginação inválidos.'})
+      const pageSize=Math.min(100,pageSizeRaw),query=String(url.searchParams.get('query')||'').trim().slice(0,100)
+      const status=String(url.searchParams.get('status')||'all'),account=String(url.searchParams.get('account')||'all'),situation=String(url.searchParams.get('situation')||'all')
+      const jobStatuses=['pending','filling','awaiting_confirmation','completed','error','canceled','removed']
+      const situations=['all','available','scheduled','paused','stalled','hidden']
+      if(status!=='all'&&!jobStatuses.includes(status)||account!=='all'&&(!Number.isInteger(Number(account))||Number(account)<=0)||!situations.includes(situation))return send(res,400,{error:'Filtros de publicação inválidos.'})
+      const conditions=['j.organization_id=?'],params:Array<string|number>=[auth.organizationId]
+      if(query){conditions.push("lower(CAST(j.id AS TEXT)||' '||v.make||' '||v.model||' '||v.year||' '||COALESCE(u.name,'')||' '||COALESCE(a.label,'')) LIKE '%'||lower(?)||'%'");params.push(query)}
+      if(status!=='all'){conditions.push('j.status=?');params.push(status)}
+      if(account!=='all'){conditions.push('j.social_account_id=?');params.push(Number(account))}
+      const active="j.status IN ('pending','filling','error','awaiting_confirmation')"
+      if(situation==='available')conditions.push(`${active} AND j.extension_visible=1 AND j.paused=0 AND (j.scheduled_at IS NULL OR datetime(j.scheduled_at)<=CURRENT_TIMESTAMP)`)
+      if(situation==='scheduled')conditions.push(`${active} AND j.scheduled_at IS NOT NULL AND datetime(j.scheduled_at)>CURRENT_TIMESTAMP`)
+      if(situation==='paused')conditions.push('j.paused=1')
+      if(situation==='hidden')conditions.push(`${active} AND j.extension_visible=0`)
+      if(situation==='stalled')conditions.push("j.status='filling' AND (j.lease_expires_at IS NULL OR datetime(j.lease_expires_at)<=CURRENT_TIMESTAMP) AND j.started_at IS NOT NULL AND (strftime('%s','now')-strftime('%s',j.started_at))>=COALESCE(s.stuck_timeout_minutes,15)*60")
+      const joins=`FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id LEFT JOIN social_accounts a ON a.id=j.social_account_id LEFT JOIN users u ON u.id=v.assigned_user_id LEFT JOIN organization_settings s ON s.organization_id=j.organization_id`
+      const where=`WHERE ${conditions.join(' AND ')}`
+      const total=Number((db.prepare(`SELECT COUNT(*) total ${joins} ${where}`).get(...params) as {total:number}).total)
+      const totalPages=Math.max(1,Math.ceil(total/pageSize)),currentPage=Math.min(pageRaw,totalPages),offset=(currentPage-1)*pageSize
+      const rows=db.prepare(`SELECT j.id,j.status,j.result_url resultUrl,j.error_code errorCode,j.fill_report fillReport,j.extension_version extensionVersion,j.extension_visible extensionVisible,j.queue_priority queuePriority,j.paused,j.scheduled_at scheduledAt,j.started_at startedAt,j.filled_at filledAt,j.removed_at removedAt,j.created_at createdAt,j.updated_at updatedAt,v.id vehicleId,v.year,v.make,v.model,v.price,j.social_account_id accountId,COALESCE(a.label,'Perfil não definido') accountLabel,COALESCE(u.name,'Não atribuído') seller ${joins} ${where} ORDER BY CASE WHEN ${active} THEN 0 ELSE 1 END,j.paused,j.queue_priority,j.created_at DESC LIMIT ? OFFSET ?`).all(...params,pageSize,offset) as Array<Record<string,unknown>>
+      const jobs=rows.map(item=>{try{return{...item,fillReport:item.fillReport?JSON.parse(String(item.fillReport)):null}}catch{return{...item,fillReport:null}}})
+      return send(res,200,{jobs,pagination:{totalItems:total,totalPages,currentPage,pageSize}})
+    }
     if (req.method === 'GET' && url.pathname === '/api/publications') {
       const rows = db.prepare(`SELECT j.id,j.status,j.result_url resultUrl,j.error_code errorCode,j.fill_report fillReport,
         j.extension_version extensionVersion,j.extension_visible extensionVisible,j.queue_priority queuePriority,j.paused,j.scheduled_at scheduledAt,j.started_at startedAt,j.filled_at filledAt,j.removed_at removedAt,j.created_at createdAt,j.updated_at updatedAt,

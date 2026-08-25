@@ -57,7 +57,7 @@ try{
   const serverSource=await readFile('server/server.ts','utf8')
   if(serverSource.includes('scryptSync'))throw new Error('O login voltou a usar derivação de senha síncrona.')
   const automationStart=serverSource.indexOf("if (req.method === 'GET' && url.pathname === '/api/automation/overview')")
-  const automationEnd=serverSource.indexOf("if (req.method === 'GET' && url.pathname === '/api/publications')",automationStart)
+  const automationEnd=serverSource.indexOf("if (req.method === 'GET' && url.pathname === '/api/publications/paged')",automationStart)
   const automationHandler=serverSource.slice(automationStart,automationEnd)
   if(!serverSource.includes('const automationStatements=')||automationHandler.includes('db.prepare('))throw new Error('A Central voltou a preparar SQL durante cada request.')
   const invalidPassword=randomUUID()
@@ -307,6 +307,12 @@ try{
   await call(`/publications/${publication.id}`,adminToken,{method:'PATCH',body:JSON.stringify({status:'removed'})})
   job=(await call('/publications',adminToken)).jobs.find(item=>item.id===publication.id)
   if(job.status!=='removed'||!job.removedAt)throw new Error('A remoção do anúncio não foi registrada.')
+  const publicationPageOne=await call('/publications/paged?page=1&limit=1',adminToken)
+  const publicationPageTwo=await call('/publications/paged?page=2&limit=1',adminToken)
+  if(publicationPageOne.jobs.length!==1||publicationPageOne.jobs[0].id===publicationPageTwo.jobs[0]?.id||publicationPageOne.pagination.totalItems<3)throw new Error('A paginação de publicações retornou itens incorretos.')
+  const publicationSearch=await call(`/publications/paged?page=1&limit=25&query=Corolla&status=removed&account=${first.id}&situation=all`,adminToken)
+  if(publicationSearch.jobs.length!==1||publicationSearch.jobs[0].id!==publication.id)throw new Error('Os filtros paginados de publicação ficaram incorretos.')
+  await expectStatus(400,()=>call('/publications/paged?situation=invalid',adminToken))
   soldVehicle=(await call('/vehicles',adminToken)).vehicles.find(item=>item.id===1)
   if(soldVehicle.pendingRemovalCount!==0)throw new Error('O veículo continuou marcado como pendente de remoção após confirmar a remoção do anúncio.')
   const uploadedFile=join(dataDir,'uploads',new URL(imageOne.url).pathname.split('/').pop())
@@ -319,7 +325,7 @@ try{
   if((await call('/reports/issues',adminToken)).issues.some(item=>item.jobId===publication.id))throw new Error('O relatório manteve eventos órfãos após excluir o veículo.')
   await expectStatus(404,()=>call('/vehicles',adminToken,{method:'DELETE',body:JSON.stringify({ids:[1]})}))
 
-  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,stateTransitions:true,terminalVehicleStatuses:true,sqliteWal:true,sqliteIndexes:true,aggregatedAutomationQueries:true,reusedAutomationStatements:true,manifestV3:true,alarmHeartbeat:true,issueCursorPagination:true,vehiclePagination:true,serverVehicleSearch:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
+  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,stateTransitions:true,terminalVehicleStatuses:true,sqliteWal:true,sqliteIndexes:true,aggregatedAutomationQueries:true,reusedAutomationStatements:true,manifestV3:true,alarmHeartbeat:true,issueCursorPagination:true,vehiclePagination:true,serverVehicleSearch:true,publicationPagination:true,serverPublicationFilters:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
 }finally{
   if(server.exitCode===null){server.kill();await new Promise(resolve=>server.once('exit',resolve))}
   await rm(dataDir,{recursive:true,force:true})
