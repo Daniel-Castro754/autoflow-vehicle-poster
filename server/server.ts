@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { randomBytes, scryptSync, timingSafeEqual, createHmac, createHash } from 'node:crypto'
+import { randomBytes, scrypt, timingSafeEqual, createHmac, createHash } from 'node:crypto'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const configuredSecret = process.env.AUTH_SECRET?.trim()
@@ -196,14 +196,32 @@ function replaceMarketplaceGroups(organizationId:number,values:unknown[]) {
   return marketplaceGroups(organizationId)
 }
 
-function hashPassword(password:string) {
-  const salt = randomBytes(16).toString('hex')
-  return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`
+function derivePassword(password:string,salt:string) {
+  return new Promise<Buffer>((resolve,reject)=>scrypt(password,salt,64,(error,key)=>error?reject(error):resolve(key)))
 }
-function verifyPassword(password:string, stored:string) {
+async function hashPassword(password:string) {
+  const salt = randomBytes(16).toString('hex')
+  return `${salt}:${(await derivePassword(password,salt)).toString('hex')}`
+}
+async function verifyPassword(password:string, stored:string) {
   const [salt, expected] = stored.split(':')
-  const actual = scryptSync(password, salt, 64)
-  return expected?.length === 128 && timingSafeEqual(actual, Buffer.from(expected, 'hex'))
+  if(!/^[a-f0-9]{32}$/.test(salt||'')||!/^[a-f0-9]{128}$/.test(expected||''))return false
+  try{return timingSafeEqual(await derivePassword(password,salt),Buffer.from(expected,'hex'))}
+  catch{return false}
+}
+const dummyPasswordHash=await hashPassword(randomBytes(32).toString('hex'))
+const loginWindowMs=Math.max(1,Math.floor(Number(process.env.LOGIN_WINDOW_SECONDS)||900))*1000
+const loginMaxAttempts=Math.max(1,Math.floor(Number(process.env.LOGIN_MAX_ATTEMPTS)||5))
+const loginIpMaxAttempts=Math.max(loginMaxAttempts,Math.floor(Number(process.env.LOGIN_IP_MAX_ATTEMPTS)||30))
+type LoginBucket={count:number;resetAt:number}
+const loginBuckets=new Map<string,LoginBucket>()
+function reserveLoginAttempt(key:string,limit:number) {
+  const now=Date.now()
+  if(loginBuckets.size>2000){for(const [entry,value] of loginBuckets)if(value.resetAt<=now)loginBuckets.delete(entry);while(loginBuckets.size>1000)loginBuckets.delete(loginBuckets.keys().next().value!)}
+  const current=loginBuckets.get(key)
+  if(current&&current.resetAt>now&&current.count>=limit)return Math.max(1,Math.ceil((current.resetAt-now)/1000))
+  loginBuckets.set(key,current&&current.resetAt>now?{...current,count:current.count+1}:{count:1,resetAt:now+loginWindowMs})
+  return 0
 }
 function sign(payload:object) {
   const body = Buffer.from(JSON.stringify({ ...payload, exp: Date.now() + 12 * 60 * 60 * 1000 })).toString('base64url')
@@ -334,7 +352,7 @@ if (!(db.prepare('SELECT id FROM users LIMIT 1').get())) {
   if(!adminName||!adminEmail.includes('@')||adminPassword.length<12)throw new Error('Banco vazio: configure INITIAL_ADMIN_EMAIL e INITIAL_ADMIN_PASSWORD (mínimo de 12 caracteres).')
   const org = db.prepare('INSERT INTO organizations (name) VALUES (?)').run(String(process.env.INITIAL_ORGANIZATION_NAME||'AutoFlow').trim()||'AutoFlow')
   const orgId = Number(org.lastInsertRowid)
-  const admin = db.prepare('INSERT INTO users (organization_id,name,email,password_hash,role) VALUES (?,?,?,?,?)').run(orgId,adminName,adminEmail,hashPassword(adminPassword),'admin')
+  const admin = db.prepare('INSERT INTO users (organization_id,name,email,password_hash,role) VALUES (?,?,?,?,?)').run(orgId,adminName,adminEmail,await hashPassword(adminPassword),'admin')
   const adminId = Number(admin.lastInsertRowid)
   const rows = [
     [2022,'Toyota','Corolla','XEi 2.0',119900,42500,adminId,'Pronto','#dce8ef','São Paulo, SP','2022 Toyota Corolla XEi 2.0 com 42.500 km. Único dono, revisões em dia.'],
@@ -380,8 +398,16 @@ createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/health') return send(res,200,{ok:true})
     if (req.method === 'POST' && url.pathname === '/api/auth/login') {
       const { email, password } = await jsonBody(req) as {email?:string,password?:string}
-      const row = db.prepare('SELECT * FROM users WHERE lower(email)=lower(?)').get(email || '') as Record<string,unknown> | undefined
-      if (!row || !verifyPassword(password || '', String(row.password_hash))) return send(res,401,{error:'E-mail ou senha inválidos.'})
+      const normalizedEmail=String(email||'').trim().toLowerCase().slice(0,254)
+      const suppliedPassword=String(password||'')
+      const remoteAddress=req.socket.remoteAddress||'unknown'
+      const accountKey=`account:${remoteAddress}:${normalizedEmail}`
+      const retryAfter=Math.max(reserveLoginAttempt(`ip:${remoteAddress}`,loginIpMaxAttempts),reserveLoginAttempt(accountKey,loginMaxAttempts))
+      if(retryAfter){res.setHeader('Retry-After',String(retryAfter));return send(res,429,{error:'Muitas tentativas de acesso. Aguarde antes de tentar novamente.'})}
+      const row = db.prepare('SELECT * FROM users WHERE lower(email)=lower(?)').get(normalizedEmail) as Record<string,unknown> | undefined
+      const passwordValid=suppliedPassword.length<=512&&await verifyPassword(suppliedPassword,row?String(row.password_hash):dummyPasswordHash)
+      if (!row || !passwordValid) return send(res,401,{error:'E-mail ou senha inválidos.'})
+      loginBuckets.delete(accountKey)
       const user = userById(Number(row.id)); return send(res,200,{token:sign({userId:row.id,organizationId:row.organization_id}),user})
     }
     const auth = readToken(req)
@@ -1024,8 +1050,9 @@ createServer(async (req, res) => {
       if (!b.name || !b.email || !b.password) return send(res,400,{error:'Nome, e-mail e senha temporária são obrigatórios.'})
       if (String(b.password).length < 8) return send(res,400,{error:'A senha temporária deve ter pelo menos 8 caracteres.'})
       try {
+        const passwordHash=await hashPassword(String(b.password))
         const result = db.prepare('INSERT INTO users (organization_id,name,email,password_hash,role) VALUES (?,?,?,?,?)')
-          .run(auth.organizationId,String(b.name),String(b.email).toLowerCase(),hashPassword(String(b.password)),b.role === 'admin' ? 'admin' : 'seller')
+          .run(auth.organizationId,String(b.name),String(b.email).toLowerCase(),passwordHash,b.role === 'admin' ? 'admin' : 'seller')
         return send(res,201,{id:Number(result.lastInsertRowid)})
       } catch (error) {
         if (String(error).includes('UNIQUE')) return send(res,409,{error:'Este e-mail já está cadastrado.'})
