@@ -266,7 +266,28 @@ function validateVehicleBody(body:Record<string,unknown>) {
 }
 
 function userById(id:number) { return db.prepare('SELECT id, organization_id organizationId, name, email, role FROM users WHERE id = ?').get(id) }
-function allowedExtensionAccount(accountId:number,auth:{userId:number;organizationId:number}) {
+type AuthContext={userId:number;organizationId:number}
+function isAdmin(auth:AuthContext) { return (userById(auth.userId) as {role?:string}|undefined)?.role==='admin' }
+function canWriteVehicle(vehicleId:number,auth:AuthContext) {
+  return Boolean(isAdmin(auth)
+    ?db.prepare('SELECT id FROM vehicles WHERE id=? AND organization_id=?').get(vehicleId,auth.organizationId)
+    :db.prepare('SELECT id FROM vehicles WHERE id=? AND organization_id=? AND assigned_user_id=?').get(vehicleId,auth.organizationId,auth.userId))
+}
+function canWriteImage(imageId:number,auth:AuthContext) {
+  return Boolean(isAdmin(auth)
+    ?db.prepare('SELECT i.id FROM vehicle_images i JOIN vehicles v ON v.id=i.vehicle_id WHERE i.id=? AND i.organization_id=? AND v.organization_id=?').get(imageId,auth.organizationId,auth.organizationId)
+    :db.prepare('SELECT i.id FROM vehicle_images i JOIN vehicles v ON v.id=i.vehicle_id WHERE i.id=? AND i.organization_id=? AND v.organization_id=? AND v.assigned_user_id=?').get(imageId,auth.organizationId,auth.organizationId,auth.userId))
+}
+function canManageJobs(ids:number[],auth:AuthContext) {
+  if(!ids.length)return false
+  const placeholders=ids.map(()=>'?').join(',')
+  const row=isAdmin(auth)
+    ?db.prepare(`SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND id IN (${placeholders})`).get(auth.organizationId,...ids)
+    :db.prepare(`SELECT COUNT(*) total FROM publication_jobs j JOIN social_accounts a ON a.id=j.social_account_id
+      WHERE j.organization_id=? AND a.organization_id=? AND a.user_id=? AND j.id IN (${placeholders})`).get(auth.organizationId,auth.organizationId,auth.userId,...ids)
+  return Number((row as {total?:number}|undefined)?.total)===ids.length
+}
+function allowedExtensionAccount(accountId:number,auth:AuthContext) {
   const current = userById(auth.userId) as {role?:string}|undefined
   return current?.role==='admin'
     ? db.prepare(`SELECT a.id,a.label,a.browser_profile browserProfile,a.status,a.user_id userId,u.name owner
@@ -487,17 +508,21 @@ createServer(async (req, res) => {
     }
     const vehicleRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)$/)
     if (req.method === 'PATCH' && vehicleRoute) {
+      const vehicleId=Number(vehicleRoute[1])
+      if(!canWriteVehicle(vehicleId,auth))return send(res,403,{error:'Você não pode alterar este veículo.'})
       const b = await jsonBody(req) as Record<string,unknown>
       const validationError=validateVehicleBody(b)
       if (validationError) return send(res,400,{error:validationError})
       const result = db.prepare(`UPDATE vehicles SET year=?,make=?,model=?,trim=?,price=?,km=?,vehicle_type=?,location=?,transmission=?,fuel_type=?,body_type=?,exterior_color=?,interior_color=?,vehicle_condition=?,description=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
-        .run(Number(b.year),String(b.make),String(b.model).trim(),String(b.trim||''),Number(b.price),Number(b.km),String(b.vehicleType),String(b.location).trim(),String(b.transmission),String(b.fuelType),String(b.bodyType),String(b.exteriorColor),String(b.interiorColor),String(b.condition),String(b.description).trim(),String(b.status||'Rascunho'),Number(vehicleRoute[1]),auth.organizationId)
+        .run(Number(b.year),String(b.make),String(b.model).trim(),String(b.trim||''),Number(b.price),Number(b.km),String(b.vehicleType),String(b.location).trim(),String(b.transmission),String(b.fuelType),String(b.bodyType),String(b.exteriorColor),String(b.interiorColor),String(b.condition),String(b.description).trim(),String(b.status||'Rascunho'),vehicleId,auth.organizationId)
       return result.changes?send(res,200,{ok:true}):send(res,404,{error:'Veículo não encontrado.'})
     }
     const markSoldRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)\/mark-sold$/)
     if (req.method === 'POST' && markSoldRoute) {
+      const vehicleId=Number(markSoldRoute[1])
+      if(!canWriteVehicle(vehicleId,auth))return send(res,403,{error:'Você não pode alterar este veículo.'})
       const result = db.prepare("UPDATE vehicles SET status='Vendido',sold_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?")
-        .run(Number(markSoldRoute[1]),auth.organizationId)
+        .run(vehicleId,auth.organizationId)
       return result.changes?send(res,200,{ok:true}):send(res,404,{error:'Veículo não encontrado.'})
     }
     const vehicleImagesRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)\/images$/)
@@ -508,7 +533,7 @@ createServer(async (req, res) => {
     if (req.method === 'POST' && vehicleImagesRoute) {
       const b = await jsonBody(req) as Record<string,unknown>
       const vehicleId = Number(vehicleImagesRoute[1])
-      if (!db.prepare('SELECT id FROM vehicles WHERE id=? AND organization_id=?').get(vehicleId,auth.organizationId)) return send(res,404,{error:'Veículo não encontrado.'})
+      if(!canWriteVehicle(vehicleId,auth))return send(res,403,{error:'Você não pode alterar as fotos deste veículo.'})
       const mime = String(b.mimeType||'')
       if (!['image/jpeg','image/png','image/webp'].includes(mime)) return send(res,400,{error:'Use imagens JPG, PNG ou WebP.'})
       const bytes = Buffer.from(String(b.dataBase64||''),'base64')
@@ -524,7 +549,7 @@ createServer(async (req, res) => {
     const imageReorderRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)\/images\/reorder$/)
     if (req.method === 'PATCH' && imageReorderRoute) {
       const vehicleId = Number(imageReorderRoute[1])
-      if (!db.prepare('SELECT id FROM vehicles WHERE id=? AND organization_id=?').get(vehicleId,auth.organizationId)) return send(res,404,{error:'Veículo não encontrado.'})
+      if(!canWriteVehicle(vehicleId,auth))return send(res,403,{error:'Você não pode alterar as fotos deste veículo.'})
       const b = await jsonBody(req) as {order?:unknown[]}
       const order = Array.isArray(b.order) ? b.order.map(Number).filter(Number.isInteger) : []
       const owned = db.prepare('SELECT id FROM vehicle_images WHERE vehicle_id=? AND organization_id=?').all(vehicleId,auth.organizationId) as Array<{id:number}>
@@ -539,13 +564,16 @@ createServer(async (req, res) => {
     }
     const imageRoute = url.pathname.match(/^\/api\/vehicle-images\/(\d+)$/)
     if (req.method === 'DELETE' && imageRoute) {
-      const image = db.prepare('SELECT file_name fileName FROM vehicle_images WHERE id=? AND organization_id=?').get(Number(imageRoute[1]),auth.organizationId) as {fileName:string}|undefined
+      const imageId=Number(imageRoute[1])
+      if(!canWriteImage(imageId,auth))return send(res,403,{error:'Você não pode excluir esta imagem.'})
+      const image = db.prepare('SELECT file_name fileName FROM vehicle_images WHERE id=? AND organization_id=?').get(imageId,auth.organizationId) as {fileName:string}|undefined
       if (!image) return send(res,404,{error:'Imagem não encontrada.'})
       const path = join(uploadsDir,image.fileName); if (existsSync(path)) unlinkSync(path)
-      db.prepare('DELETE FROM vehicle_images WHERE id=? AND organization_id=?').run(Number(imageRoute[1]),auth.organizationId)
+      db.prepare('DELETE FROM vehicle_images WHERE id=? AND organization_id=?').run(imageId,auth.organizationId)
       return send(res,200,{ok:true})
     }
     if (req.method === 'DELETE' && url.pathname === '/api/vehicles') {
+      if(!isAdmin(auth))return send(res,403,{error:'Somente administradores podem excluir veículos.'})
       const b = await jsonBody(req) as {ids?:unknown[]}
       const ids = [...new Set((b.ids||[]).map(Number).filter(Number.isInteger))].slice(0,100)
       if (!ids.length) return send(res,400,{error:'Selecione pelo menos um veículo.'})
@@ -708,6 +736,7 @@ createServer(async (req, res) => {
         transmission,fuel_type fuelType,body_type bodyType,exterior_color exteriorColor,interior_color interiorColor,vehicle_condition condition
         FROM vehicles WHERE id=? AND organization_id=?`).get(Number(b.vehicleId),auth.organizationId) as {id:number;year:number;make:string;model:string;price:number;km:number;location:string;description:string;vehicleType:string;transmission:string;fuelType:string;bodyType:string;exteriorColor:string;interiorColor:string;condition:string}|undefined
       if (!vehicle) return send(res,400,{error:'Veículo inválido.'})
+      if(!canWriteVehicle(vehicle.id,auth))return send(res,403,{error:'Você não pode publicar este veículo.'})
       const imageCount = (db.prepare('SELECT COUNT(*) c FROM vehicle_images WHERE vehicle_id=? AND organization_id=?').get(vehicle.id,auth.organizationId) as {c:number}).c
       const missing:string[] = []
       if (!(vehicle.price>0)) missing.push('Preço')
@@ -731,6 +760,7 @@ createServer(async (req, res) => {
       }
       const accountId=Number(b.accountId)
       if (!Number.isInteger(accountId)||!db.prepare('SELECT id FROM social_accounts WHERE id=? AND organization_id=?').get(accountId,auth.organizationId)) return send(res,400,{error:'Selecione o perfil do Brave que publicará este veículo.'})
+      if(!allowedExtensionAccount(accountId,auth))return send(res,403,{error:'Você não pode criar trabalhos para este perfil.'})
       const duplicateRisk=publicationDuplicateRisk(auth.organizationId,vehicle.id)
       if(duplicateRisk)return send(res,409,{error:duplicateRisk.message,duplicate:duplicateRisk})
       const settings=db.prepare('SELECT daily_limit dailyLimit FROM organization_settings WHERE organization_id=?').get(auth.organizationId) as {dailyLimit:number}|undefined
@@ -756,6 +786,7 @@ createServer(async (req, res) => {
       const placeholders=ids.map(()=>'?').join(',')
       const owned=db.prepare(`SELECT id FROM publication_jobs WHERE organization_id=? AND id IN (${placeholders})`).all(auth.organizationId,...ids) as Array<{id:number}>
       if(owned.length!==ids.length)return send(res,400,{error:'Um ou mais trabalhos não pertencem a esta empresa.'})
+      if(!canManageJobs(ids,auth))return send(res,403,{error:'Você não pode alterar trabalhos de outro perfil.'})
       const visible=b.visible===true?1:0
       db.prepare(`UPDATE publication_jobs SET extension_visible=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=? AND id IN (${placeholders})`).run(visible,auth.organizationId,...ids)
       for(const id of ids)recordJobEvent(auth.organizationId,id,visible?'shown_in_extension':'hidden_from_extension',auth.userId)
@@ -769,6 +800,7 @@ createServer(async (req, res) => {
       const placeholders=ids.map(()=>'?').join(',')
       const owned=db.prepare(`SELECT id,status FROM publication_jobs WHERE organization_id=? AND id IN (${placeholders})`).all(auth.organizationId,...ids) as Array<{id:number;status:string}>
       if(owned.length!==ids.length)return send(res,400,{error:'Um ou mais trabalhos não pertencem a esta empresa.'})
+      if(!canManageJobs(ids,auth))return send(res,403,{error:'Você não pode alterar trabalhos de outro perfil.'})
       if(owned.some(job=>!['pending','error','awaiting_confirmation'].includes(job.status)))return send(res,409,{error:'Trabalhos em preenchimento ou encerrados não podem ser pausados.'})
       const paused=String(b.action)==='pause'?1:0
       if(paused)db.prepare(`UPDATE publication_jobs SET paused=1,updated_at=CURRENT_TIMESTAMP WHERE organization_id=? AND id IN (${placeholders})`).run(auth.organizationId,...ids)
@@ -820,6 +852,7 @@ createServer(async (req, res) => {
       const current=db.prepare(`SELECT id,social_account_id accountId,queue_priority priority,status FROM publication_jobs
         WHERE id=? AND organization_id=?`).get(Number(queuePriority[1]),auth.organizationId) as {id:number;accountId:number;priority:number;status:string}|undefined
       if(!current)return send(res,404,{error:'Trabalho não encontrado.'})
+      if(!canManageJobs([current.id],auth))return send(res,403,{error:'Você não pode alterar trabalhos de outro perfil.'})
       if(!['pending','error','awaiting_confirmation'].includes(current.status))return send(res,409,{error:'Este trabalho não pode ser reordenado agora.'})
       const comparator=direction==='up'?'<':'>'
       const order=direction==='up'?'DESC':'ASC'
@@ -841,6 +874,7 @@ createServer(async (req, res) => {
       const b=await jsonBody(req) as Record<string,unknown>
       const job=db.prepare('SELECT id,status FROM publication_jobs WHERE id=? AND organization_id=?').get(Number(publicationSchedule[1]),auth.organizationId) as {id:number;status:string}|undefined
       if(!job)return send(res,404,{error:'Trabalho não encontrado.'})
+      if(!canManageJobs([job.id],auth))return send(res,403,{error:'Você não pode alterar trabalhos de outro perfil.'})
       if(!['pending','error','awaiting_confirmation'].includes(job.status))return send(res,409,{error:'Este trabalho não pode ser agendado agora.'})
       let scheduledAt:string|null=null
       if(String(b.scheduledAt||'').trim()){
@@ -862,6 +896,7 @@ createServer(async (req, res) => {
       const placeholders=ids.map(()=>'?').join(',')
       const rows=db.prepare(`SELECT id,status,social_account_id accountId FROM publication_jobs WHERE organization_id=? AND id IN (${placeholders})`).all(auth.organizationId,...ids) as Array<{id:number;status:string;accountId:number}>
       if(rows.length!==ids.length)return send(res,400,{error:'Um ou mais trabalhos não pertencem a esta empresa.'})
+      if(!canManageJobs(ids,auth))return send(res,403,{error:'Você não pode alterar trabalhos de outro perfil.'})
       if(rows.some(job=>!['pending','error','awaiting_confirmation'].includes(job.status)))return send(res,409,{error:'Trabalhos em preenchimento ou encerrados não podem ser agendados.'})
       const byId=new Map(rows.map(job=>[job.id,job])),intervalMs=intervalMinutes*60000
       const existing=db.prepare(`SELECT social_account_id accountId,scheduled_at scheduledAt FROM publication_jobs WHERE organization_id=? AND scheduled_at IS NOT NULL
@@ -892,6 +927,7 @@ createServer(async (req, res) => {
       if (!allowed.includes(String(b.status))) return send(res,400,{error:'Status inválido.'})
       const job=db.prepare('SELECT vehicle_id vehicleId,fill_report fillReport FROM publication_jobs WHERE id=? AND organization_id=?').get(Number(publication[1]),auth.organizationId) as {vehicleId:number;fillReport?:string}|undefined
       if(!job)return send(res,404,{error:'Publicação não encontrada.'})
+      if(!canManageJobs([Number(publication[1])],auth))return send(res,403,{error:'Você não pode alterar trabalhos de outro perfil.'})
       let previousReport:Record<string,unknown>={}
       try{previousReport=job.fillReport?JSON.parse(job.fillReport):{}}catch{/* relatório antigo inválido */}
       if(String(b.status)==='pending'&&previousReport.publishAttempted&&b.confirmNoPublication!==true)return send(res,409,{error:'Antes de repetir, verifique em “Seus classificados” se o anúncio foi criado. Confirme no painel que ele NÃO foi publicado para liberar uma nova tentativa.'})
