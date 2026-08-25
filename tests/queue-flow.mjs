@@ -15,7 +15,7 @@ const adminPassword='admin-test-password-strong'
 const sellerEmail='seller-test@autoflow.local'
 const sellerPassword='seller-test-password'
 const jpegBase64=value=>Buffer.concat([Buffer.from([0xff,0xd8,0xff,0xe0]),Buffer.from(value)]).toString('base64')
-const server=spawn(process.execPath,['server/server.ts'],{cwd:process.cwd(),env:{...process.env,HOST:'127.0.0.1',PORT:String(port),DATA_DIR:dataDir,AUTH_SECRET:'queue-test-secret-with-at-least-32-characters',INITIAL_ADMIN_NAME:'Administrador Teste',INITIAL_ADMIN_EMAIL:adminEmail,INITIAL_ADMIN_PASSWORD:adminPassword},stdio:['ignore','pipe','pipe']})
+const server=spawn(process.execPath,['server/server.ts'],{cwd:process.cwd(),env:{...process.env,HOST:'127.0.0.1',PORT:String(port),DATA_DIR:dataDir,AUTH_SECRET:'queue-test-secret-with-at-least-32-characters',INITIAL_ADMIN_NAME:'Administrador Teste',INITIAL_ADMIN_EMAIL:adminEmail,INITIAL_ADMIN_PASSWORD:adminPassword,LOGIN_MAX_ATTEMPTS:'3',LOGIN_IP_MAX_ATTEMPTS:'100',LOGIN_WINDOW_SECONDS:'60'},stdio:['ignore','pipe','pipe']})
 let serverOutput=''
 server.stdout.on('data',chunk=>serverOutput+=chunk)
 server.stderr.on('data',chunk=>serverOutput+=chunk)
@@ -48,7 +48,19 @@ try{
   if(deniedCors.status!==403||deniedCors.headers.has('access-control-allow-origin'))throw new Error('Uma origem externa recebeu acesso CORS à API.')
   const contentScript=await readFile('extension-mv2/content.js','utf8')
   if(/\.innerHTML\s*=/.test(contentScript))throw new Error('O content script voltou a inserir HTML dinâmico diretamente.')
+  const serverSource=await readFile('server/server.ts','utf8')
+  if(serverSource.includes('scryptSync'))throw new Error('O login voltou a usar derivação de senha síncrona.')
+  for(let attempt=0;attempt<2;attempt++){
+    const response=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:adminEmail,password:'senha-incorreta'})})
+    if(response.status!==401)throw new Error('Uma tentativa inválida antes do login não retornou 401.')
+  }
   const adminToken=await login(adminEmail,adminPassword)
+  for(let attempt=0;attempt<3;attempt++){
+    const response=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:adminEmail,password:'senha-incorreta'})})
+    if(response.status!==401)throw new Error('O login bem-sucedido não limpou o contador da conta.')
+  }
+  const blockedLogin=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:adminEmail,password:'senha-incorreta'})})
+  if(blockedLogin.status!==429||!blockedLogin.headers.get('retry-after'))throw new Error('O rate-limit de login não retornou 429 com Retry-After.')
   await call('/team/users',adminToken,{method:'POST',body:JSON.stringify({name:'Marina Costa',email:sellerEmail,password:sellerPassword,role:'seller'})})
   const sellerToken=await login(sellerEmail,sellerPassword)
   const team=await call('/team',adminToken)
@@ -267,7 +279,7 @@ try{
   if((await call('/reports/issues',adminToken)).issues.some(item=>item.jobId===publication.id))throw new Error('O relatório manteve eventos órfãos após excluir o veículo.')
   await expectStatus(404,()=>call('/vehicles',adminToken,{method:'DELETE',body:JSON.stringify({ids:[1]})}))
 
-  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
+  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
 }finally{
   if(server.exitCode===null){server.kill();await new Promise(resolve=>server.once('exit',resolve))}
   await rm(dataDir,{recursive:true,force:true})

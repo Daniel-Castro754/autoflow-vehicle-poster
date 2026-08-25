@@ -16,6 +16,8 @@ Na primeira execução com um banco vazio, `INITIAL_ADMIN_EMAIL` e `INITIAL_ADMI
 
 A API escuta somente em `127.0.0.1` por padrão. `HOST` altera a interface de rede conscientemente, e `PUBLIC_ORIGIN` define a origem usada nas URLs de imagens quando ela for diferente de `http://HOST:PORT`. A extensão local espera a API em `http://127.0.0.1:3333`.
 
+O login aceita por padrão até 5 tentativas por conta/endereço e 30 tentativas totais por endereço em uma janela de 15 minutos. `LOGIN_MAX_ATTEMPTS`, `LOGIN_IP_MAX_ATTEMPTS` e `LOGIN_WINDOW_SECONDS` permitem ajustar esses limites.
+
 O comando `npm run dev` inicia o painel em `http://localhost:5173` e a API em `http://127.0.0.1:3333`.
 
 ## Escopo atual
