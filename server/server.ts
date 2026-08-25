@@ -25,6 +25,9 @@ const imageBaseUrl=`${publicOrigin}/uploads/`
 
 db.exec(`
   PRAGMA foreign_keys = ON;
+  PRAGMA busy_timeout = 5000;
+  PRAGMA journal_mode = WAL;
+  PRAGMA synchronous = NORMAL;
   CREATE TABLE IF NOT EXISTS organizations (
     id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
@@ -119,8 +122,17 @@ ensureColumn('organization_settings','target_groups',"TEXT NOT NULL DEFAULT '[]'
 ensureColumn('organization_settings','auto_publish','INTEGER NOT NULL DEFAULT 0')
 ensureColumn('organization_settings','stuck_timeout_minutes','INTEGER NOT NULL DEFAULT 15')
 db.prepare('UPDATE publication_jobs SET queue_priority=id WHERE queue_priority=0').run()
-db.exec('CREATE INDEX IF NOT EXISTS idx_publication_job_events_timeline ON publication_job_events (organization_id,publication_job_id,created_at,id)')
-db.exec('CREATE INDEX IF NOT EXISTS idx_vehicle_images_content_hash ON vehicle_images (organization_id,content_hash,vehicle_id)')
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_publication_job_events_timeline ON publication_job_events (organization_id,publication_job_id,created_at,id);
+  CREATE INDEX IF NOT EXISTS idx_vehicle_images_content_hash ON vehicle_images (organization_id,content_hash,vehicle_id);
+  CREATE INDEX IF NOT EXISTS idx_publication_jobs_account_queue ON publication_jobs (organization_id,social_account_id,status,paused,queue_priority);
+  CREATE INDEX IF NOT EXISTS idx_publication_jobs_vehicle_status ON publication_jobs (organization_id,vehicle_id,status);
+  CREATE INDEX IF NOT EXISTS idx_publication_jobs_created ON publication_jobs (organization_id,social_account_id,created_at,status);
+  CREATE INDEX IF NOT EXISTS idx_vehicles_org_updated ON vehicles (organization_id,updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_vehicle_images_vehicle_position ON vehicle_images (organization_id,vehicle_id,position,id);
+  CREATE INDEX IF NOT EXISTS idx_social_accounts_org_user ON social_accounts (organization_id,user_id);
+  CREATE INDEX IF NOT EXISTS idx_marketplace_groups_org_active_priority ON marketplace_groups (organization_id,active,priority,id);
+`)
 for(const image of db.prepare("SELECT id,file_name fileName FROM vehicle_images WHERE content_hash='' OR content_hash IS NULL").all() as Array<{id:number;fileName:string}>){
   const path=join(uploadsDir,image.fileName)
   if(existsSync(path))db.prepare('UPDATE vehicle_images SET content_hash=? WHERE id=?').run(createHash('sha256').update(readFileSync(path)).digest('hex'),image.id)
@@ -709,14 +721,28 @@ createServer(async (req, res) => {
         :db.prepare(`SELECT a.id,a.label,a.browser_profile browserProfile,a.status,a.last_seen_at lastSeenAt,u.name owner
           FROM social_accounts a JOIN users u ON u.id=a.user_id WHERE a.organization_id=? AND a.user_id=? ORDER BY a.label`).all(auth.organizationId,auth.userId)) as Array<{id:number;label:string;browserProfile?:string;status:string;lastSeenAt?:string;owner:string}>
       const settings=db.prepare('SELECT daily_limit dailyLimit,stuck_timeout_minutes stuckTimeoutMinutes FROM organization_settings WHERE organization_id=?').get(auth.organizationId) as {dailyLimit?:number;stuckTimeoutMinutes?:number}|undefined
+      type LatestAutomationJob={accountId:number;id:number;status:string;paused:number;scheduledAt?:string;attemptCount?:number;fillReport?:string;extensionVersion?:string;startedAt?:string;updatedAt?:string;leaseExpiresAt?:string;year:number;make:string;model:string}
+      const latestRows=db.prepare(`WITH ranked AS (
+        SELECT j.social_account_id accountId,j.id,j.status,j.paused,j.scheduled_at scheduledAt,j.attempt_count attemptCount,j.fill_report fillReport,j.extension_version extensionVersion,
+          j.started_at startedAt,j.updated_at updatedAt,j.lease_expires_at leaseExpiresAt,v.year,v.make,v.model,
+          ROW_NUMBER() OVER (PARTITION BY j.social_account_id ORDER BY
+            CASE WHEN j.status IN ('filling','pending','awaiting_confirmation','error') AND j.paused=0 AND (j.scheduled_at IS NULL OR datetime(j.scheduled_at)<=CURRENT_TIMESTAMP) THEN 0
+              WHEN j.status IN ('filling','pending','awaiting_confirmation','error') AND j.paused=0 THEN 1
+              WHEN j.status IN ('filling','pending','awaiting_confirmation','error') THEN 2 ELSE 3 END,
+            j.queue_priority,j.updated_at DESC) rank
+        FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id WHERE j.organization_id=? AND j.social_account_id IS NOT NULL
+      ) SELECT accountId,id,status,paused,scheduledAt,attemptCount,fillReport,extensionVersion,startedAt,updatedAt,leaseExpiresAt,year,make,model FROM ranked WHERE rank=1`).all(auth.organizationId) as LatestAutomationJob[]
+      const latestByAccount=new Map(latestRows.map(item=>[item.accountId,item]))
+      const statsRows=db.prepare(`SELECT social_account_id accountId,
+        SUM(CASE WHEN date(created_at)=date('now') AND status!='canceled' THEN 1 ELSE 0 END) today,
+        SUM(CASE WHEN status IN ('completed','removed') THEN 1 ELSE 0 END) successes,
+        SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) failures
+        FROM publication_jobs WHERE organization_id=? AND social_account_id IS NOT NULL GROUP BY social_account_id`).all(auth.organizationId) as Array<{accountId:number;today:number;successes:number;failures:number}>
+      const statsByAccount=new Map(statsRows.map(item=>[item.accountId,item]))
       const profiles=accounts.map(account=>{
-        const latest=db.prepare(`SELECT j.id,j.status,j.paused,j.scheduled_at scheduledAt,j.attempt_count attemptCount,j.fill_report fillReport,j.extension_version extensionVersion,
-          j.started_at startedAt,j.updated_at updatedAt,j.lease_expires_at leaseExpiresAt,v.year,v.make,v.model
-          FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id WHERE j.organization_id=? AND j.social_account_id=?
-          ORDER BY CASE WHEN j.status IN ('filling','pending','awaiting_confirmation','error') AND j.paused=0 AND (j.scheduled_at IS NULL OR datetime(j.scheduled_at)<=CURRENT_TIMESTAMP) THEN 0 WHEN j.status IN ('filling','pending','awaiting_confirmation','error') AND j.paused=0 THEN 1 WHEN j.status IN ('filling','pending','awaiting_confirmation','error') THEN 2 ELSE 3 END,j.queue_priority,j.updated_at DESC LIMIT 1`).get(auth.organizationId,account.id) as {id:number;status:string;paused:number;scheduledAt?:string;attemptCount?:number;fillReport?:string;extensionVersion?:string;startedAt?:string;updatedAt?:string;leaseExpiresAt?:string;year:number;make:string;model:string}|undefined
-        const today=(db.prepare("SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND date(created_at)=date('now') AND status!='canceled'").get(auth.organizationId,account.id) as {total:number}).total
-        const successes=(db.prepare("SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND status IN ('completed','removed')").get(auth.organizationId,account.id) as {total:number}).total
-        const failures=(db.prepare("SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND status='error'").get(auth.organizationId,account.id) as {total:number}).total
+        const latest=latestByAccount.get(account.id)
+        const stats=statsByAccount.get(account.id)
+        const today=Number(stats?.today||0),successes=Number(stats?.successes||0),failures=Number(stats?.failures||0)
         let report:{advanced?:boolean;publishAttempted?:boolean;missing?:string[];missingGroups?:string[];flowIssues?:string[]}|null=null
         try{report=latest?.fillReport?JSON.parse(latest.fillReport):null}catch{/* relatório antigo inválido */}
         const scheduled=latest?.scheduledAt&&Date.parse(latest.scheduledAt)>Date.now()

@@ -213,6 +213,8 @@ try{
   await expectStatus(409,()=>call('/publications/reassign',adminToken,{method:'PATCH',body:JSON.stringify({ids:[publication.id],accountId:second.id})}))
   const automationOverview=await call('/automation/overview',adminToken)
   const automationProfile=automationOverview.profiles.find(profile=>profile.id===first.id)
+  const sellerAutomationProfile=automationOverview.profiles.find(profile=>profile.id===second.id)
+  if(!sellerAutomationProfile||sellerAutomationProfile.successes!==1||sellerAutomationProfile.failures!==0)throw new Error('As métricas agregadas por perfil ficaram incorretas.')
   if(!automationProfile||automationProfile.stage!=='Preenchendo dados'||automationProfile.currentJob?.id!==publication.id||automationProfile.currentJob?.attemptCount!==1)throw new Error('A Central de automacao nao refletiu o trabalho em andamento.')
   if(prepared.vehicle.interiorColor!=='Preto')throw new Error('A cor interna não chegou à extensão.')
   if(prepared.vehicle.condition!=='Excelente')throw new Error('A condição do veículo não chegou à extensão.')
@@ -226,6 +228,10 @@ try{
   await expectStatus(403,()=>call(`/publications/${publication.id}/recover`,sellerToken,{method:'POST'}))
   await expectStatus(409,()=>call(`/publications/${publication.id}/recover`,adminToken,{method:'POST'}))
   const testDb=new DatabaseSync(join(dataDir,'autoflow.db'))
+  const journalMode=testDb.prepare('PRAGMA journal_mode').get().journal_mode
+  if(journalMode!=='wal'||!serverSource.includes('PRAGMA busy_timeout = 5000;'))throw new Error('A configuração de concorrência do SQLite não foi aplicada.')
+  const indexes=new Set(testDb.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(item=>item.name))
+  for(const name of ['idx_publication_jobs_account_queue','idx_publication_jobs_vehicle_status','idx_publication_jobs_created','idx_vehicles_org_updated','idx_vehicle_images_vehicle_position','idx_social_accounts_org_user','idx_marketplace_groups_org_active_priority'])if(!indexes.has(name))throw new Error(`O índice ${name} não foi criado.`)
   testDb.prepare("UPDATE publication_jobs SET started_at=datetime('now','-2 minutes') WHERE id=?").run(publication.id)
   await expectStatus(409,()=>call(`/publications/${publication.id}/recover`,adminToken,{method:'POST'}))
   testDb.prepare("UPDATE publication_jobs SET lease_expires_at=datetime('now','-1 second') WHERE id=?").run(publication.id)
@@ -291,7 +297,7 @@ try{
   if((await call('/reports/issues',adminToken)).issues.some(item=>item.jobId===publication.id))throw new Error('O relatório manteve eventos órfãos após excluir o veículo.')
   await expectStatus(404,()=>call('/vehicles',adminToken,{method:'DELETE',body:JSON.stringify({ids:[1]})}))
 
-  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,stateTransitions:true,terminalVehicleStatuses:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
+  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,stateTransitions:true,terminalVehicleStatuses:true,sqliteWal:true,sqliteIndexes:true,aggregatedAutomationQueries:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
 }finally{
   if(server.exitCode===null){server.kill();await new Promise(resolve=>server.once('exit',resolve))}
   await rm(dataDir,{recursive:true,force:true})
