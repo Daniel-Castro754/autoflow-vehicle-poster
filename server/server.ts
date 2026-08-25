@@ -133,6 +133,32 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_social_accounts_org_user ON social_accounts (organization_id,user_id);
   CREATE INDEX IF NOT EXISTS idx_marketplace_groups_org_active_priority ON marketplace_groups (organization_id,active,priority,id);
 `)
+type AutomationAccount={id:number;label:string;browserProfile?:string;status:string;lastSeenAt?:string;owner:string}
+type LatestAutomationJob={accountId:number;id:number;status:string;paused:number;scheduledAt?:string;attemptCount?:number;fillReport?:string;extensionVersion?:string;startedAt?:string;updatedAt?:string;leaseExpiresAt?:string;year:number;make:string;model:string}
+type AutomationStats={accountId:number;today:number;successes:number;failures:number}
+const automationStatements={
+  accountsAdmin:db.prepare(`SELECT a.id,a.label,a.browser_profile browserProfile,a.status,a.last_seen_at lastSeenAt,u.name owner
+    FROM social_accounts a JOIN users u ON u.id=a.user_id WHERE a.organization_id=? ORDER BY u.name,a.label`),
+  accountsSeller:db.prepare(`SELECT a.id,a.label,a.browser_profile browserProfile,a.status,a.last_seen_at lastSeenAt,u.name owner
+    FROM social_accounts a JOIN users u ON u.id=a.user_id WHERE a.organization_id=? AND a.user_id=? ORDER BY a.label`),
+  settings:db.prepare('SELECT daily_limit dailyLimit,stuck_timeout_minutes stuckTimeoutMinutes FROM organization_settings WHERE organization_id=?'),
+  latest:db.prepare(`WITH ranked AS (
+    SELECT j.social_account_id accountId,j.id,j.status,j.paused,j.scheduled_at scheduledAt,j.attempt_count attemptCount,j.fill_report fillReport,j.extension_version extensionVersion,
+      j.started_at startedAt,j.updated_at updatedAt,j.lease_expires_at leaseExpiresAt,v.year,v.make,v.model,
+      ROW_NUMBER() OVER (PARTITION BY j.social_account_id ORDER BY
+        CASE WHEN j.status IN ('filling','pending','awaiting_confirmation','error') AND j.paused=0 AND (j.scheduled_at IS NULL OR datetime(j.scheduled_at)<=CURRENT_TIMESTAMP) THEN 0
+          WHEN j.status IN ('filling','pending','awaiting_confirmation','error') AND j.paused=0 THEN 1
+          WHEN j.status IN ('filling','pending','awaiting_confirmation','error') THEN 2 ELSE 3 END,
+        j.queue_priority,j.updated_at DESC) rank
+    FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id WHERE j.organization_id=? AND j.social_account_id IS NOT NULL
+  ) SELECT accountId,id,status,paused,scheduledAt,attemptCount,fillReport,extensionVersion,startedAt,updatedAt,leaseExpiresAt,year,make,model FROM ranked WHERE rank=1`),
+  stats:db.prepare(`SELECT social_account_id accountId,
+    SUM(CASE WHEN date(created_at)=date('now') AND status!='canceled' THEN 1 ELSE 0 END) today,
+    SUM(CASE WHEN status IN ('completed','removed') THEN 1 ELSE 0 END) successes,
+    SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) failures
+    FROM publication_jobs WHERE organization_id=? AND social_account_id IS NOT NULL GROUP BY social_account_id`),
+}
+
 for(const image of db.prepare("SELECT id,file_name fileName FROM vehicle_images WHERE content_hash='' OR content_hash IS NULL").all() as Array<{id:number;fileName:string}>){
   const path=join(uploadsDir,image.fileName)
   if(existsSync(path))db.prepare('UPDATE vehicle_images SET content_hash=? WHERE id=?').run(createHash('sha256').update(readFileSync(path)).digest('hex'),image.id)
@@ -716,28 +742,12 @@ createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/automation/overview') {
       const current=userById(auth.userId) as {role?:string}|undefined
       const accounts=(current?.role==='admin'
-        ?db.prepare(`SELECT a.id,a.label,a.browser_profile browserProfile,a.status,a.last_seen_at lastSeenAt,u.name owner
-          FROM social_accounts a JOIN users u ON u.id=a.user_id WHERE a.organization_id=? ORDER BY u.name,a.label`).all(auth.organizationId)
-        :db.prepare(`SELECT a.id,a.label,a.browser_profile browserProfile,a.status,a.last_seen_at lastSeenAt,u.name owner
-          FROM social_accounts a JOIN users u ON u.id=a.user_id WHERE a.organization_id=? AND a.user_id=? ORDER BY a.label`).all(auth.organizationId,auth.userId)) as Array<{id:number;label:string;browserProfile?:string;status:string;lastSeenAt?:string;owner:string}>
-      const settings=db.prepare('SELECT daily_limit dailyLimit,stuck_timeout_minutes stuckTimeoutMinutes FROM organization_settings WHERE organization_id=?').get(auth.organizationId) as {dailyLimit?:number;stuckTimeoutMinutes?:number}|undefined
-      type LatestAutomationJob={accountId:number;id:number;status:string;paused:number;scheduledAt?:string;attemptCount?:number;fillReport?:string;extensionVersion?:string;startedAt?:string;updatedAt?:string;leaseExpiresAt?:string;year:number;make:string;model:string}
-      const latestRows=db.prepare(`WITH ranked AS (
-        SELECT j.social_account_id accountId,j.id,j.status,j.paused,j.scheduled_at scheduledAt,j.attempt_count attemptCount,j.fill_report fillReport,j.extension_version extensionVersion,
-          j.started_at startedAt,j.updated_at updatedAt,j.lease_expires_at leaseExpiresAt,v.year,v.make,v.model,
-          ROW_NUMBER() OVER (PARTITION BY j.social_account_id ORDER BY
-            CASE WHEN j.status IN ('filling','pending','awaiting_confirmation','error') AND j.paused=0 AND (j.scheduled_at IS NULL OR datetime(j.scheduled_at)<=CURRENT_TIMESTAMP) THEN 0
-              WHEN j.status IN ('filling','pending','awaiting_confirmation','error') AND j.paused=0 THEN 1
-              WHEN j.status IN ('filling','pending','awaiting_confirmation','error') THEN 2 ELSE 3 END,
-            j.queue_priority,j.updated_at DESC) rank
-        FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id WHERE j.organization_id=? AND j.social_account_id IS NOT NULL
-      ) SELECT accountId,id,status,paused,scheduledAt,attemptCount,fillReport,extensionVersion,startedAt,updatedAt,leaseExpiresAt,year,make,model FROM ranked WHERE rank=1`).all(auth.organizationId) as LatestAutomationJob[]
+        ?automationStatements.accountsAdmin.all(auth.organizationId)
+        :automationStatements.accountsSeller.all(auth.organizationId,auth.userId)) as AutomationAccount[]
+      const settings=automationStatements.settings.get(auth.organizationId) as {dailyLimit?:number;stuckTimeoutMinutes?:number}|undefined
+      const latestRows=automationStatements.latest.all(auth.organizationId) as LatestAutomationJob[]
       const latestByAccount=new Map(latestRows.map(item=>[item.accountId,item]))
-      const statsRows=db.prepare(`SELECT social_account_id accountId,
-        SUM(CASE WHEN date(created_at)=date('now') AND status!='canceled' THEN 1 ELSE 0 END) today,
-        SUM(CASE WHEN status IN ('completed','removed') THEN 1 ELSE 0 END) successes,
-        SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) failures
-        FROM publication_jobs WHERE organization_id=? AND social_account_id IS NOT NULL GROUP BY social_account_id`).all(auth.organizationId) as Array<{accountId:number;today:number;successes:number;failures:number}>
+      const statsRows=automationStatements.stats.all(auth.organizationId) as AutomationStats[]
       const statsByAccount=new Map(statsRows.map(item=>[item.accountId,item]))
       const profiles=accounts.map(account=>{
         const latest=latestByAccount.get(account.id)
