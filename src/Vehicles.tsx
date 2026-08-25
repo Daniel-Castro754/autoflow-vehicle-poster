@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Car, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Clock3,
@@ -13,6 +13,7 @@ import {
 type ApiFn = <T=Record<string,unknown>>(path:string, options?:RequestInit) => Promise<T>
 type AccountOption = { id:number; label:string; browserProfile?:string }
 type MenuState = { vehicleId:number; top:number; left:number }
+type VehiclePage = { vehicles:VehicleRecord[]; pagination:{totalItems:number;totalPages:number;currentPage:number;pageSize:number} }
 
 export type VehicleRecord = {
   id:number
@@ -77,13 +78,22 @@ export default function VehiclesView({api,vehicles,accounts,reload,notify}:{api:
   const [menu,setMenu] = useState<MenuState|null>(null)
   const [editor,setEditor] = useState<VehicleRecord|null|undefined>(undefined)
   const [queueVehicle,setQueueVehicle] = useState<VehicleRecord|null>(null)
+  const [pageVehicles,setPageVehicles]=useState<VehicleRecord[]>(vehicles.slice(0,25))
+  const [page,setPage]=useState(1)
+  const [pageLoading,setPageLoading]=useState(true)
+  const [pagination,setPagination]=useState({totalItems:vehicles.length,totalPages:Math.max(1,Math.ceil(vehicles.length/25)),currentPage:1,pageSize:25})
+  const deferredQuery=useDeferredValue(query)
 
-  const filtered = useMemo(() => vehicles.filter(vehicle =>
-    `${vehicle.make} ${vehicle.model} ${vehicle.year} ${vehicle.seller}`.toLowerCase().includes(query.toLowerCase())
-    && (status === 'Todos' || vehicle.status === status)
-  ), [vehicles,query,status])
+  useEffect(()=>{
+    let active=true
+    const params=new URLSearchParams({page:String(page),limit:'25',query:deferredQuery,status})
+    void api<VehiclePage>(`/vehicles/paged?${params}`).then(result=>{if(!active)return;setPageVehicles(result.vehicles);setPagination(result.pagination);if(result.pagination.currentPage!==page)setPage(result.pagination.currentPage)}).catch(error=>{if(active)notify(error instanceof Error?error.message:'Erro ao carregar veículos')}).finally(()=>{if(active)setPageLoading(false)})
+    return()=>{active=false}
+  },[api,deferredQuery,status,page,vehicles,notify])
+
+  const filtered = pageVehicles
   const allSelected = filtered.length > 0 && filtered.every(vehicle => selected.has(vehicle.id))
-  const menuVehicle = menu ? vehicles.find(vehicle => vehicle.id === menu.vehicleId) : undefined
+  const menuVehicle = menu ? pageVehicles.find(vehicle => vehicle.id === menu.vehicleId) : undefined
 
   useEffect(() => {
     if (!menu) return
@@ -150,9 +160,9 @@ export default function VehiclesView({api,vehicles,accounts,reload,notify}:{api:
       <article><span className="stat-icon red"><CircleAlert/></span><div><small>Precisam de atenção</small><strong>{vehicles.filter(v=>v.status==='Atenção').length}</strong><em>revisar dados</em></div></article>
     </div>
     <div className="panel">
-      <div className="toolbar"><div className="search"><Search size={18}/><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar veículo ou vendedor..."/></div><select value={status} onChange={event=>setStatus(event.target.value)}><option>Todos</option>{VEHICLE_STATUSES.map(item=><option key={item}>{item}</option>)}</select><button className="secondary">Todas as lojas<ChevronDown size={15}/></button></div>
+      <div className="toolbar"><div className="search"><Search size={18}/><input value={query} onChange={event=>{setQuery(event.target.value);setPage(1);setPageLoading(true);setSelected(new Set())}} placeholder="Buscar veículo ou vendedor..."/></div><select value={status} onChange={event=>{setStatus(event.target.value);setPage(1);setPageLoading(true);setSelected(new Set())}}><option>Todos</option>{VEHICLE_STATUSES.map(item=><option key={item}>{item}</option>)}</select><button className="secondary">Todas as lojas<ChevronDown size={15}/></button></div>
       {selected.size>0 && <div className="bulk-bar"><div><Check/><strong>{selected.size}</strong><span>selecionado{selected.size>1?'s':''}</span></div><HelpTip tone="warning" text="A exclusão remove os veículos, suas fotos e os registros de publicação relacionados. Uma confirmação será solicitada." placement="bottom"/><button onClick={()=>remove([...selected])}><Trash2/>Excluir selecionados</button><button className="bulk-clear" onClick={()=>setSelected(new Set())}><X/>Limpar</button></div>}
-      <div className="table-wrap"><table><thead><tr><th className="check-cell"><input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Selecionar todos os veículos"/></th><th>VEÍCULO</th><th>PREÇO</th><th>QUILOMETRAGEM</th><th>RESPONSÁVEL</th><th>STATUS</th><th>FOTOS</th><th>ATUALIZADO</th><th/></tr></thead><tbody>{filtered.map(vehicle=><tr key={vehicle.id} className={selected.has(vehicle.id)?'selected-row':''}>
+      <div className="table-wrap"><table><thead><tr><th className="check-cell"><input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Selecionar todos os veículos desta página"/></th><th>VEÍCULO</th><th>PREÇO</th><th>QUILOMETRAGEM</th><th>RESPONSÁVEL</th><th>STATUS</th><th>FOTOS</th><th>ATUALIZADO</th><th/></tr></thead><tbody>{filtered.map(vehicle=><tr key={vehicle.id} className={selected.has(vehicle.id)?'selected-row':''}>
         <td className="check-cell"><input type="checkbox" checked={selected.has(vehicle.id)} onChange={()=>toggleOne(vehicle.id)} aria-label={`Selecionar ${vehicle.year} ${vehicle.make} ${vehicle.model}`}/></td>
         <td><div className="vehicle"><Thumb vehicle={vehicle}/><div><strong>{vehicle.year} {vehicle.make} {vehicle.model}</strong><small>{vehicle.trim}</small></div></div></td>
         <td><strong>{money.format(vehicle.price)}</strong></td><td>{vehicle.km.toLocaleString('pt-BR')} km</td>
@@ -160,8 +170,8 @@ export default function VehiclesView({api,vehicles,accounts,reload,notify}:{api:
         <td><span className={`image-status ${vehicle.imageCount?'has-images':''}`}>{vehicle.imageCount||0}/20</span></td>
         <td className="muted">{vehicle.updatedAt?new Date(vehicle.updatedAt+'Z').toLocaleDateString('pt-BR'):'agora'}</td>
         <td className="actions-cell"><button className="row-more" onClick={event=>toggleMenu(event,vehicle.id)} aria-label={`Ações de ${vehicle.year} ${vehicle.make} ${vehicle.model}`} aria-expanded={menu?.vehicleId===vehicle.id}><MoreHorizontal/></button></td>
-      </tr>)}</tbody></table>{!filtered.length&&<div className="empty">Nenhum veículo encontrado.</div>}</div>
-      <footer className="panel-foot"><span>Mostrando {filtered.length} de {vehicles.length} veículos</span><div><button disabled>Anterior</button><button className="page">1</button><button>Próximo</button></div></footer>
+      </tr>)}</tbody></table>{!filtered.length&&<div className="empty">{pageLoading?'Carregando veículos...':'Nenhum veículo encontrado.'}</div>}</div>
+      <footer className="panel-foot"><span>Mostrando {filtered.length} de {pagination.totalItems} veículos</span><div><button disabled={pageLoading||pagination.currentPage<=1} onClick={()=>{setPage(current=>Math.max(1,current-1));setPageLoading(true);setSelected(new Set())}}>Anterior</button><button className="page">{pagination.currentPage} / {pagination.totalPages}</button><button disabled={pageLoading||pagination.currentPage>=pagination.totalPages} onClick={()=>{setPage(current=>Math.min(pagination.totalPages,current+1));setPageLoading(true);setSelected(new Set())}}>Próximo</button></div></footer>
     </div>
 
     {menu && menuVehicle && createPortal(<><button className="row-menu-backdrop" onClick={()=>setMenu(null)} aria-label="Fechar ações"/><div className="row-menu floating-row-menu" style={{top:menu.top,left:menu.left}} role="menu">

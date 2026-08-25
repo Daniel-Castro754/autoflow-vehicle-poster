@@ -97,6 +97,13 @@ try{
   await expectStatus(403,()=>call('/vehicles',sellerToken,{method:'DELETE',body:JSON.stringify({ids:[1]})}))
   await expectStatus(403,()=>call('/publications',sellerToken,{method:'POST',body:JSON.stringify({vehicleId:1,accountId:second.id})}))
   const sellerVehicle=await call('/vehicles',sellerToken,{method:'POST',body:JSON.stringify(sellerVehiclePayload)})
+  const vehiclePageOne=await call('/vehicles/paged?page=1&limit=2',adminToken)
+  const vehiclePageTwo=await call('/vehicles/paged?page=2&limit=2',adminToken)
+  if(vehiclePageOne.vehicles.length!==2||vehiclePageOne.pagination.totalItems<6||vehiclePageOne.vehicles.some(item=>vehiclePageTwo.vehicles.some(next=>next.id===item.id)))throw new Error('A paginação de veículos retornou quantidade ou itens incorretos.')
+  const vehicleSearch=await call('/vehicles/paged?page=1&limit=25&query=City&status=Pronto',adminToken)
+  if(vehicleSearch.vehicles.length!==1||vehicleSearch.vehicles[0].id!==sellerVehicle.id)throw new Error('A busca paginada de veículos não aplicou query e status.')
+  await expectStatus(400,()=>call('/vehicles/paged?page=0',adminToken))
+  await expectStatus(400,()=>call('/vehicles/paged?status=Inexistente',adminToken))
   await expectStatus(409,()=>call(`/vehicles/${sellerVehicle.id}`,sellerToken,{method:'PATCH',body:JSON.stringify({...sellerVehiclePayload,status:'Vendido'})}))
   await call(`/vehicles/${sellerVehicle.id}`,sellerToken,{method:'PATCH',body:JSON.stringify({...sellerVehiclePayload,km:30500})})
   await expectStatus(400,()=>call(`/vehicles/${sellerVehicle.id}/images`,sellerToken,{method:'POST',body:JSON.stringify({name:'invalida.jpg',mimeType:'image/jpeg',dataBase64:'%%%%'})}))
@@ -240,7 +247,7 @@ try{
   const journalMode=testDb.prepare('PRAGMA journal_mode').get().journal_mode
   if(journalMode!=='wal'||!serverSource.includes('PRAGMA busy_timeout = 5000;'))throw new Error('A configuração de concorrência do SQLite não foi aplicada.')
   const indexes=new Set(testDb.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(item=>item.name))
-  for(const name of ['idx_publication_jobs_account_queue','idx_publication_jobs_vehicle_status','idx_publication_jobs_created','idx_vehicles_org_updated','idx_vehicle_images_vehicle_position','idx_social_accounts_org_user','idx_marketplace_groups_org_active_priority'])if(!indexes.has(name))throw new Error(`O índice ${name} não foi criado.`)
+  for(const name of ['idx_publication_jobs_account_queue','idx_publication_jobs_vehicle_status','idx_publication_jobs_created','idx_vehicles_org_updated','idx_vehicles_status_updated','idx_vehicle_images_vehicle_position','idx_social_accounts_org_user','idx_marketplace_groups_org_active_priority'])if(!indexes.has(name))throw new Error(`O índice ${name} não foi criado.`)
   testDb.prepare("UPDATE publication_jobs SET started_at=datetime('now','-2 minutes') WHERE id=?").run(publication.id)
   await expectStatus(409,()=>call(`/publications/${publication.id}/recover`,adminToken,{method:'POST'}))
   testDb.prepare("UPDATE publication_jobs SET lease_expires_at=datetime('now','-1 second') WHERE id=?").run(publication.id)
@@ -312,7 +319,7 @@ try{
   if((await call('/reports/issues',adminToken)).issues.some(item=>item.jobId===publication.id))throw new Error('O relatório manteve eventos órfãos após excluir o veículo.')
   await expectStatus(404,()=>call('/vehicles',adminToken,{method:'DELETE',body:JSON.stringify({ids:[1]})}))
 
-  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,stateTransitions:true,terminalVehicleStatuses:true,sqliteWal:true,sqliteIndexes:true,aggregatedAutomationQueries:true,reusedAutomationStatements:true,manifestV3:true,alarmHeartbeat:true,issueCursorPagination:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
+  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,stateTransitions:true,terminalVehicleStatuses:true,sqliteWal:true,sqliteIndexes:true,aggregatedAutomationQueries:true,reusedAutomationStatements:true,manifestV3:true,alarmHeartbeat:true,issueCursorPagination:true,vehiclePagination:true,serverVehicleSearch:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
 }finally{
   if(server.exitCode===null){server.kill();await new Promise(resolve=>server.once('exit',resolve))}
   await rm(dataDir,{recursive:true,force:true})
