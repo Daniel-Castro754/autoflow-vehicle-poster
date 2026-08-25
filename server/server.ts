@@ -154,7 +154,7 @@ const automationStatements={
     FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id WHERE j.organization_id=? AND j.social_account_id IS NOT NULL
   ) SELECT accountId,id,status,paused,scheduledAt,attemptCount,fillReport,extensionVersion,startedAt,updatedAt,leaseExpiresAt,year,make,model FROM ranked WHERE rank=1`),
   stats:db.prepare(`SELECT social_account_id accountId,
-    SUM(CASE WHEN date(created_at)=date('now') AND status!='canceled' THEN 1 ELSE 0 END) today,
+    SUM(CASE WHEN date(created_at,'localtime')=date('now','localtime') AND status!='canceled' THEN 1 ELSE 0 END) today,
     SUM(CASE WHEN status IN ('completed','removed') THEN 1 ELSE 0 END) successes,
     SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) failures
     FROM publication_jobs WHERE organization_id=? AND social_account_id IS NOT NULL GROUP BY social_account_id`),
@@ -947,7 +947,7 @@ createServer(async (req, res) => {
       const duplicateRisk=publicationDuplicateRisk(auth.organizationId,vehicle.id)
       if(duplicateRisk)return send(res,409,{error:duplicateRisk.message,duplicate:duplicateRisk})
       const settings=db.prepare('SELECT daily_limit dailyLimit FROM organization_settings WHERE organization_id=?').get(auth.organizationId) as {dailyLimit:number}|undefined
-      const today=(db.prepare("SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND date(created_at)=date('now') AND status!='canceled'").get(auth.organizationId,accountId) as {total:number}).total
+      const today=(db.prepare("SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND date(created_at,'localtime')=date('now','localtime') AND status!='canceled'").get(auth.organizationId,accountId) as {total:number}).total
       if(today>=Number(settings?.dailyLimit||10))return send(res,429,{error:`O perfil atingiu o limite diário de ${settings?.dailyLimit||10} trabalhos.`})
       const nextPriority=((db.prepare(`SELECT COALESCE(MAX(queue_priority),0)+1 value FROM publication_jobs
         WHERE organization_id=? AND social_account_id=? AND status IN ('pending','filling','error','awaiting_confirmation')`).get(auth.organizationId,accountId) as {value:number}).value)||1
@@ -1013,7 +1013,7 @@ createServer(async (req, res) => {
         .get(auth.organizationId,accountId,...transferredVehicleIds,...ids)
       if(duplicate)return send(res,409,{error:'O perfil de destino já possui um trabalho ativo para um dos veículos selecionados.'})
       const settings=db.prepare('SELECT daily_limit dailyLimit FROM organization_settings WHERE organization_id=?').get(auth.organizationId) as {dailyLimit:number}|undefined
-      const today=(db.prepare("SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND date(created_at)=date('now') AND status!='canceled'").get(auth.organizationId,accountId) as {total:number}).total
+      const today=(db.prepare("SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND date(created_at,'localtime')=date('now','localtime') AND status!='canceled'").get(auth.organizationId,accountId) as {total:number}).total
       if(today+jobs.length>Number(settings?.dailyLimit||10))return send(res,429,{error:`A transferência ultrapassaria o limite diário de ${settings?.dailyLimit||10} trabalhos do perfil de destino.`})
       let nextPriority=((db.prepare(`SELECT COALESCE(MAX(queue_priority),0)+1 value FROM publication_jobs WHERE organization_id=? AND social_account_id=?
         AND status IN ('pending','filling','error','awaiting_confirmation')`).get(auth.organizationId,accountId) as {value:number}).value)||1

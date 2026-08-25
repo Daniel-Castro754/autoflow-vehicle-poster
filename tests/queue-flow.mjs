@@ -60,6 +60,7 @@ try{
   const automationEnd=serverSource.indexOf("if (req.method === 'GET' && url.pathname === '/api/publications/paged')",automationStart)
   const automationHandler=serverSource.slice(automationStart,automationEnd)
   if(!serverSource.includes('const automationStatements=')||automationHandler.includes('db.prepare('))throw new Error('A Central voltou a preparar SQL durante cada request.')
+  if(serverSource.includes("date(created_at)=date('now')")||!serverSource.includes("date(created_at,'localtime')=date('now','localtime')"))throw new Error('Os limites diários voltaram a usar a data UTC.')
   const invalidPassword=randomUUID()
   for(let attempt=0;attempt<2;attempt++){
     const response=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:adminEmail,password:invalidPassword})})
@@ -325,7 +326,7 @@ try{
   if((await call('/reports/issues',adminToken)).issues.some(item=>item.jobId===publication.id))throw new Error('O relatório manteve eventos órfãos após excluir o veículo.')
   await expectStatus(404,()=>call('/vehicles',adminToken,{method:'DELETE',body:JSON.stringify({ids:[1]})}))
 
-  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,stateTransitions:true,terminalVehicleStatuses:true,sqliteWal:true,sqliteIndexes:true,aggregatedAutomationQueries:true,reusedAutomationStatements:true,manifestV3:true,alarmHeartbeat:true,issueCursorPagination:true,vehiclePagination:true,serverVehicleSearch:true,publicationPagination:true,serverPublicationFilters:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
+  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,stateTransitions:true,terminalVehicleStatuses:true,sqliteWal:true,sqliteIndexes:true,aggregatedAutomationQueries:true,reusedAutomationStatements:true,manifestV3:true,alarmHeartbeat:true,issueCursorPagination:true,vehiclePagination:true,serverVehicleSearch:true,publicationPagination:true,serverPublicationFilters:true,localBusinessDay:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
 }finally{
   if(server.exitCode===null){server.kill();await new Promise(resolve=>server.once('exit',resolve))}
   await rm(dataDir,{recursive:true,force:true})
