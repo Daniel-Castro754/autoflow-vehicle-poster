@@ -219,10 +219,27 @@ function readToken(req:IncomingMessage) {
   if (sig.length !== valid.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(valid))) return null
   try { const value = JSON.parse(Buffer.from(body, 'base64url').toString()); return value.exp > Date.now() ? value : null } catch { return null }
 }
-async function jsonBody(req:IncomingMessage) {
-  const chunks:Buffer[] = []; for await (const chunk of req) chunks.push(chunk)
+const JSON_BODY_LIMIT=1024*1024
+const IMAGE_UPLOAD_BODY_LIMIT=17*1024*1024
+class HttpError extends Error {
+  status:number
+  constructor(status:number,message:string){super(message);this.status=status}
+}
+async function jsonBody(req:IncomingMessage,maxBytes=JSON_BODY_LIMIT) {
+  const declared=Number(req.headers['content-length'])
+  if(Number.isFinite(declared)&&declared>maxBytes)throw new HttpError(413,'O corpo da requisição excede o limite permitido.')
+  const chunks:Buffer[] = []
+  let size=0,tooLarge=false
+  for await (const chunk of req) {
+    const buffer=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk)
+    size+=buffer.length
+    if(size>maxBytes){tooLarge=true;continue}
+    chunks.push(buffer)
+  }
+  if(tooLarge)throw new HttpError(413,'O corpo da requisição excede o limite permitido.')
   if (!chunks.length) return {}
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+  try{return JSON.parse(Buffer.concat(chunks).toString('utf8'))}
+  catch{throw new HttpError(400,'O corpo da requisição não contém JSON válido.')}
 }
 const configuredOrigins=new Set((process.env.CORS_ORIGINS||'http://localhost:5173,http://127.0.0.1:5173').split(',').map(value=>value.trim()).filter(Boolean))
 function applyCors(req:IncomingMessage,res:ServerResponse) {
@@ -237,6 +254,13 @@ function applyCors(req:IncomingMessage,res:ServerResponse) {
 function send(res:ServerResponse, status:number, data:unknown) {
   res.writeHead(status, { 'Content-Type':'application/json; charset=utf-8' })
   res.end(JSON.stringify(data))
+}
+
+function validImageContent(bytes:Buffer,mime:string) {
+  if(mime==='image/jpeg')return bytes.length>=3&&bytes[0]===0xff&&bytes[1]===0xd8&&bytes[2]===0xff
+  if(mime==='image/png')return bytes.length>=8&&bytes.subarray(0,8).equals(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]))
+  if(mime==='image/webp')return bytes.length>=12&&bytes.subarray(0,4).toString('ascii')==='RIFF'&&bytes.subarray(8,12).toString('ascii')==='WEBP'
+  return false
 }
 
 const vehicleOptions = {
@@ -538,20 +562,32 @@ createServer(async (req, res) => {
       return send(res,200,{images})
     }
     if (req.method === 'POST' && vehicleImagesRoute) {
-      const b = await jsonBody(req) as Record<string,unknown>
       const vehicleId = Number(vehicleImagesRoute[1])
       if(!canWriteVehicle(vehicleId,auth))return send(res,403,{error:'Você não pode alterar as fotos deste veículo.'})
+      const imageCount=(db.prepare('SELECT COUNT(*) total FROM vehicle_images WHERE vehicle_id=? AND organization_id=?').get(vehicleId,auth.organizationId) as {total:number}).total
+      if(imageCount>=20)return send(res,409,{error:'Este veículo já possui o limite de 20 fotos.'})
+      const b = await jsonBody(req,IMAGE_UPLOAD_BODY_LIMIT) as Record<string,unknown>
       const mime = String(b.mimeType||'')
       if (!['image/jpeg','image/png','image/webp'].includes(mime)) return send(res,400,{error:'Use imagens JPG, PNG ou WebP.'})
-      const bytes = Buffer.from(String(b.dataBase64||''),'base64')
+      const encoded=String(b.dataBase64||'').trim()
+      if(!encoded||encoded.length%4!==0||!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded))return send(res,400,{error:'Os dados da imagem estão em formato inválido.'})
+      const bytes = Buffer.from(encoded,'base64')
+      if(bytes.toString('base64')!==encoded)return send(res,400,{error:'Os dados da imagem estão em formato inválido.'})
       if (!bytes.length || bytes.length>12*1024*1024) return send(res,400,{error:'A imagem deve ter no máximo 12 MB.'})
+      if(!validImageContent(bytes,mime))return send(res,400,{error:'O conteúdo do arquivo não corresponde ao formato informado.'})
+      const confirmedCount=(db.prepare('SELECT COUNT(*) total FROM vehicle_images WHERE vehicle_id=? AND organization_id=?').get(vehicleId,auth.organizationId) as {total:number}).total
+      if(confirmedCount>=20)return send(res,409,{error:'Este veículo já possui o limite de 20 fotos.'})
       const ext = mime==='image/png'?'png':mime==='image/webp'?'webp':'jpg'
       const fileName = `${randomBytes(12).toString('hex')}.${ext}`
       const contentHash=createHash('sha256').update(bytes).digest('hex')
-      writeFileSync(join(uploadsDir,fileName),bytes)
-      const position = (db.prepare('SELECT COALESCE(MAX(position),-1)+1 next FROM vehicle_images WHERE vehicle_id=?').get(vehicleId) as {next:number}).next
-      const result = db.prepare('INSERT INTO vehicle_images (organization_id,vehicle_id,file_name,original_name,mime_type,position,content_hash) VALUES (?,?,?,?,?,?,?)').run(auth.organizationId,vehicleId,fileName,String(b.name||fileName),mime,position,contentHash)
-      return send(res,201,{id:Number(result.lastInsertRowid),url:`${imageBaseUrl}${fileName}`})
+      const filePath=join(uploadsDir,fileName)
+      writeFileSync(filePath,bytes)
+      try{
+        const position = (db.prepare('SELECT COALESCE(MAX(position),-1)+1 next FROM vehicle_images WHERE vehicle_id=?').get(vehicleId) as {next:number}).next
+        const originalName=String(b.name||fileName).slice(0,200)
+        const result = db.prepare('INSERT INTO vehicle_images (organization_id,vehicle_id,file_name,original_name,mime_type,position,content_hash) VALUES (?,?,?,?,?,?,?)').run(auth.organizationId,vehicleId,fileName,originalName,mime,position,contentHash)
+        return send(res,201,{id:Number(result.lastInsertRowid),url:`${imageBaseUrl}${fileName}`})
+      }catch(error){if(existsSync(filePath))unlinkSync(filePath);throw error}
     }
     const imageReorderRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)\/images\/reorder$/)
     if (req.method === 'PATCH' && imageReorderRoute) {
@@ -1009,6 +1045,7 @@ createServer(async (req, res) => {
     }
     return send(res,404,{error:'Rota não encontrada.'})
   } catch (error) {
+    if(error instanceof HttpError)return send(res,error.status,{error:error.message})
     console.error(error); return send(res,500,{error:'Erro interno da aplicação.'})
   }
 }).listen(port,host,() => console.log(`API AutoFlow em ${publicOrigin}`))

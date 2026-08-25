@@ -14,6 +14,7 @@ const adminEmail='admin-test@autoflow.local'
 const adminPassword='admin-test-password-strong'
 const sellerEmail='seller-test@autoflow.local'
 const sellerPassword='seller-test-password'
+const jpegBase64=value=>Buffer.concat([Buffer.from([0xff,0xd8,0xff,0xe0]),Buffer.from(value)]).toString('base64')
 const server=spawn(process.execPath,['server/server.ts'],{cwd:process.cwd(),env:{...process.env,HOST:'127.0.0.1',PORT:String(port),DATA_DIR:dataDir,AUTH_SECRET:'queue-test-secret-with-at-least-32-characters',INITIAL_ADMIN_NAME:'Administrador Teste',INITIAL_ADMIN_EMAIL:adminEmail,INITIAL_ADMIN_PASSWORD:adminPassword},stdio:['ignore','pipe','pipe']})
 let serverOutput=''
 server.stdout.on('data',chunk=>serverOutput+=chunk)
@@ -35,6 +36,11 @@ async function expectMissingSecretFailure(){
 
 try{
   await waitForServer()
+  const malformedJson=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:'{'})
+  if(malformedJson.status!==400)throw new Error('JSON inválido não retornou 400.')
+  const oversizedBody=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:'x'.repeat(1024*1024),password:'x'})})
+  if(oversizedBody.status!==413)throw new Error('Corpo acima do limite não retornou 413.')
+  if(!(await fetch(base+'/health')).ok)throw new Error('A API não se recuperou após rejeitar um corpo excessivo.')
   await expectMissingSecretFailure()
   const allowedCors=await fetch(base+'/health',{headers:{Origin:'http://localhost:5173'}})
   if(!allowedCors.ok||allowedCors.headers.get('access-control-allow-origin')!=='http://localhost:5173'||!String(allowedCors.headers.get('vary')).includes('Origin'))throw new Error('A origem do painel não recebeu os cabeçalhos CORS esperados.')
@@ -63,12 +69,14 @@ try{
   const sellerVehiclePayload={year:2022,make:'Honda',model:'City',trim:'EXL',price:89900,km:31000,vehicleType:'Carro/picape',location:'São Paulo, SP',transmission:'Automático',fuelType:'Flex',bodyType:'Sedã',condition:'Excelente',exteriorColor:'Prateado',interiorColor:'Preto',description:'Veículo do vendedor para validar permissões.',status:'Pronto'}
   await expectStatus(403,()=>call('/vehicles/1',sellerToken,{method:'PATCH',body:JSON.stringify(sellerVehiclePayload)}))
   await expectStatus(403,()=>call('/vehicles/1/mark-sold',sellerToken,{method:'POST'}))
-  await expectStatus(403,()=>call('/vehicles/1/images',sellerToken,{method:'POST',body:JSON.stringify({name:'proibida.jpg',mimeType:'image/jpeg',dataBase64:Buffer.from('proibida').toString('base64')})}))
+  await expectStatus(403,()=>call('/vehicles/1/images',sellerToken,{method:'POST',body:JSON.stringify({name:'proibida.jpg',mimeType:'image/jpeg',dataBase64:jpegBase64('proibida')})}))
   await expectStatus(403,()=>call('/vehicles',sellerToken,{method:'DELETE',body:JSON.stringify({ids:[1]})}))
   await expectStatus(403,()=>call('/publications',sellerToken,{method:'POST',body:JSON.stringify({vehicleId:1,accountId:second.id})}))
   const sellerVehicle=await call('/vehicles',sellerToken,{method:'POST',body:JSON.stringify(sellerVehiclePayload)})
   await call(`/vehicles/${sellerVehicle.id}`,sellerToken,{method:'PATCH',body:JSON.stringify({...sellerVehiclePayload,km:30500})})
-  const sellerImage=await call(`/vehicles/${sellerVehicle.id}/images`,sellerToken,{method:'POST',body:JSON.stringify({name:'seller.jpg',mimeType:'image/jpeg',dataBase64:Buffer.from('seller-photo').toString('base64')})})
+  await expectStatus(400,()=>call(`/vehicles/${sellerVehicle.id}/images`,sellerToken,{method:'POST',body:JSON.stringify({name:'invalida.jpg',mimeType:'image/jpeg',dataBase64:'%%%%'})}))
+  await expectStatus(400,()=>call(`/vehicles/${sellerVehicle.id}/images`,sellerToken,{method:'POST',body:JSON.stringify({name:'mime-falso.png',mimeType:'image/png',dataBase64:jpegBase64('mime-falso')})}))
+  const sellerImage=await call(`/vehicles/${sellerVehicle.id}/images`,sellerToken,{method:'POST',body:JSON.stringify({name:'seller.jpg',mimeType:'image/jpeg',dataBase64:jpegBase64('seller-photo')})})
   await call(`/vehicles/${sellerVehicle.id}/images/reorder`,sellerToken,{method:'PATCH',body:JSON.stringify({order:[sellerImage.id]})})
   await expectStatus(403,()=>call('/publications',sellerToken,{method:'POST',body:JSON.stringify({vehicleId:sellerVehicle.id,accountId:first.id})}))
   const sellerPublication=await call('/publications',sellerToken,{method:'POST',body:JSON.stringify({vehicleId:sellerVehicle.id,accountId:second.id})})
@@ -95,9 +103,9 @@ try{
   const blockedVehicle=(await call('/vehicles',adminToken)).vehicles.find(item=>item.id===4)
   if(blockedVehicle.status!=='Atenção')throw new Error('O veículo incompleto não foi marcado como Atenção.')
 
-  const imageOne=await call('/vehicles/1/images',adminToken,{method:'POST',body:JSON.stringify({name:'foto-1.jpg',mimeType:'image/jpeg',dataBase64:Buffer.from('foto-um').toString('base64')})})
+  const imageOne=await call('/vehicles/1/images',adminToken,{method:'POST',body:JSON.stringify({name:'foto-1.jpg',mimeType:'image/jpeg',dataBase64:jpegBase64('foto-um')})})
   if(new URL(imageOne.url).origin!==`http://127.0.0.1:${port}`)throw new Error('A URL da imagem ignorou HOST ou PORT da API.')
-  const imageTwo=await call('/vehicles/1/images',adminToken,{method:'POST',body:JSON.stringify({name:'foto-2.jpg',mimeType:'image/jpeg',dataBase64:Buffer.from('foto-dois').toString('base64')})})
+  const imageTwo=await call('/vehicles/1/images',adminToken,{method:'POST',body:JSON.stringify({name:'foto-2.jpg',mimeType:'image/jpeg',dataBase64:jpegBase64('foto-dois')})})
   const orderedBefore=(await call('/vehicles/1/images',adminToken)).images.map(item=>item.id)
   if(orderedBefore[0]!==imageOne.id||orderedBefore[1]!==imageTwo.id)throw new Error('A ordem inicial das fotos não respeitou o upload.')
   await call('/vehicles/1/images/reorder',adminToken,{method:'PATCH',body:JSON.stringify({order:[imageTwo.id,imageOne.id]})})
@@ -118,7 +126,9 @@ try{
   await expectStatus(403,()=>call(`/publications/${publication.id}`,sellerToken,{method:'PATCH',body:JSON.stringify({status:'completed'})}))
   await expectStatus(409,()=>call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:1,accountId:second.id})}))
   const priorityVehicle=await call('/vehicles',adminToken,{method:'POST',body:JSON.stringify({year:2024,make:'Chevrolet',model:'Tracker',trim:'Premier',price:154900,km:8900,vehicleType:'Carro/picape',location:'São Paulo, SP',transmission:'Automático',fuelType:'Flex',bodyType:'SUV',condition:'Excelente',exteriorColor:'Prateado',interiorColor:'Preto',description:'Veículo para testar prioridade da fila.',status:'Pronto'})})
-  await call(`/vehicles/${priorityVehicle.id}/images`,adminToken,{method:'POST',body:JSON.stringify({name:'prioridade.jpg',mimeType:'image/jpeg',dataBase64:Buffer.from('foto-prioridade').toString('base64')})})
+  await call(`/vehicles/${priorityVehicle.id}/images`,adminToken,{method:'POST',body:JSON.stringify({name:'prioridade-1.jpg',mimeType:'image/jpeg',dataBase64:jpegBase64('foto-prioridade-1')})})
+  for(let index=2;index<=20;index++)await call(`/vehicles/${priorityVehicle.id}/images`,adminToken,{method:'POST',body:JSON.stringify({name:`prioridade-${index}.jpg`,mimeType:'image/jpeg',dataBase64:jpegBase64(`foto-prioridade-${index}`)})})
+  await expectStatus(409,()=>call(`/vehicles/${priorityVehicle.id}/images`,adminToken,{method:'POST',body:JSON.stringify({name:'prioridade-21.jpg',mimeType:'image/jpeg',dataBase64:jpegBase64('foto-prioridade-21')})}))
   const priorityPublication=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:priorityVehicle.id,accountId:first.id})})
   await expectStatus(403,()=>call('/publications/schedule-batch',sellerToken,{method:'PATCH',body:JSON.stringify({ids:[publication.id,priorityPublication.id],startAt:new Date(Date.now()+3600000).toISOString(),intervalMinutes:20})}))
   const batchStart=new Date(Date.now()+2*3600000).toISOString()
@@ -236,7 +246,7 @@ try{
   if(!completedTimeline.events.some(event=>event.eventType==='filling_started'&&event.actor==='Extensão AutoFlow'))throw new Error('O histórico não diferenciou a ação automática da ação humana.')
 
   const photoClone=await call('/vehicles',adminToken,{method:'POST',body:JSON.stringify({year:2019,make:'Renault',model:'Sandero',trim:'Zen',price:45900,km:62000,vehicleType:'Carro/picape',location:'São Paulo, SP',transmission:'Manual',fuelType:'Flex',bodyType:'Hatch',condition:'Excelente',exteriorColor:'Prateado',interiorColor:'Preto',description:'Cadastro duplicado para validar a proteção por foto.',status:'Pronto'})})
-  await call(`/vehicles/${photoClone.id}/images`,adminToken,{method:'POST',body:JSON.stringify({name:'foto-repetida.jpg',mimeType:'image/jpeg',dataBase64:Buffer.from('foto-um').toString('base64')})})
+  await call(`/vehicles/${photoClone.id}/images`,adminToken,{method:'POST',body:JSON.stringify({name:'foto-repetida.jpg',mimeType:'image/jpeg',dataBase64:jpegBase64('foto-um')})})
   await expectStatus(409,()=>call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:photoClone.id,accountId:second.id})}))
 
   await call('/vehicles/1/mark-sold',adminToken,{method:'POST'})
@@ -257,9 +267,8 @@ try{
   if((await call('/reports/issues',adminToken)).issues.some(item=>item.jobId===publication.id))throw new Error('O relatório manteve eventos órfãos após excluir o veículo.')
   await expectStatus(404,()=>call('/vehicles',adminToken,{method:'DELETE',body:JSON.stringify({ids:[1]})}))
 
-  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
+  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
 }finally{
-  server.kill()
-  await new Promise(resolve=>server.once('exit',resolve))
+  if(server.exitCode===null){server.kill();await new Promise(resolve=>server.once('exit',resolve))}
   await rm(dataDir,{recursive:true,force:true})
 }
