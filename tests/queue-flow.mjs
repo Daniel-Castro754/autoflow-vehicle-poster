@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -10,23 +10,44 @@ const base=`http://127.0.0.1:${port}/api`
 const dataDir=await mkdtemp(join(tmpdir(),'autoflow-queue-test-'))
 const extensionOne='test_extension_instance_alpha'
 const extensionTwo='test_extension_instance_beta'
-const server=spawn(process.execPath,['server/server.ts'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),DATA_DIR:dataDir,AUTH_SECRET:'queue-test-secret'},stdio:['ignore','pipe','pipe']})
+const adminEmail='admin-test@autoflow.local'
+const adminPassword='admin-test-password-strong'
+const sellerEmail='seller-test@autoflow.local'
+const sellerPassword='seller-test-password'
+const server=spawn(process.execPath,['server/server.ts'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),DATA_DIR:dataDir,AUTH_SECRET:'queue-test-secret-with-at-least-32-characters',INITIAL_ADMIN_NAME:'Administrador Teste',INITIAL_ADMIN_EMAIL:adminEmail,INITIAL_ADMIN_PASSWORD:adminPassword},stdio:['ignore','pipe','pipe']})
 let serverOutput=''
 server.stdout.on('data',chunk=>serverOutput+=chunk)
 server.stderr.on('data',chunk=>serverOutput+=chunk)
 
 async function waitForServer(){for(let attempt=0;attempt<40;attempt++){try{const response=await fetch(base+'/health');if(response.ok)return}catch{/* API ainda inicializando */}await new Promise(resolve=>setTimeout(resolve,100))}throw new Error(`A API de teste não iniciou. ${serverOutput}`)}
-async function login(email){const response=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:'demo1234'})});const data=await response.json();if(!response.ok)throw new Error(data.error);return data.token}
+async function login(email,password){const response=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});const data=await response.json();if(!response.ok)throw new Error(data.error);return data.token}
 async function call(path,token,options={}){const response=await fetch(base+path,{...options,headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`}});const data=await response.json();if(!response.ok)throw Object.assign(new Error(`${response.status} ${path}: ${data.error}`),{status:response.status,body:data});return data}
 async function expectStatus(status,operation){try{await operation();throw new Error(`A operação deveria responder ${status}.`)}catch(error){if(error.status!==status)throw error}}
 
+async function expectMissingSecretFailure(){
+  const env={...process.env,PORT:'3398',DATA_DIR:join(dataDir,'missing-secret')}
+  delete env.AUTH_SECRET
+  const child=spawn(process.execPath,['server/server.ts'],{cwd:process.cwd(),env,stdio:['ignore','pipe','pipe']})
+  let output='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk)
+  const code=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{child.kill();reject(new Error('O servidor iniciou sem AUTH_SECRET.'))},3000);child.once('exit',value=>{clearTimeout(timer);resolve(value)})})
+  if(code===0||!output.includes('AUTH_SECRET'))throw new Error('A inicialização sem AUTH_SECRET não falhou com uma mensagem clara.')
+}
+
 try{
   await waitForServer()
-  const adminToken=await login('admin@autoflow.local')
-  const sellerToken=await login('marina@autoflow.local')
+  await expectMissingSecretFailure()
+  const allowedCors=await fetch(base+'/health',{headers:{Origin:'http://localhost:5173'}})
+  if(!allowedCors.ok||allowedCors.headers.get('access-control-allow-origin')!=='http://localhost:5173'||!String(allowedCors.headers.get('vary')).includes('Origin'))throw new Error('A origem do painel não recebeu os cabeçalhos CORS esperados.')
+  const deniedCors=await fetch(base+'/health',{headers:{Origin:'https://evil.example'}})
+  if(deniedCors.status!==403||deniedCors.headers.has('access-control-allow-origin'))throw new Error('Uma origem externa recebeu acesso CORS à API.')
+  const contentScript=await readFile('extension-mv2/content.js','utf8')
+  if(/\.innerHTML\s*=/.test(contentScript))throw new Error('O content script voltou a inserir HTML dinâmico diretamente.')
+  const adminToken=await login(adminEmail,adminPassword)
+  await call('/team/users',adminToken,{method:'POST',body:JSON.stringify({name:'Marina Costa',email:sellerEmail,password:sellerPassword,role:'seller'})})
+  const sellerToken=await login(sellerEmail,sellerPassword)
   const team=await call('/team',adminToken)
-  const admin=team.users.find(user=>user.email==='admin@autoflow.local')
-  const marina=team.users.find(user=>user.email==='marina@autoflow.local')
+  const admin=team.users.find(user=>user.email===adminEmail)
+  const marina=team.users.find(user=>user.email===sellerEmail)
   const first=await call('/social-accounts',adminToken,{method:'POST',body:JSON.stringify({userId:admin.id,label:'Facebook Daniel',browserProfile:'Brave Perfil 1'})})
   const second=await call('/social-accounts',adminToken,{method:'POST',body:JSON.stringify({userId:marina.id,label:'Facebook Marina',browserProfile:'Brave Perfil 2'})})
   await call('/settings',adminToken,{method:'PATCH',body:JSON.stringify({organizationName:'AutoPrime Veículos',defaultLocation:'São Paulo, SP',dailyLimit:10,descriptionTemplate:'',autoAdvance:true,fillGroups:true,targetGroups:['Compra-se e Vende-se | https://www.facebook.com/groups/123456','Carros e Motos Criciúma e Região'],autoPublish:false})})

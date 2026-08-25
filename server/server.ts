@@ -6,12 +6,14 @@ import { fileURLToPath } from 'node:url'
 import { randomBytes, scryptSync, timingSafeEqual, createHmac, createHash } from 'node:crypto'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
+const configuredSecret = process.env.AUTH_SECRET?.trim()
+if (!configuredSecret || configuredSecret.length < 32) throw new Error('AUTH_SECRET deve ter pelo menos 32 caracteres.')
+const secret=configuredSecret
 const dataDir = process.env.DATA_DIR ? resolve(process.env.DATA_DIR) : join(root, 'data')
 mkdirSync(dataDir, { recursive: true })
 const uploadsDir = join(dataDir, 'uploads')
 mkdirSync(uploadsDir, { recursive: true })
 const db = new DatabaseSync(join(dataDir, 'autoflow.db'))
-const secret = process.env.AUTH_SECRET || 'dev-only-change-before-production'
 const port = Number(process.env.PORT || 3333)
 
 db.exec(`
@@ -128,7 +130,7 @@ function publicationDuplicateRisk(organizationId:number,vehicleId:number,exclude
   const sameVehicle=db.prepare(`SELECT j.id jobId,j.status,COALESCE(a.label,'Perfil não definido') accountLabel
     FROM publication_jobs j LEFT JOIN social_accounts a ON a.id=j.social_account_id
     WHERE j.organization_id=? AND j.vehicle_id=? AND j.id!=? AND j.status IN ('pending','filling','error','awaiting_confirmation','completed')
-    ORDER BY CASE j.status WHEN 'completed' THEN 0 WHEN 'filling' THEN 1 ELSE 2 END,j.updated_at DESC LIMIT 1`).get(organizationId,vehicleId,excludeJobId) as Record<string,any>|undefined
+    ORDER BY CASE j.status WHEN 'completed' THEN 0 WHEN 'filling' THEN 1 ELSE 2 END,j.updated_at DESC LIMIT 1`).get(organizationId,vehicleId,excludeJobId) as Record<string,unknown>|undefined
   if(sameVehicle)return{type:'same_vehicle',...sameVehicle,message:sameVehicle.status==='completed'?`Este veículo já possui um anúncio publicado no perfil ${sameVehicle.accountLabel}. Marque o anúncio anterior como removido antes de publicar novamente.`:`Este veículo já possui o trabalho #${sameVehicle.jobId} no perfil ${sameVehicle.accountLabel}. Retome o trabalho existente em vez de criar outro.`}
   const sharedPhoto=db.prepare(`SELECT other.vehicle_id vehicleId,v.year,v.make,v.model,j.id jobId,j.status,COALESCE(a.label,'Perfil não definido') accountLabel,
       COUNT(DISTINCT target.content_hash) matchedPhotos
@@ -138,7 +140,7 @@ function publicationDuplicateRisk(organizationId:number,vehicleId:number,exclude
     LEFT JOIN social_accounts a ON a.id=j.social_account_id
     WHERE target.organization_id=? AND target.vehicle_id=? AND target.content_hash!=''
       AND j.status IN ('pending','filling','error','awaiting_confirmation','completed')
-    GROUP BY other.vehicle_id,j.id ORDER BY matchedPhotos DESC,j.updated_at DESC LIMIT 1`).get(organizationId,vehicleId) as Record<string,any>|undefined
+    GROUP BY other.vehicle_id,j.id ORDER BY matchedPhotos DESC,j.updated_at DESC LIMIT 1`).get(organizationId,vehicleId) as Record<string,unknown>|undefined
   if(sharedPhoto)return{type:'shared_photo',...sharedPhoto,message:`As fotos coincidem com o trabalho #${sharedPhoto.jobId} (${sharedPhoto.year} ${sharedPhoto.make} ${sharedPhoto.model}) no perfil ${sharedPhoto.accountLabel}. Use o cadastro existente ou remova o anúncio anterior antes de continuar.`}
   return null
 }
@@ -150,13 +152,15 @@ function parseGroupTarget(value:unknown) {
   const key=(url.match(/facebook\.com\/groups\/([^/?#]+)/i)?.[1]||'').trim()
   return {name:name||key,url,groupKey:key}
 }
-function validateGroupTarget(value:any) {
+function validateGroupTarget(value:unknown) {
   if(typeof value==='string'){
     const parts=value.split('|').map((item:string)=>item.trim()).filter(Boolean)
     const possibleUrl=parts.find((item:string)=>/^https?:\/\//i.test(item))||''
     return Boolean(parseGroupTarget(value).name)&&(!possibleUrl||/^https?:\/\/(?:www\.|m\.)?facebook\.com\/groups\/[^/?#]+/i.test(possibleUrl))
   }
-  const name=String(value?.name||'').trim(),url=String(value?.url||'').trim()
+  if(!value||typeof value!=='object')return false
+  const record=value as Record<string,unknown>
+  const name=String(record.name||'').trim(),url=String(record.url||'').trim()
   return Boolean(name)&&(!url||/^https?:\/\/(?:www\.|m\.)?facebook\.com\/groups\/[^/?#]+/i.test(url))
 }
 function groupTarget(group:{name:string;url:string}) { return group.url?`${group.name} | ${group.url}`:group.name }
@@ -166,10 +170,11 @@ function marketplaceGroups(organizationId:number,activeOnly=false) {
 }
 function replaceMarketplaceGroups(organizationId:number,values:unknown[]) {
   const existing=marketplaceGroups(organizationId),byId=new Map(existing.map(group=>[group.id,group]))
-  const incoming=values.slice(0,20).map((value:any,index)=>{
+  const incoming=values.slice(0,20).map((value,index)=>{
     if(typeof value==='string')return {...parseGroupTarget(value),id:0,active:true,priority:index+1}
-    const parsed=parseGroupTarget(value.url?`${value.name||''} | ${value.url}`:value.name)
-    return {...parsed,id:Number(value.id)||0,active:value.active!==false,priority:Number(value.priority)||index+1}
+    const record=value&&typeof value==='object'?value as Record<string,unknown>:{}
+    const parsed=parseGroupTarget(record.url?`${record.name||''} | ${record.url}`:record.name)
+    return {...parsed,id:Number(record.id)||0,active:record.active!==false,priority:Number(record.priority)||index+1}
   }).filter(group=>group.name)
   const incomingIds=new Set(incoming.map(group=>group.id).filter(Boolean))
   for(const group of existing)if(!incomingIds.has(group.id))db.prepare('DELETE FROM marketplace_groups WHERE id=? AND organization_id=?').run(group.id,organizationId)
@@ -212,8 +217,18 @@ async function jsonBody(req:IncomingMessage) {
   if (!chunks.length) return {}
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
 }
+const configuredOrigins=new Set((process.env.CORS_ORIGINS||'http://localhost:5173,http://127.0.0.1:5173').split(',').map(value=>value.trim()).filter(Boolean))
+function applyCors(req:IncomingMessage,res:ServerResponse) {
+  const origin=String(req.headers.origin||'')
+  const allowed=!origin||configuredOrigins.has(origin)||/^chrome-extension:\/\/[a-p]{32}$/.test(origin)
+  if(origin)res.setHeader('Vary','Origin')
+  if(origin&&allowed)res.setHeader('Access-Control-Allow-Origin',origin)
+  res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization')
+  res.setHeader('Access-Control-Allow-Methods','GET, POST, PATCH, DELETE, OPTIONS')
+  return allowed
+}
 function send(res:ServerResponse, status:number, data:unknown) {
-  res.writeHead(status, { 'Content-Type':'application/json; charset=utf-8', 'Access-Control-Allow-Origin':'*', 'Access-Control-Allow-Headers':'Content-Type, Authorization', 'Access-Control-Allow-Methods':'GET, POST, PATCH, DELETE, OPTIONS' })
+  res.writeHead(status, { 'Content-Type':'application/json; charset=utf-8' })
   res.end(JSON.stringify(data))
 }
 
@@ -261,15 +276,18 @@ function allowedExtensionAccount(accountId:number,auth:{userId:number;organizati
 }
 
 if (!(db.prepare('SELECT id FROM users LIMIT 1').get())) {
-  const org = db.prepare('INSERT INTO organizations (name) VALUES (?)').run('AutoPrime Veículos')
+  const adminName=String(process.env.INITIAL_ADMIN_NAME||'Administrador').trim()
+  const adminEmail=String(process.env.INITIAL_ADMIN_EMAIL||'').trim().toLowerCase()
+  const adminPassword=String(process.env.INITIAL_ADMIN_PASSWORD||'')
+  if(!adminName||!adminEmail.includes('@')||adminPassword.length<12)throw new Error('Banco vazio: configure INITIAL_ADMIN_EMAIL e INITIAL_ADMIN_PASSWORD (mínimo de 12 caracteres).')
+  const org = db.prepare('INSERT INTO organizations (name) VALUES (?)').run(String(process.env.INITIAL_ORGANIZATION_NAME||'AutoFlow').trim()||'AutoFlow')
   const orgId = Number(org.lastInsertRowid)
-  const admin = db.prepare('INSERT INTO users (organization_id,name,email,password_hash,role) VALUES (?,?,?,?,?)').run(orgId,'Daniel Costa','admin@autoflow.local',hashPassword('demo1234'),'admin')
+  const admin = db.prepare('INSERT INTO users (organization_id,name,email,password_hash,role) VALUES (?,?,?,?,?)').run(orgId,adminName,adminEmail,hashPassword(adminPassword),'admin')
   const adminId = Number(admin.lastInsertRowid)
-  const marina = db.prepare('INSERT INTO users (organization_id,name,email,password_hash,role) VALUES (?,?,?,?,?)').run(orgId,'Marina Costa','marina@autoflow.local',hashPassword('demo1234'),'seller')
   const rows = [
-    [2022,'Toyota','Corolla','XEi 2.0',119900,42500,Number(marina.lastInsertRowid),'Pronto','#dce8ef','São Paulo, SP','2022 Toyota Corolla XEi 2.0 com 42.500 km. Único dono, revisões em dia.'],
+    [2022,'Toyota','Corolla','XEi 2.0',119900,42500,adminId,'Pronto','#dce8ef','São Paulo, SP','2022 Toyota Corolla XEi 2.0 com 42.500 km. Único dono, revisões em dia.'],
     [2021,'Jeep','Compass','Longitude',134500,51820,adminId,'Publicado','#dedbd3','São Paulo, SP','2021 Jeep Compass Longitude com 51.820 km. Completo, pneus novos.'],
-    [2023,'Volkswagen','T-Cross','Comfortline',128900,22300,Number(marina.lastInsertRowid),'Rascunho','#d9e2e6','São Paulo, SP','2023 Volkswagen T-Cross Comfortline com 22.300 km.'],
+    [2023,'Volkswagen','T-Cross','Comfortline',128900,22300,adminId,'Rascunho','#d9e2e6','São Paulo, SP','2023 Volkswagen T-Cross Comfortline com 22.300 km.'],
     [2020,'Honda','Civic','Touring',139990,68100,adminId,'Atenção','#e7e4de','São Paulo, SP','2020 Honda Civic Touring com 68.100 km. Revisar documentação antes de publicar.'],
     [2024,'Chevrolet','Tracker','Premier',154900,8900,adminId,'Pronto','#d9e0df','São Paulo, SP','2024 Chevrolet Tracker Premier com 8.900 km. Seminovo, garantia de fábrica.'],
   ]
@@ -293,7 +311,9 @@ db.prepare("UPDATE vehicles SET exterior_color='Prateado' WHERE exterior_color='
 db.prepare("UPDATE vehicles SET interior_color='Preto' WHERE interior_color='' AND exterior_color!=''").run()
 
 createServer(async (req, res) => {
-  if (req.method === 'OPTIONS') return send(res, 204, null)
+  const originAllowed=applyCors(req,res)
+  if (req.method === 'OPTIONS') return originAllowed?send(res,204,null):send(res,403,{error:'Origem não permitida.'})
+  if(!originAllowed)return send(res,403,{error:'Origem não permitida.'})
   try {
     const url = new URL(req.url || '/', 'http://localhost')
     const uploadFile = url.pathname.match(/^\/uploads\/([a-f0-9]{24}\.(?:jpg|jpeg|png|webp))$/)
@@ -302,7 +322,7 @@ createServer(async (req, res) => {
       if (!existsSync(path)) return send(res,404,{error:'Imagem não encontrada.'})
       const ext = uploadFile[1].split('.').pop()
       const mime = ext==='png'?'image/png':ext==='webp'?'image/webp':'image/jpeg'
-      res.writeHead(200,{'Content-Type':mime,'Access-Control-Allow-Origin':'*','Cache-Control':'public, max-age=3600'})
+      res.writeHead(200,{'Content-Type':mime,'Cache-Control':'public, max-age=3600'})
       return res.end(readFileSync(path))
     }
     if (req.method === 'GET' && url.pathname === '/api/health') return send(res,200,{ok:true})
@@ -373,7 +393,7 @@ createServer(async (req, res) => {
       if (job.scheduledAt&&Date.parse(job.scheduledAt)>Date.now()) return send(res,409,{error:'Este trabalho ainda não chegou ao horário agendado.'})
       if (!['pending','filling','error','awaiting_confirmation'].includes(job.status)) return send(res,409,{error:'Este trabalho não está disponível para preenchimento.'})
       if(job.leaseExpiresAt&&Date.parse(job.leaseExpiresAt.replace(' ','T')+'Z')>Date.now())return send(res,409,{error:'Este trabalho já está aberto em outra aba ou instância da extensão.'})
-      let previousReport:Record<string,any>={}
+      let previousReport:Record<string,unknown>={}
       try{previousReport=job.fillReport?JSON.parse(job.fillReport):{}}catch{/* relatório antigo inválido */}
       if(job.status==='awaiting_confirmation'&&previousReport.publishAttempted&&!previousReport.published)return send(res,409,{error:'O Facebook recebeu um clique em Publicar, mas não confirmou o resultado. Verifique Seus classificados e confirme no painel antes de tentar novamente.'})
       const duplicateRisk=publicationDuplicateRisk(auth.organizationId,job.vehicleId,job.id)
@@ -382,7 +402,7 @@ createServer(async (req, res) => {
         v.vehicle_type vehicleType,v.location,v.transmission,v.fuel_type fuelType,v.body_type bodyType,v.exterior_color exteriorColor,v.interior_color interiorColor,v.vehicle_condition condition,
         printf('%d %s %s %s',v.year,v.make,v.model,v.trim) title,
         CASE WHEN length(v.description)>0 THEN v.description ELSE printf('%d %s %s %s com %d km. Entre em contato para consultar disponibilidade e condições.',v.year,v.make,v.model,v.trim,v.km) END description
-        FROM vehicles v WHERE v.id=? AND v.organization_id=?`).get(job.vehicleId,auth.organizationId)
+        FROM vehicles v WHERE v.id=? AND v.organization_id=?`).get(job.vehicleId,auth.organizationId) as Record<string,unknown>|undefined
       if (!vehicle) return send(res,404,{error:'Veículo não encontrado.'})
       const images = db.prepare(`SELECT 'http://127.0.0.1:3333/uploads/'||file_name url,original_name name,mime_type mimeType FROM vehicle_images WHERE vehicle_id=? AND organization_id=? ORDER BY position,id LIMIT 20`).all(job.vehicleId,auth.organizationId)
       const settings=db.prepare(`SELECT auto_advance autoAdvance,fill_groups fillGroups,target_groups targetGroups,auto_publish autoPublish
@@ -543,7 +563,7 @@ createServer(async (req, res) => {
             const placeholders=jobIds.map(()=>'?').join(',')
             db.prepare(`DELETE FROM publication_job_events WHERE organization_id=? AND publication_job_id IN (${placeholders})`).run(auth.organizationId,...jobIds.map(job=>job.id))
           }
-          removedJobs+=db.prepare('DELETE FROM publication_jobs WHERE vehicle_id=? AND organization_id=?').run(item.id,auth.organizationId).changes
+          removedJobs+=Number(db.prepare('DELETE FROM publication_jobs WHERE vehicle_id=? AND organization_id=?').run(item.id,auth.organizationId).changes)
           db.prepare('DELETE FROM vehicle_images WHERE vehicle_id=? AND organization_id=?').run(item.id,auth.organizationId)
           db.prepare('DELETE FROM vehicles WHERE id=? AND organization_id=?').run(item.id,auth.organizationId)
         }
@@ -577,17 +597,17 @@ createServer(async (req, res) => {
         ?db.prepare(`SELECT a.id,a.label,a.browser_profile browserProfile,a.status,a.last_seen_at lastSeenAt,u.name owner
           FROM social_accounts a JOIN users u ON u.id=a.user_id WHERE a.organization_id=? ORDER BY u.name,a.label`).all(auth.organizationId)
         :db.prepare(`SELECT a.id,a.label,a.browser_profile browserProfile,a.status,a.last_seen_at lastSeenAt,u.name owner
-          FROM social_accounts a JOIN users u ON u.id=a.user_id WHERE a.organization_id=? AND a.user_id=? ORDER BY a.label`).all(auth.organizationId,auth.userId)) as Array<any>
+          FROM social_accounts a JOIN users u ON u.id=a.user_id WHERE a.organization_id=? AND a.user_id=? ORDER BY a.label`).all(auth.organizationId,auth.userId)) as Array<{id:number;label:string;browserProfile?:string;status:string;lastSeenAt?:string;owner:string}>
       const settings=db.prepare('SELECT daily_limit dailyLimit,stuck_timeout_minutes stuckTimeoutMinutes FROM organization_settings WHERE organization_id=?').get(auth.organizationId) as {dailyLimit?:number;stuckTimeoutMinutes?:number}|undefined
       const profiles=accounts.map(account=>{
         const latest=db.prepare(`SELECT j.id,j.status,j.paused,j.scheduled_at scheduledAt,j.attempt_count attemptCount,j.fill_report fillReport,j.extension_version extensionVersion,
           j.started_at startedAt,j.updated_at updatedAt,j.lease_expires_at leaseExpiresAt,v.year,v.make,v.model
           FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id WHERE j.organization_id=? AND j.social_account_id=?
-          ORDER BY CASE WHEN j.status IN ('filling','pending','awaiting_confirmation','error') AND j.paused=0 AND (j.scheduled_at IS NULL OR datetime(j.scheduled_at)<=CURRENT_TIMESTAMP) THEN 0 WHEN j.status IN ('filling','pending','awaiting_confirmation','error') AND j.paused=0 THEN 1 WHEN j.status IN ('filling','pending','awaiting_confirmation','error') THEN 2 ELSE 3 END,j.queue_priority,j.updated_at DESC LIMIT 1`).get(auth.organizationId,account.id) as any
+          ORDER BY CASE WHEN j.status IN ('filling','pending','awaiting_confirmation','error') AND j.paused=0 AND (j.scheduled_at IS NULL OR datetime(j.scheduled_at)<=CURRENT_TIMESTAMP) THEN 0 WHEN j.status IN ('filling','pending','awaiting_confirmation','error') AND j.paused=0 THEN 1 WHEN j.status IN ('filling','pending','awaiting_confirmation','error') THEN 2 ELSE 3 END,j.queue_priority,j.updated_at DESC LIMIT 1`).get(auth.organizationId,account.id) as {id:number;status:string;paused:number;scheduledAt?:string;attemptCount?:number;fillReport?:string;extensionVersion?:string;startedAt?:string;updatedAt?:string;leaseExpiresAt?:string;year:number;make:string;model:string}|undefined
         const today=(db.prepare("SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND date(created_at)=date('now') AND status!='canceled'").get(auth.organizationId,account.id) as {total:number}).total
         const successes=(db.prepare("SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND status IN ('completed','removed')").get(auth.organizationId,account.id) as {total:number}).total
         const failures=(db.prepare("SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND status='error'").get(auth.organizationId,account.id) as {total:number}).total
-        let report:any=null
+        let report:{advanced?:boolean;publishAttempted?:boolean;missing?:string[];missingGroups?:string[];flowIssues?:string[]}|null=null
         try{report=latest?.fillReport?JSON.parse(latest.fillReport):null}catch{/* relatório antigo inválido */}
         const scheduled=latest?.scheduledAt&&Date.parse(latest.scheduledAt)>Date.now()
         let stage=!latest?'Sem atividade':latest.paused?'Pausado pelo painel':scheduled?'Aguardando horário agendado':latest.status==='pending'?'Na fila':latest.status==='filling'?'Preenchendo dados':latest.status==='error'?'Erro — requer revisão':latest.status==='awaiting_confirmation'?(report?.advanced?'Etapa final / revisão':'Dados preenchidos'):latest.status==='completed'?'Publicado':latest.status==='removed'?'Anúncio removido':'Encerrado'
@@ -614,7 +634,7 @@ createServer(async (req, res) => {
         COALESCE(u.name,'Não atribuído') seller FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id
         LEFT JOIN social_accounts a ON a.id=j.social_account_id LEFT JOIN users u ON u.id=v.assigned_user_id
         WHERE j.organization_id=? ORDER BY CASE WHEN j.status IN ('pending','filling','error','awaiting_confirmation') THEN 0 ELSE 1 END,j.paused,j.queue_priority,j.created_at DESC`).all(auth.organizationId)
-      const jobs=rows.map((item:any)=>{try{return{...item,fillReport:item.fillReport?JSON.parse(item.fillReport):null}}catch{return{...item,fillReport:null}}})
+      const jobs=(rows as Array<Record<string,unknown>>).map(item=>{try{return{...item,fillReport:item.fillReport?JSON.parse(String(item.fillReport)):null}}catch{return{...item,fillReport:null}}})
       return send(res,200,{jobs})
     }
     if(req.method==='GET'&&url.pathname==='/api/reports/issues'){
@@ -627,22 +647,22 @@ createServer(async (req, res) => {
         JOIN vehicles v ON v.id=j.vehicle_id LEFT JOIN social_accounts a ON a.id=j.social_account_id
         LEFT JOIN users u ON u.id=v.assigned_user_id WHERE event.organization_id=?
         AND event.event_type IN ('fill_error','filled_waiting_confirmation','stalled_recovered','duplicate_blocked')
-        ORDER BY datetime(event.created_at) DESC,event.id DESC`).all(auth.organizationId) as Array<Record<string,any>>
+        ORDER BY datetime(event.created_at) DESC,event.id DESC`).all(auth.organizationId) as Array<{eventId:number;eventType:string;details:string;occurredAt:string;jobId:number;jobStatus:string;extensionVersion?:string;year:number;make:string;model:string;accountLabel:string;seller:string;latestIssueEventId?:number}>
       const issues:Array<Record<string,unknown>>=[]
       for(const row of rows){
-        let details:Record<string,any>={}
+        let details:Record<string,unknown>={}
         try{details=JSON.parse(String(row.details||'{}'))}catch{/* evento antigo sem JSON válido */}
         const base={eventId:row.eventId,jobId:row.jobId,jobStatus:row.jobStatus,extensionVersion:String(details.extensionVersion||row.extensionVersion||''),year:row.year,make:row.make,model:row.model,accountLabel:row.accountLabel,seller:row.seller,occurredAt:row.occurredAt}
         const active=Number(row.eventId)===Number(row.latestIssueEventId)&&((row.eventType==='fill_error'&&row.jobStatus==='error')||(row.eventType==='filled_waiting_confirmation'&&row.jobStatus==='awaiting_confirmation')||(row.eventType==='duplicate_blocked'&&['pending','awaiting_confirmation'].includes(row.jobStatus)))
         const add=(severity:'error'|'warning',category:string,message:string)=>issues.push({...base,severity,category,message:String(message).slice(0,300),active})
-        if(row.eventType==='fill_error')add('error','execution',details.error||'Falha durante o preenchimento no Facebook.')
+        if(row.eventType==='fill_error')add('error','execution',String(details.error||'Falha durante o preenchimento no Facebook.'))
         if(row.eventType==='filled_waiting_confirmation'){
           for(const field of Array.isArray(details.missing)?details.missing:[])add('warning','fields',`Campo não confirmado: ${field}`)
           for(const group of Array.isArray(details.missingGroups)?details.missingGroups:[])add('warning','groups',`Grupo não encontrado: ${group}`)
           for(const issue of Array.isArray(details.flowIssues)?details.flowIssues:[])add('warning','flow',issue)
         }
         if(row.eventType==='stalled_recovered')add('warning','recovery',`Execução travada recuperada${Number(details.elapsedMinutes)>0?` após ${details.elapsedMinutes} min`:''}.`)
-        if(row.eventType==='duplicate_blocked')add('warning','duplicate',details.message||'Possível anúncio duplicado bloqueado antes do envio ao Facebook.')
+        if(row.eventType==='duplicate_blocked')add('warning','duplicate',String(details.message||'Possível anúncio duplicado bloqueado antes do envio ao Facebook.'))
       }
       return send(res,200,{issues,generatedAt:new Date().toISOString(),definitions:{errors:'Falhas que interromperam uma tentativa de preenchimento.',warnings:'Campos, grupos, etapas ou recuperações que exigiram atenção.'}})
     }
@@ -656,8 +676,8 @@ createServer(async (req, res) => {
         COALESCE(user.name,'Extensão AutoFlow') actor,previous.label fromAccount,next.label toAccount
         FROM publication_job_events event LEFT JOIN users user ON user.id=event.created_by
         LEFT JOIN social_accounts previous ON previous.id=event.from_account_id LEFT JOIN social_accounts next ON next.id=event.to_account_id
-        WHERE event.organization_id=? AND event.publication_job_id=? ORDER BY datetime(event.created_at) DESC,event.id DESC`).all(auth.organizationId,job.id) as Array<Record<string,any>>
-      const events=rows.map(row=>{try{return{...row,details:JSON.parse(String(row.details||'{}'))}}catch{return{...row,details:{}}}})
+        WHERE event.organization_id=? AND event.publication_job_id=? ORDER BY datetime(event.created_at) DESC,event.id DESC`).all(auth.organizationId,job.id) as Array<{id:number;eventType:string;details:string;createdAt:string;actor:string;fromAccount:string|null;toAccount:string|null}>
+      const events=rows.map(row=>{let details:Record<string,unknown>={};try{details=JSON.parse(String(row.details||'{}'))}catch{/* evento antigo sem JSON válido */}return{...row,details}})
       if(!events.some(event=>event.eventType==='created'))events.push({id:0,eventType:'created',details:{accountLabel:job.accountLabel},createdAt:job.createdAt,actor:'Sistema',fromAccount:null,toAccount:null})
       events.sort((a,b)=>Date.parse(String(b.createdAt))-Date.parse(String(a.createdAt))||Number(b.id)-Number(a.id))
       return send(res,200,{job,events})
@@ -686,7 +706,7 @@ createServer(async (req, res) => {
       const b = await jsonBody(req) as Record<string,unknown>
       const vehicle = db.prepare(`SELECT id,year,make,model,price,km,location,description,vehicle_type vehicleType,
         transmission,fuel_type fuelType,body_type bodyType,exterior_color exteriorColor,interior_color interiorColor,vehicle_condition condition
-        FROM vehicles WHERE id=? AND organization_id=?`).get(Number(b.vehicleId),auth.organizationId) as Record<string,any>|undefined
+        FROM vehicles WHERE id=? AND organization_id=?`).get(Number(b.vehicleId),auth.organizationId) as {id:number;year:number;make:string;model:string;price:number;km:number;location:string;description:string;vehicleType:string;transmission:string;fuelType:string;bodyType:string;exteriorColor:string;interiorColor:string;condition:string}|undefined
       if (!vehicle) return send(res,400,{error:'Veículo inválido.'})
       const imageCount = (db.prepare('SELECT COUNT(*) c FROM vehicle_images WHERE vehicle_id=? AND organization_id=?').get(vehicle.id,auth.organizationId) as {c:number}).c
       const missing:string[] = []
@@ -908,9 +928,9 @@ createServer(async (req, res) => {
       const autoPublish=b.autoPublish===true
       const targetGroups=Array.isArray(b.targetGroups)?[...new Set(b.targetGroups.map(value=>String(value).trim()).filter(Boolean))].slice(0,20):[]
       const groupRecords=Array.isArray(b.groups)?b.groups:targetGroups
-      if(groupRecords.some((value:any)=>!validateGroupTarget(value)))return send(res,400,{error:'Informe um nome e uma URL valida do Facebook para cada grupo.'})
+      if(groupRecords.some((value:unknown)=>!validateGroupTarget(value)))return send(res,400,{error:'Informe um nome e uma URL valida do Facebook para cada grupo.'})
       if(fillGroups&&!autoAdvance)return send(res,400,{error:'Ative o avanço automático para selecionar grupos.'})
-      if(fillGroups&&!groupRecords.some((value:any)=>validateGroupTarget(value)&&(typeof value==='string'||value.active!==false)))return send(res,400,{error:'Mantenha pelo menos um grupo ativo para preencher.'})
+      if(fillGroups&&!groupRecords.some((value:unknown)=>validateGroupTarget(value)&&(typeof value==='string'||(Boolean(value)&&typeof value==='object'&&(value as Record<string,unknown>).active!==false))))return send(res,400,{error:'Mantenha pelo menos um grupo ativo para preencher.'})
       if(autoPublish&&!autoAdvance)return send(res,400,{error:'Ative o avanço automático antes da publicação automática.'})
       db.prepare('UPDATE organizations SET name=? WHERE id=?').run(String(b.organizationName).trim(),auth.organizationId)
       db.prepare(`UPDATE organization_settings SET default_location=?,daily_limit=?,stuck_timeout_minutes=?,require_confirmation=?,description_template=?,auto_advance=?,fill_groups=?,target_groups=?,auto_publish=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=?`)

@@ -4,15 +4,15 @@ Painel inicial para estoque, atribuição de vendedores e acompanhamento da fila
 
 ## Rodar localmente
 
-```bash
+```powershell
 npm install
+$env:AUTH_SECRET = "substitua-por-um-segredo-aleatorio-com-32-caracteres"
+$env:INITIAL_ADMIN_EMAIL = "voce@empresa.com"
+$env:INITIAL_ADMIN_PASSWORD = "uma-senha-inicial-forte"
 npm run dev
 ```
 
-## Acesso de demonstração
-
-- E-mail: `admin@autoflow.local`
-- Senha: `demo1234`
+Na primeira execução com um banco vazio, `INITIAL_ADMIN_EMAIL` e `INITIAL_ADMIN_PASSWORD` criam o administrador inicial. A senha deve ter pelo menos 12 caracteres. Nas execuções seguintes, somente `AUTH_SECRET` continua obrigatório. Use `CORS_ORIGINS` para liberar origens adicionais do painel, separadas por vírgula; por padrão, somente `http://localhost:5173`, `http://127.0.0.1:5173` e extensões do Chromium podem acessar a API.
 
 O comando `npm run dev` inicia o painel em `http://localhost:5173` e a API em `http://localhost:3333`.
 
@@ -47,6 +47,6 @@ O comando `npm run dev` inicia o painel em `http://localhost:5173` e a API em `h
 
 As lacunas encontradas na comparação com ferramentas similares e o roadmap recomendado estão em [COMPETITIVE_ANALYSIS.md](./COMPETITIVE_ANALYSIS.md).
 
-O banco de desenvolvimento fica em `data/autoflow.db` e não deve ser versionado. Antes de produção, configure `AUTH_SECRET` e migre o banco para PostgreSQL. Nenhuma credencial ou sessão do Facebook é armazenada.
+O banco de desenvolvimento fica em `data/autoflow.db` e não deve ser versionado. Antes de produção, migre o banco para PostgreSQL. Nenhuma credencial ou sessão do Facebook é armazenada.
 
 Para testes isolados, `DATA_DIR` permite escolher outra pasta de banco e uploads, e `PORT` altera a porta da API.

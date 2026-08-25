@@ -10,7 +10,7 @@ import {
   VEHICLE_STATUSES, VEHICLE_TYPES, VEHICLE_YEARS, withLegacyOption,
 } from './vehicleOptions'
 
-type ApiFn = (path:string, options?:RequestInit) => Promise<any>
+type ApiFn = <T=Record<string,unknown>>(path:string, options?:RequestInit) => Promise<T>
 type AccountOption = { id:number; label:string; browserProfile?:string }
 type MenuState = { vehicleId:number; top:number; left:number }
 
@@ -122,7 +122,7 @@ export default function VehiclesView({api,vehicles,accounts,reload,notify}:{api:
   async function remove(ids:number[]) {
     if (!ids.length || !window.confirm(`Excluir ${ids.length} veículo${ids.length>1?'s':''}? Fotos e publicações relacionadas também serão removidas.`)) return
     try {
-      const result = await api('/vehicles',{method:'DELETE',body:JSON.stringify({ids})})
+      const result = await api<{deleted:number}>('/vehicles',{method:'DELETE',body:JSON.stringify({ids})})
       setSelected(new Set()); setMenu(null)
       notify(`${result.deleted} veículo${result.deleted===1?'':'s'} excluído${result.deleted===1?'':'s'}.`)
       await reload()
@@ -206,7 +206,7 @@ function VehicleDrawer({api,vehicle,onClose,onSaved}:{api:ApiFn;vehicle:VehicleR
   const [saving,setSaving] = useState(false)
   const [error,setError] = useState('')
 
-  useEffect(() => { if(vehicle) api(`/vehicles/${vehicle.id}/images`).then(data=>setImages(data.images)).catch(()=>setImages([])) }, [vehicle?.id])
+  useEffect(() => { if(vehicle) api<{images:ImageRecord[]}>(`/vehicles/${vehicle.id}/images`).then(data=>setImages(data.images)).catch(()=>setImages([])) }, [api,vehicle])
 
   async function upload(vehicleId:number) {
     for (const file of files.slice(0,20-images.length)) await api(`/vehicles/${vehicleId}/images`,{method:'POST',body:JSON.stringify(await filePayload(file))})
@@ -226,7 +226,7 @@ function VehicleDrawer({api,vehicle,onClose,onSaved}:{api:ApiFn;vehicle:VehicleR
     try {
       let id=vehicle?.id
       if (id) await api(`/vehicles/${id}`,{method:'PATCH',body:JSON.stringify(payload)})
-      else id=(await api('/vehicles',{method:'POST',body:JSON.stringify(payload)})).id
+      else id=(await api<{id:number}>('/vehicles',{method:'POST',body:JSON.stringify(payload)})).id
       await upload(id!)
       await onSaved(vehicle?'Veículo atualizado com sucesso.':'Veículo adicionado ao estoque.')
     } catch (caught) { setError(caught instanceof Error?caught.message:'Erro ao salvar veículo'); setSaving(false) }

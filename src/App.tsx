@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { BarChart3, Bell, Car, Check, CheckCheck, ChevronDown, CircleAlert, LayoutDashboard, Laptop, Menu, Moon, MoreHorizontal, Plus, Send, Settings, ShieldCheck, Sun, Trash2, UserPlus, Users, X } from 'lucide-react'
 import { OverviewView, PublicationsView, ReportsView, SettingsView } from './Views'
 import VehiclesView, { type VehicleRecord } from './Vehicles'
@@ -41,31 +41,43 @@ export default function App() {
   const [team, setTeam] = useState<TeamUser[]>([])
   const [accounts, setAccounts] = useState<SocialAccount[]>([])
 
-  async function api(path:string, options:RequestInit = {}) {
+  const api=useCallback(async <T=Record<string,unknown>,>(path:string, options:RequestInit = {}):Promise<T> => {
     const response = await fetch(`${API}${path}`, { ...options, headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`, ...options.headers} })
     const data = await response.json()
     if (!response.ok) throw Object.assign(new Error(data.error || 'Não foi possível concluir a operação.'), {missing: data.missing})
-    return data
-  }
+    return data as T
+  },[token])
 
-  async function loadVehicles(activeToken = token) {
+  const loadVehicles=useCallback(async (activeToken = token) => {
     const response = await fetch(`${API}/vehicles`, { headers:{Authorization:`Bearer ${activeToken}`} })
     if (response.status === 401) { localStorage.removeItem('autoflow_token'); setToken(''); setLoading(false); return }
     const data = await response.json(); setVehicles(data.vehicles); setLoading(false)
-  }
+  },[token])
 
-  useEffect(() => { if (token) loadVehicles() }, [token])
-  useEffect(() => { if (token) loadOrganizationName() }, [token])
-  useEffect(() => { if (token) loadTeam() }, [token])
-
-  async function loadTeam() {
-    try { const data = await api('/team'); setTeam(data.users); setAccounts(data.accounts) }
+  const loadTeam=useCallback(async () => {
+    try { const data = await api<{users:TeamUser[];accounts:SocialAccount[]}>('/team'); setTeam(data.users); setAccounts(data.accounts) }
     catch (error) { setToast(error instanceof Error ? error.message : 'Erro ao carregar equipe') }
-  }
+  },[api])
 
-  async function loadOrganizationName() {
-    try { const data = await api('/settings'); setOrganizationName(data.organization.name) } catch { /* login flow handles invalid sessions */ }
-  }
+  const loadOrganizationName=useCallback(async () => {
+    try { const data = await api<{organization:{name:string}}>('/settings'); setOrganizationName(data.organization.name) } catch { /* login flow handles invalid sessions */ }
+  },[api])
+
+  useEffect(() => {
+    if(!token)return
+    void fetch(`${API}/vehicles`,{headers:{Authorization:`Bearer ${token}`}}).then(async response=>{
+      if(response.status===401){localStorage.removeItem('autoflow_token');setToken('');setLoading(false);return}
+      const data=await response.json();setVehicles(data.vehicles);setLoading(false)
+    })
+  },[token])
+  useEffect(() => {
+    if(!token)return
+    void api<{organization:{name:string}}>('/settings').then(data=>setOrganizationName(data.organization.name)).catch(()=>{})
+  },[token,api])
+  useEffect(() => {
+    if(!token)return
+    void api<{users:TeamUser[];accounts:SocialAccount[]}>('/team').then(data=>{setTeam(data.users);setAccounts(data.accounts)}).catch(error=>setToast(error instanceof Error?error.message:'Erro ao carregar equipe'))
+  },[token,api])
 
   function changeTheme(next:'light'|'dark') {
     setTheme(next); localStorage.setItem('autoflow_theme',next)
@@ -166,5 +178,5 @@ function TeamView({team,accounts,onAddUser,onAddAccount}:{team:TeamUser[];accoun
 }
 
 function Login({onSubmit,error,loading,theme}:{onSubmit:(e:React.FormEvent<HTMLFormElement>)=>void,error:string,loading:boolean,theme:'light'|'dark'}) {
-  return <div className={`login-page ${theme==='dark'?'theme-dark':''}`}><section className="login-aside"><div className="brand light"><span className="brand-mark"><Car size={22}/></span><span>AutoFlow</span></div><div><span className="eyebrow light-text">OPERAÇÃO MULTICONTA</span><h1>Seu estoque pronto para vender, em um só lugar.</h1><p>Organize veículos, vendedores e filas de publicação sem compartilhar credenciais pessoais.</p></div><small>Ambiente local seguro para desenvolvimento</small></section><main className="login-main"><form className="login-card" onSubmit={onSubmit}><span className="login-logo"><Car/></span><h2>Bem-vindo</h2><p>Acesse o painel da sua empresa.</p>{error&&<div className="auth-error"><CircleAlert size={16}/>{error}</div>}<label>E-mail<input name="email" type="email" defaultValue="admin@autoflow.local" required/></label><label>Senha<input name="password" type="password" defaultValue="demo1234" required/></label><button className="primary" disabled={loading}>{loading?'Entrando...':'Entrar no painel'}</button><small>Conta de demonstração preenchida automaticamente.</small></form></main></div>
+  return <div className={`login-page ${theme==='dark'?'theme-dark':''}`}><section className="login-aside"><div className="brand light"><span className="brand-mark"><Car size={22}/></span><span>AutoFlow</span></div><div><span className="eyebrow light-text">OPERAÇÃO MULTICONTA</span><h1>Seu estoque pronto para vender, em um só lugar.</h1><p>Organize veículos, vendedores e filas de publicação sem compartilhar credenciais pessoais.</p></div><small>Ambiente local seguro para desenvolvimento</small></section><main className="login-main"><form className="login-card" onSubmit={onSubmit}><span className="login-logo"><Car/></span><h2>Bem-vindo</h2><p>Acesse o painel da sua empresa.</p>{error&&<div className="auth-error"><CircleAlert size={16}/>{error}</div>}<label>E-mail<input name="email" type="email" autoComplete="email" required/></label><label>Senha<input name="password" type="password" autoComplete="current-password" required/></label><button className="primary" disabled={loading}>{loading?'Entrando...':'Entrar no painel'}</button><small>Use as credenciais definidas na configuração inicial.</small></form></main></div>
 }
