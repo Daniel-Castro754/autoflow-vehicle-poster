@@ -784,7 +784,12 @@ createServer(async (req, res) => {
       return send(res,200,{jobs})
     }
     if(req.method==='GET'&&url.pathname==='/api/reports/issues'){
-      const rows=db.prepare(`SELECT event.id eventId,event.event_type eventType,event.details,event.created_at occurredAt,
+      type IssueEventRow={eventId:number;eventType:string;details:string;occurredAt:string;jobId:number;jobStatus:string;extensionVersion?:string;year:number;make:string;model:string;accountLabel:string;seller:string;latestIssueEventId?:number}
+      const paginated=url.searchParams.has('limit')||url.searchParams.has('before')
+      const limit=Math.max(1,Math.min(100,Math.floor(Number(url.searchParams.get('limit'))||50)))
+      const beforeRaw=url.searchParams.get('before'),before=beforeRaw===null?null:Number(beforeRaw)
+      if(before!==null&&(!Number.isInteger(before)||before<=0))return send(res,400,{error:'Cursor de paginação inválido.'})
+      const baseIssueSql=`SELECT event.id eventId,event.event_type eventType,event.details,event.created_at occurredAt,
         j.id jobId,j.status jobStatus,j.extension_version extensionVersion,v.year,v.make,v.model,
         COALESCE(a.label,'Perfil não definido') accountLabel,COALESCE(u.name,'Não atribuído') seller,
         (SELECT MAX(latest.id) FROM publication_job_events latest WHERE latest.publication_job_id=j.id
@@ -792,10 +797,15 @@ createServer(async (req, res) => {
         FROM publication_job_events event JOIN publication_jobs j ON j.id=event.publication_job_id
         JOIN vehicles v ON v.id=j.vehicle_id LEFT JOIN social_accounts a ON a.id=j.social_account_id
         LEFT JOIN users u ON u.id=v.assigned_user_id WHERE event.organization_id=?
-        AND event.event_type IN ('fill_error','filled_waiting_confirmation','stalled_recovered','duplicate_blocked')
-        ORDER BY datetime(event.created_at) DESC,event.id DESC`).all(auth.organizationId) as Array<{eventId:number;eventType:string;details:string;occurredAt:string;jobId:number;jobStatus:string;extensionVersion?:string;year:number;make:string;model:string;accountLabel:string;seller:string;latestIssueEventId?:number}>
+        AND event.event_type IN ('fill_error','filled_waiting_confirmation','stalled_recovered','duplicate_blocked')`
+      let rows:IssueEventRow[]
+      if(paginated)rows=(before===null
+        ?db.prepare(`${baseIssueSql} ORDER BY event.id DESC LIMIT ?`).all(auth.organizationId,limit+1)
+        :db.prepare(`${baseIssueSql} AND event.id<? ORDER BY event.id DESC LIMIT ?`).all(auth.organizationId,before,limit+1)) as IssueEventRow[]
+      else rows=db.prepare(`${baseIssueSql} ORDER BY datetime(event.created_at) DESC,event.id DESC`).all(auth.organizationId) as IssueEventRow[]
+      const hasMore=paginated&&rows.length>limit,pageRows=paginated?rows.slice(0,limit):rows
       const issues:Array<Record<string,unknown>>=[]
-      for(const row of rows){
+      for(const row of pageRows){
         let details:Record<string,unknown>={}
         try{details=JSON.parse(String(row.details||'{}'))}catch{/* evento antigo sem JSON válido */}
         const base={eventId:row.eventId,jobId:row.jobId,jobStatus:row.jobStatus,extensionVersion:String(details.extensionVersion||row.extensionVersion||''),year:row.year,make:row.make,model:row.model,accountLabel:row.accountLabel,seller:row.seller,occurredAt:row.occurredAt}
@@ -810,7 +820,8 @@ createServer(async (req, res) => {
         if(row.eventType==='stalled_recovered')add('warning','recovery',`Execução travada recuperada${Number(details.elapsedMinutes)>0?` após ${details.elapsedMinutes} min`:''}.`)
         if(row.eventType==='duplicate_blocked')add('warning','duplicate',String(details.message||'Possível anúncio duplicado bloqueado antes do envio ao Facebook.'))
       }
-      return send(res,200,{issues,generatedAt:new Date().toISOString(),definitions:{errors:'Falhas que interromperam uma tentativa de preenchimento.',warnings:'Campos, grupos, etapas ou recuperações que exigiram atenção.'}})
+      const page=paginated?{limit,hasMore,nextCursor:hasMore?pageRows.at(-1)?.eventId||null:null}:undefined
+      return send(res,200,{issues,generatedAt:new Date().toISOString(),definitions:{errors:'Falhas que interromperam uma tentativa de preenchimento.',warnings:'Campos, grupos, etapas ou recuperações que exigiram atenção.'},...(page?{page}:{})})
     }
     const publicationTimeline=url.pathname.match(/^\/api\/publications\/(\d+)\/timeline$/)
     if(req.method==='GET'&&publicationTimeline){

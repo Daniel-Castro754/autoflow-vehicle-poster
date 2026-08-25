@@ -279,6 +279,12 @@ try{
   await expectStatus(409,()=>call(`/publications/${publication.id}`,adminToken,{method:'PATCH',body:JSON.stringify({status:'pending'})}))
   issueReport=await call('/reports/issues',adminToken)
   if(!issueReport.issues.some(item=>item.jobId===publication.id&&item.category==='recovery')||issueReport.issues.some(item=>item.jobId===publication.id&&item.active))throw new Error('O relatório não preservou o histórico ou deixou pendências após a conclusão.')
+  const firstIssuePage=await call('/reports/issues?limit=1',adminToken)
+  if(!firstIssuePage.page||!firstIssuePage.page.hasMore||!firstIssuePage.page.nextCursor||!firstIssuePage.issues.length)throw new Error('A primeira página de ocorrências não retornou cursor válido.')
+  const secondIssuePage=await call(`/reports/issues?limit=1&before=${firstIssuePage.page.nextCursor}`,adminToken)
+  const firstEventIds=new Set(firstIssuePage.issues.map(item=>item.eventId))
+  if(!secondIssuePage.issues.length||secondIssuePage.issues.some(item=>firstEventIds.has(item.eventId)))throw new Error('A paginação repetiu ou perdeu o próximo evento.')
+  await expectStatus(400,()=>call('/reports/issues?limit=1&before=invalid',adminToken))
   const completedTimeline=await call(`/publications/${publication.id}/timeline`,adminToken)
   const completedEvents=new Set(completedTimeline.events.map(event=>event.eventType))
   for(const type of ['created','filling_started','fill_error','stalled_recovered','filled_waiting_confirmation','hidden_from_extension','shown_in_extension','retry_requested','auto_published'])if(!completedEvents.has(type))throw new Error(`O histórico da extensão não registrou o evento ${type}.`)
@@ -306,7 +312,7 @@ try{
   if((await call('/reports/issues',adminToken)).issues.some(item=>item.jobId===publication.id))throw new Error('O relatório manteve eventos órfãos após excluir o veículo.')
   await expectStatus(404,()=>call('/vehicles',adminToken,{method:'DELETE',body:JSON.stringify({ids:[1]})}))
 
-  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,stateTransitions:true,terminalVehicleStatuses:true,sqliteWal:true,sqliteIndexes:true,aggregatedAutomationQueries:true,reusedAutomationStatements:true,manifestV3:true,alarmHeartbeat:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
+  console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,stateTransitions:true,terminalVehicleStatuses:true,sqliteWal:true,sqliteIndexes:true,aggregatedAutomationQueries:true,reusedAutomationStatements:true,manifestV3:true,alarmHeartbeat:true,issueCursorPagination:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
 }finally{
   if(server.exitCode===null){server.kill();await new Promise(resolve=>server.once('exit',resolve))}
   await rm(dataDir,{recursive:true,force:true})
