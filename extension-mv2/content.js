@@ -436,7 +436,7 @@
     return {selected,missing}
   }
 
-  async function publishListing(beforeClick){
+  async function publishListing(beforeClick,checkPermission){
     if(hasHumanChallenge())return false
     if(marketplaceStage()!=='groups')return false
     const button=await waitForDom(()=>actionButton(['Publicar','Publish']),18000)
@@ -448,6 +448,7 @@
     if(hasHumanChallenge())return false
     const current=actionButton(['Publicar','Publish'])||button
     if(!controlEnabled(current))return false
+    if(checkPermission)await checkPermission()
     firePointerClick(current)
     return Boolean(await waitForDom(()=>{
       if(hasHumanChallenge())return false
@@ -519,7 +520,7 @@
         publishAttempted=true
         const currentResults=[...resultMap.values()]
         const reportBeforePublish={filledCount:currentResults.filter(item=>item[1]).length,totalCount:currentResults.length,imageCount,missing:currentResults.filter(item=>!item[1]).map(item=>item[0]),fields:currentResults.map(item=>({name:item[0],ok:Boolean(item[1])})),advanced,selectedGroups,missingGroups:[],flowIssues:[],publishAttempted:true}
-        published=await publishListing(()=>runtimeMessage({type:'AUTOFLOW_PUBLISH_STARTED',jobId,report:reportBeforePublish}))
+        published=await publishListing(()=>runtimeMessage({type:'AUTOFLOW_PUBLISH_STARTED',jobId,report:reportBeforePublish}),()=>runtimeMessage({type:'AUTOFLOW_PUBLISH_CHECK',jobId}))
         if(!published){
           flowIssues.push('O clique em Publicar foi feito, mas o Facebook não confirmou o resultado. Verifique Seus classificados antes de liberar uma nova tentativa.')
           chrome.runtime.sendMessage({type:'AUTOFLOW_PUBLISH_ABORTED',jobId})
