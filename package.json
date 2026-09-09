@@ -10,7 +10,8 @@
     "build": "tsc -b && vite build",
     "test:queue": "node tests/queue-flow.mjs",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:stock": "node tests/stock-state.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "6.0.5",

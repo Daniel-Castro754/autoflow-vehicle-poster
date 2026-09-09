@@ -142,8 +142,8 @@ export default function VehiclesView({api,vehicles,accounts,reload,notify}:{api:
   async function markSold(vehicleId:number) {
     setMenu(null)
     try {
-      await api(`/vehicles/${vehicleId}/mark-sold`,{method:'POST'})
-      notify('Veículo marcado como vendido. Lembre-se de remover o anúncio do Facebook em até 24h.')
+      const result=await api<{reviewJobs:number}>(`/vehicles/${vehicleId}/mark-sold`,{method:'POST'})
+      notify(result.reviewJobs?'Veículo vendido. Há publicações em andamento para conferir no Facebook; revise em Publicações.':'Veículo vendido. Trabalhos pendentes foram cancelados; remova os anúncios que já estavam publicados.')
       await reload()
     } catch (error) { notify(error instanceof Error ? error.message : 'Erro ao marcar veículo como vendido') }
   }
@@ -176,7 +176,7 @@ export default function VehiclesView({api,vehicles,accounts,reload,notify}:{api:
 
     {menu && menuVehicle && createPortal(<><button className="row-menu-backdrop" onClick={()=>setMenu(null)} aria-label="Fechar ações"/><div className="row-menu floating-row-menu" style={{top:menu.top,left:menu.left}} role="menu">
       <div className="row-menu-action"><button onClick={()=>{setEditor(menuVehicle);setMenu(null)}}><Edit3/>Editar e gerenciar fotos</button></div>
-      <div className="row-menu-action"><button onClick={()=>{setQueueVehicle(menuVehicle);setMenu(null)}}><Send/>Adicionar à fila</button><HelpTip text="Escolha o perfil do Brave. A extensão seguirá as etapas de avanço, grupos e publicação definidas em Configurações." placement="bottom"/></div>
+      {menuVehicle.status!=='Vendido'&&<div className="row-menu-action"><button onClick={()=>{setQueueVehicle(menuVehicle);setMenu(null)}}><Send/>Adicionar à fila</button><HelpTip text="Escolha o perfil do Brave. A extensão seguirá as etapas de avanço, grupos e publicação definidas em Configurações." placement="bottom"/></div>}
       {menuVehicle.status!=='Vendido'&&<div className="row-menu-action"><button onClick={()=>markSold(menuVehicle.id)}><Tag/>Marcar como vendido</button><HelpTip tone="warning" text="Remova o anúncio do Facebook em até 24h após a venda. O AutoFlow vai lembrar você." placement="bottom"/></div>}
       <div className="row-menu-action danger"><button onClick={()=>remove([menuVehicle.id])}><Trash2/>Excluir veículo</button><HelpTip tone="warning" text="Também remove fotos e históricos de publicação deste veículo." placement="bottom"/></div>
     </div></>,document.body)}

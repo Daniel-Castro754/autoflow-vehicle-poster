@@ -387,6 +387,18 @@ function canWriteVehicle(vehicleId:number,auth:AuthContext) {
     ?db.prepare('SELECT id FROM vehicles WHERE id=? AND organization_id=?').get(vehicleId,auth.organizationId)
     :db.prepare('SELECT id FROM vehicles WHERE id=? AND organization_id=? AND assigned_user_id=?').get(vehicleId,auth.organizationId,auth.userId))
 }
+function refreshVehiclePublicationStatus(vehicleId:number,organizationId:number) {
+  db.prepare(`UPDATE vehicles SET status=CASE
+    WHEN EXISTS (SELECT 1 FROM publication_jobs WHERE vehicle_id=? AND organization_id=? AND status='completed') THEN 'Publicado'
+    ELSE 'Pronto' END,updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND organization_id=? AND status!='Vendido' AND sold_at IS NULL`)
+    .run(vehicleId,organizationId,vehicleId,organizationId)
+}
+function jobsIncludeSoldVehicle(ids:number[],organizationId:number) {
+  return ids.length>0&&Boolean(db.prepare(`SELECT j.id FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id
+    WHERE j.organization_id=? AND j.id IN (${ids.map(()=>'?').join(',')}) AND (v.status='Vendido' OR v.sold_at IS NOT NULL) LIMIT 1`)
+    .get(organizationId,...ids))
+}
 function canWriteImage(imageId:number,auth:AuthContext) {
   return Boolean(isAdmin(auth)
     ?db.prepare('SELECT i.id FROM vehicle_images i JOIN vehicles v ON v.id=i.vehicle_id WHERE i.id=? AND i.organization_id=? AND v.organization_id=?').get(imageId,auth.organizationId,auth.organizationId)
@@ -522,7 +534,7 @@ createServer(async (req, res) => {
         COALESCE(u.name,'Não atribuído') seller,a.label accountLabel
         FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id
         JOIN social_accounts a ON a.id=j.social_account_id LEFT JOIN users u ON u.id=v.assigned_user_id
-        WHERE j.organization_id=? AND j.social_account_id=? AND j.extension_visible=1 AND j.paused=0 AND (j.scheduled_at IS NULL OR datetime(j.scheduled_at)<=CURRENT_TIMESTAMP) AND j.status IN ('pending','filling','error','awaiting_confirmation')
+        WHERE j.organization_id=? AND j.social_account_id=? AND v.status!='Vendido' AND v.sold_at IS NULL AND j.extension_visible=1 AND j.paused=0 AND (j.scheduled_at IS NULL OR datetime(j.scheduled_at)<=CURRENT_TIMESTAMP) AND j.status IN ('pending','filling','error','awaiting_confirmation')
         ORDER BY CASE j.status WHEN 'filling' THEN 0 ELSE 1 END,j.queue_priority,j.created_at`).all(auth.organizationId,accountId)
       const settings=db.prepare(`SELECT auto_advance autoAdvance,fill_groups fillGroups,target_groups targetGroups,auto_publish autoPublish
         FROM organization_settings WHERE organization_id=?`).get(auth.organizationId) as Record<string,unknown>|undefined
@@ -542,6 +554,7 @@ createServer(async (req, res) => {
       const job = db.prepare(`SELECT j.id,j.vehicle_id vehicleId,j.status,j.paused,j.scheduled_at scheduledAt,j.lease_expires_at leaseExpiresAt,j.fill_report fillReport FROM publication_jobs j
         WHERE j.id=? AND j.organization_id=? AND j.social_account_id=?`).get(Number(extensionPrepare[1]),auth.organizationId,accountId) as {id:number;vehicleId:number;status:string;paused:number;scheduledAt?:string;leaseExpiresAt?:string;fillReport?:string}|undefined
       if (!job) return send(res,404,{error:'Trabalho não encontrado para este perfil.'})
+      if(jobsIncludeSoldVehicle([job.id],auth.organizationId))return send(res,409,{error:'Veículos vendidos não podem ser publicados.'})
       if (job.paused) return send(res,409,{error:'Este trabalho está pausado no painel.'})
       if (job.scheduledAt&&Date.parse(job.scheduledAt)>Date.now()) return send(res,409,{error:'Este trabalho ainda não chegou ao horário agendado.'})
       if (!['pending','filling','error','awaiting_confirmation'].includes(job.status)) return send(res,409,{error:'Este trabalho não está disponível para preenchimento.'})
@@ -574,22 +587,42 @@ createServer(async (req, res) => {
       recordJobEvent(auth.organizationId,job.id,'filling_started',null,{accountId,instanceId})
       return send(res,200,{jobId:job.id,accountId,leaseToken,leaseSeconds,vehicle:{...vehicle,images},automation:{autoAdvance:Boolean(settings?.autoAdvance),fillGroups:Boolean(settings?.fillGroups),targetGroups,autoPublish:Boolean(settings?.autoPublish)}})
     }
+    const publishCheck=url.pathname.match(/^\/api\/extension\/jobs\/(\d+)\/publish-check$/)
+    if(req.method==='POST'&&publishCheck){
+      const b=await jsonBody(req) as Record<string,unknown>
+      const job=db.prepare(`SELECT id,social_account_id accountId FROM publication_jobs
+        WHERE id=? AND organization_id=? AND status='filling' AND paused=0 AND extension_visible=1
+        AND lease_token=? AND datetime(lease_expires_at)>CURRENT_TIMESTAMP`).get(Number(publishCheck[1]),auth.organizationId,String(b.leaseToken||'')) as {id:number;accountId:number}|undefined
+      if(!job||!allowedExtensionAccount(job.accountId,auth))return send(res,409,{error:'Esta execução não está mais autorizada a publicar.'})
+      if(jobsIncludeSoldVehicle([job.id],auth.organizationId))return send(res,409,{error:'O veículo foi vendido. A publicação foi interrompida.'})
+      return send(res,200,{ok:true})
+    }
     const extensionHeartbeat=url.pathname.match(/^\/api\/extension\/jobs\/(\d+)\/heartbeat$/)
     if(req.method==='POST'&&extensionHeartbeat){
       const b=await jsonBody(req) as Record<string,unknown>,leaseToken=String(b.leaseToken||'')
       const updated=db.prepare(`UPDATE publication_jobs SET lease_expires_at=datetime('now','+120 seconds'),updated_at=CURRENT_TIMESTAMP
-        WHERE id=? AND organization_id=? AND status='filling' AND lease_token=? AND datetime(lease_expires_at)>CURRENT_TIMESTAMP`).run(Number(extensionHeartbeat[1]),auth.organizationId,leaseToken)
+        WHERE id=? AND organization_id=? AND status='filling' AND lease_token=? AND datetime(lease_expires_at)>CURRENT_TIMESTAMP
+        AND EXISTS (SELECT 1 FROM vehicles v WHERE v.id=publication_jobs.vehicle_id AND v.status!='Vendido' AND v.sold_at IS NULL)`).run(Number(extensionHeartbeat[1]),auth.organizationId,leaseToken)
       if(!updated.changes)return send(res,409,{error:'O bloqueio desta execução expirou ou pertence a outra instância.'})
       return send(res,200,{ok:true,leaseSeconds:120})
     }
     const extensionFillResult = url.pathname.match(/^\/api\/extension\/jobs\/(\d+)\/fill-result$/)
     if (req.method === 'PATCH' && extensionFillResult) {
       const b=await jsonBody(req) as Record<string,unknown>
-      const job = db.prepare(`SELECT j.id,j.status,j.social_account_id accountId,j.lease_token leaseToken,j.lease_expires_at leaseExpiresAt FROM publication_jobs j
-        WHERE j.id=? AND j.organization_id=?`).get(Number(extensionFillResult[1]),auth.organizationId) as {id:number;status:string;accountId:number;leaseToken?:string;leaseExpiresAt?:string}|undefined
+      const job = db.prepare(`SELECT j.id,j.status,j.social_account_id accountId,j.lease_token leaseToken,j.lease_expires_at leaseExpiresAt,j.fill_report fillReport FROM publication_jobs j
+        WHERE j.id=? AND j.organization_id=?`).get(Number(extensionFillResult[1]),auth.organizationId) as {id:number;status:string;accountId:number;leaseToken?:string;leaseExpiresAt?:string;fillReport?:string}|undefined
       if (!job || !allowedExtensionAccount(job.accountId,auth)) return send(res,404,{error:'Trabalho não encontrado para este perfil.'})
-      if(job.status!=='filling'||!job.leaseToken||String(b.leaseToken||'')!==job.leaseToken||!job.leaseExpiresAt||Date.parse(job.leaseExpiresAt.replace(' ','T')+'Z')<=Date.now())return send(res,409,{error:'A execução perdeu o bloqueio exclusivo. Reabra o trabalho pela extensão.'})
+      let previousReport:Record<string,unknown>={}
+      try{previousReport=JSON.parse(job.fillReport||'{}')}catch{/* relatório legado */}
+      // A venda interrompe a execução, mas conserva a identidade para reconciliar um resultado tardio.
+      const soldInterrupted=job.status==='awaiting_confirmation'&&previousReport.saleInterrupted===true&&jobsIncludeSoldVehicle([job.id],auth.organizationId)
+      if(!job.leaseToken||String(b.leaseToken||'')!==job.leaseToken||(!soldInterrupted&&(job.status!=='filling'||!job.leaseExpiresAt||Date.parse(job.leaseExpiresAt.replace(' ','T')+'Z')<=Date.now())))return send(res,409,{error:'A execução perdeu o bloqueio exclusivo. Reabra o trabalho pela extensão.'})
       const error=String(b.error||'').slice(0,240)
+      if (error&&soldInterrupted) {
+        db.prepare('UPDATE publication_jobs SET error_code=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?').run(error,job.id,auth.organizationId)
+        recordJobEvent(auth.organizationId,job.id,'fill_error',null,{error,saleInterrupted:true})
+        return send(res,200,{ok:true,status:'awaiting_confirmation'})
+      }
       if (error) {
         db.prepare(`UPDATE publication_jobs SET status='error',error_code=?,extension_version=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
           .run(error,String(b.extensionVersion||'').slice(0,30),job.id,auth.organizationId)
@@ -597,6 +630,7 @@ createServer(async (req, res) => {
         return send(res,200,{ok:true,status:'error'})
       }
       const report={
+        ...(soldInterrupted?{saleInterrupted:true}:{}),
         filledCount:Math.max(0,Number(b.filledCount)||0),totalCount:Math.max(0,Number(b.totalCount)||0),
         imageCount:Math.max(0,Number(b.imageCount)||0),missing:Array.isArray(b.missing)?b.missing.map(String).slice(0,30):[],
         fields:Array.isArray(b.fields)?b.fields.slice(0,30):[],advanced:Boolean(b.advanced),
@@ -619,7 +653,7 @@ createServer(async (req, res) => {
         try{
           db.prepare(`UPDATE publication_jobs SET status='completed',fill_report=?,extension_version=?,result_url=?,error_code=NULL,filled_at=CURRENT_TIMESTAMP,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
             .run(JSON.stringify(report),String(b.extensionVersion||'').slice(0,30),String(b.resultUrl||'').slice(0,500),job.id,auth.organizationId)
-          db.prepare("UPDATE vehicles SET status='Publicado',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(vehicleId,auth.organizationId)
+          refreshVehiclePublicationStatus(vehicleId,auth.organizationId)
           recordJobEvent(auth.organizationId,job.id,'auto_published',null,{resultUrl:String(b.resultUrl||'').slice(0,500),selectedGroups:report.selectedGroups.length,extensionVersion:String(b.extensionVersion||'').slice(0,30)})
           db.exec('COMMIT')
         }catch(error){db.exec('ROLLBACK');throw error}
@@ -627,6 +661,7 @@ createServer(async (req, res) => {
       }
       db.prepare(`UPDATE publication_jobs SET status='awaiting_confirmation',fill_report=?,extension_version=?,error_code=NULL,filled_at=CURRENT_TIMESTAMP,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
         .run(JSON.stringify(report),String(b.extensionVersion||'').slice(0,30),job.id,auth.organizationId)
+      if(soldInterrupted)db.prepare('UPDATE publication_jobs SET lease_token=? WHERE id=? AND organization_id=?').run(job.leaseToken!,job.id,auth.organizationId)
       recordJobEvent(auth.organizationId,job.id,'filled_waiting_confirmation',null,{filledCount:report.filledCount,totalCount:report.totalCount,imageCount:report.imageCount,advanced:report.advanced,publishAttempted:report.publishAttempted,missing:report.missing,missingGroups:report.missingGroups,flowIssues:report.flowIssues,extensionVersion:String(b.extensionVersion||'').slice(0,30)})
       return send(res,200,{ok:true,status:'awaiting_confirmation'})
     }
@@ -642,9 +677,10 @@ createServer(async (req, res) => {
     const vehicleRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)$/)
     if (req.method === 'PATCH' && vehicleRoute) {
       const vehicleId=Number(vehicleRoute[1])
+      const b = await jsonBody(req) as Record<string,unknown>
+      // Releia o estado após o corpo: uma venda pode ocorrer enquanto a requisição chega.
       if(!canWriteVehicle(vehicleId,auth))return send(res,403,{error:'Você não pode alterar este veículo.'})
       const currentVehicle=db.prepare('SELECT status FROM vehicles WHERE id=? AND organization_id=?').get(vehicleId,auth.organizationId) as {status:string}
-      const b = await jsonBody(req) as Record<string,unknown>
       const validationError=validateVehicleBody(b)
       if (validationError) return send(res,400,{error:validationError})
       const requestedStatus=String(b.status||'Rascunho')
@@ -657,9 +693,26 @@ createServer(async (req, res) => {
     if (req.method === 'POST' && markSoldRoute) {
       const vehicleId=Number(markSoldRoute[1])
       if(!canWriteVehicle(vehicleId,auth))return send(res,403,{error:'Você não pode alterar este veículo.'})
-      const result = db.prepare("UPDATE vehicles SET status='Vendido',sold_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?")
-        .run(vehicleId,auth.organizationId)
-      return result.changes?send(res,200,{ok:true}):send(res,404,{error:'Veículo não encontrado.'})
+      let canceledJobs=0,reviewJobs=0
+      db.exec('BEGIN')
+      try {
+        db.prepare("UPDATE vehicles SET status='Vendido',sold_at=COALESCE(sold_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(vehicleId,auth.organizationId)
+        const jobs=db.prepare(`SELECT id,status,fill_report fillReport FROM publication_jobs
+          WHERE vehicle_id=? AND organization_id=? AND status IN ('pending','error','filling','awaiting_confirmation')`).all(vehicleId,auth.organizationId) as Array<{id:number;status:string;fillReport:string}>
+        for(const job of jobs){
+          let report:Record<string,unknown>={}
+          try{report=JSON.parse(job.fillReport||'{}')}catch{/* relatório legado */}
+          if(report.saleInterrupted===true)continue
+          const needsReview=job.status==='filling'||job.status==='awaiting_confirmation'||report.publishAttempted===true
+          db.prepare(`UPDATE publication_jobs SET status=?,paused=1,extension_visible=0,fill_report=?,
+            lease_token=CASE WHEN ? THEN lease_token ELSE NULL END,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP
+            WHERE id=? AND organization_id=?`).run(needsReview?'awaiting_confirmation':'canceled',JSON.stringify({...report,saleInterrupted:true}),needsReview?1:0,job.id,auth.organizationId)
+          recordJobEvent(auth.organizationId,job.id,needsReview?'sale_interrupted':'canceled',auth.userId,{reason:'vehicle_sold',requiresReview:needsReview})
+          if(needsReview)reviewJobs++;else canceledJobs++
+        }
+        db.exec('COMMIT')
+      }catch(error){db.exec('ROLLBACK');throw error}
+      return send(res,200,{ok:true,canceledJobs,reviewJobs})
     }
     const vehicleImagesRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)\/images$/)
     if (req.method === 'GET' && vehicleImagesRoute) {
@@ -931,10 +984,11 @@ createServer(async (req, res) => {
     }
     if (req.method === 'POST' && url.pathname === '/api/publications') {
       const b = await jsonBody(req) as Record<string,unknown>
-      const vehicle = db.prepare(`SELECT id,year,make,model,price,km,location,description,vehicle_type vehicleType,
+      const vehicle = db.prepare(`SELECT id,year,make,model,price,km,location,description,status,sold_at soldAt,vehicle_type vehicleType,
         transmission,fuel_type fuelType,body_type bodyType,exterior_color exteriorColor,interior_color interiorColor,vehicle_condition condition
-        FROM vehicles WHERE id=? AND organization_id=?`).get(Number(b.vehicleId),auth.organizationId) as {id:number;year:number;make:string;model:string;price:number;km:number;location:string;description:string;vehicleType:string;transmission:string;fuelType:string;bodyType:string;exteriorColor:string;interiorColor:string;condition:string}|undefined
+        FROM vehicles WHERE id=? AND organization_id=?`).get(Number(b.vehicleId),auth.organizationId) as {id:number;year:number;make:string;model:string;price:number;km:number;status:string;soldAt:string|null;location:string;description:string;vehicleType:string;transmission:string;fuelType:string;bodyType:string;exteriorColor:string;interiorColor:string;condition:string}|undefined
       if (!vehicle) return send(res,400,{error:'Veículo inválido.'})
+      if(vehicle.status==='Vendido'||vehicle.soldAt)return send(res,409,{error:'Veículos vendidos não podem ser publicados.'})
       if(!canWriteVehicle(vehicle.id,auth))return send(res,403,{error:'Você não pode publicar este veículo.'})
       const imageCount = (db.prepare('SELECT COUNT(*) c FROM vehicle_images WHERE vehicle_id=? AND organization_id=?').get(vehicle.id,auth.organizationId) as {c:number}).c
       const missing:string[] = []
@@ -987,6 +1041,7 @@ createServer(async (req, res) => {
       if(owned.length!==ids.length)return send(res,400,{error:'Um ou mais trabalhos não pertencem a esta empresa.'})
       if(!canManageJobs(ids,auth))return send(res,403,{error:'Você não pode alterar trabalhos de outro perfil.'})
       const visible=b.visible===true?1:0
+      if(visible&&jobsIncludeSoldVehicle(ids,auth.organizationId))return send(res,409,{error:'Veículos vendidos não podem voltar à extensão.'})
       db.prepare(`UPDATE publication_jobs SET extension_visible=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=? AND id IN (${placeholders})`).run(visible,auth.organizationId,...ids)
       for(const id of ids)recordJobEvent(auth.organizationId,id,visible?'shown_in_extension':'hidden_from_extension',auth.userId)
       return send(res,200,{updated:ids.length,visible:Boolean(visible)})
@@ -1002,6 +1057,7 @@ createServer(async (req, res) => {
       if(!canManageJobs(ids,auth))return send(res,403,{error:'Você não pode alterar trabalhos de outro perfil.'})
       if(owned.some(job=>!['pending','error','awaiting_confirmation'].includes(job.status)))return send(res,409,{error:'Trabalhos em preenchimento ou encerrados não podem ser pausados.'})
       const paused=String(b.action)==='pause'?1:0
+      if(!paused&&jobsIncludeSoldVehicle(ids,auth.organizationId))return send(res,409,{error:'Veículos vendidos não podem voltar à fila.'})
       if(paused)db.prepare(`UPDATE publication_jobs SET paused=1,updated_at=CURRENT_TIMESTAMP WHERE organization_id=? AND id IN (${placeholders})`).run(auth.organizationId,...ids)
       else db.prepare(`UPDATE publication_jobs SET paused=0,extension_visible=1,updated_at=CURRENT_TIMESTAMP WHERE organization_id=? AND id IN (${placeholders})`).run(auth.organizationId,...ids)
       for(const id of ids)recordJobEvent(auth.organizationId,id,paused?'paused':'resumed',auth.userId)
@@ -1022,6 +1078,7 @@ createServer(async (req, res) => {
       if(jobs.length!==ids.length)return send(res,400,{error:'Um ou mais trabalhos não pertencem a esta empresa.'})
       if(jobs.some(job=>!['pending','error','awaiting_confirmation'].includes(job.status)))return send(res,409,{error:'Trabalhos em preenchimento ou encerrados não podem ser redistribuídos.'})
       if(jobs.some(job=>job.accountId===accountId))return send(res,400,{error:'Escolha um perfil diferente do perfil atual.'})
+      if(jobsIncludeSoldVehicle(ids,auth.organizationId))return send(res,409,{error:'Trabalhos de veículos vendidos devem ser reconciliados no perfil original.'})
       const transferredVehicleIds=jobs.map(job=>job.vehicleId)
       const duplicatePlaceholders=transferredVehicleIds.map(()=>'?').join(',')
       const duplicate=db.prepare(`SELECT id FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND vehicle_id IN (${duplicatePlaceholders})
@@ -1128,6 +1185,7 @@ createServer(async (req, res) => {
       if(!job)return send(res,404,{error:'Publicação não encontrada.'})
       if(!canManageJobs([Number(publication[1])],auth))return send(res,403,{error:'Você não pode alterar trabalhos de outro perfil.'})
       const nextStatus=String(b.status)
+      if(nextStatus==='pending'&&jobsIncludeSoldVehicle([Number(publication[1])],auth.organizationId))return send(res,409,{error:'Veículos vendidos não podem voltar à fila.'})
       if(!manualPublicationTransitions[job.status]?.has(nextStatus))return send(res,409,{error:`A transição de ${job.status} para ${nextStatus} não é permitida por esta operação.`})
       let previousReport:Record<string,unknown>={}
       try{previousReport=job.fillReport?JSON.parse(job.fillReport):{}}catch{/* relatório antigo inválido */}
@@ -1137,7 +1195,7 @@ createServer(async (req, res) => {
         if(nextStatus==='pending')db.prepare("UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',started_at=NULL,filled_at=NULL,removed_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
         else if(nextStatus==='removed')db.prepare("UPDATE publication_jobs SET status='removed',removed_at=CURRENT_TIMESTAMP,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
         else db.prepare('UPDATE publication_jobs SET status=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?').run(nextStatus,Number(publication[1]),auth.organizationId)
-        if(nextStatus==='completed')db.prepare("UPDATE vehicles SET status='Publicado',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(job.vehicleId,auth.organizationId)
+        if(nextStatus==='completed'||nextStatus==='removed')refreshVehiclePublicationStatus(job.vehicleId,auth.organizationId)
         const eventType:Record<string,string>={pending:'retry_requested',filling:'filling_started',awaiting_confirmation:'filled_waiting_confirmation',completed:'confirmed_published',error:'fill_error',canceled:'canceled',removed:'marked_removed'}
         recordJobEvent(auth.organizationId,Number(publication[1]),eventType[nextStatus]||'status_changed',auth.userId,{status:nextStatus})
         db.exec('COMMIT')

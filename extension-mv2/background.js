@@ -38,6 +38,15 @@ chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
     })
     return true
   }
+  if(message.type==='AUTOFLOW_PUBLISH_CHECK'){
+    chrome.storage.local.get(['pendingJob','token'],({pendingJob,token})=>{
+      if(!token||pendingJob?.jobId!==message.jobId||!pendingJob?.leaseToken){sendResponse({ok:false,error:'A execução não está mais ativa.'});return}
+      fetch(`${API}/extension/jobs/${pendingJob.jobId}/publish-check`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({leaseToken:pendingJob.leaseToken})})
+        .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error||'A publicação não foi autorizada.');sendResponse({ok:true})})
+        .catch(error=>sendResponse({ok:false,error:error.message}))
+    })
+    return true
+  }
   if(message.type==='AUTOFLOW_PUBLISH_STARTED'){
     const tabId=_sender.tab?.id
     if(!tabId){sendResponse({ok:false,error:'A guia do Facebook não foi identificada.'});return}
