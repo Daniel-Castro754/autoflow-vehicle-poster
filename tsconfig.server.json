@@ -8,6 +8,7 @@
     "types": ["node"],
     "strict": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true
   },
   "include": ["server/**/*.ts"]

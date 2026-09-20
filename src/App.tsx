@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { BarChart3, Bell, Car, Check, CheckCheck, ChevronDown, CircleAlert, LayoutDashboard, Laptop, Menu, Moon, MoreHorizontal, Plus, Send, Settings, ShieldCheck, Sun, Trash2, UserPlus, Users, X } from 'lucide-react'
+import { BarChart3, Bell, Bot, Car, Check, CheckCheck, ChevronDown, CircleAlert, LayoutDashboard, Laptop, Menu, Moon, MoreHorizontal, Plus, Send, Settings, ShieldCheck, Sun, Trash2, UserPlus, Users, X } from 'lucide-react'
 import { OverviewView, PublicationsView, ReportsView, SettingsView } from './Views'
 import VehiclesView, { type VehicleRecord } from './Vehicles'
+import { AiCenterView } from './AiCenterView'
 
 type Vehicle = VehicleRecord & {updated?:string}
 type TeamUser = { id:number; name:string; email:string; role:'admin'|'seller' }
@@ -26,7 +27,7 @@ async function request<T>(token:string,path:string,options:RequestInit={}) {
   return data as T
 }
 const nav = [
-  ['Visão geral', LayoutDashboard], ['Veículos', Car], ['Publicações', Send], ['Equipe e contas', Users], ['Relatórios', BarChart3],
+  ['Visão geral', LayoutDashboard], ['Central de IA', Bot], ['Veículos', Car], ['Publicações', Send], ['Equipe e contas', Users], ['Relatórios', BarChart3],
 ] as const
 
 function storedStringList(key:string) {
@@ -166,7 +167,7 @@ export default function App() {
 
     <main>
       <header><button className="mobile-menu" onClick={()=>setMobileMenuOpen(true)} aria-label="Abrir menu"><Menu/></button><div className="crumb"><span>AutoFlow</span><b>/</b><strong>{active}</strong></div><div className="header-actions"><button className="theme-quick" onClick={()=>changeTheme(theme==='light'?'dark':'light')} aria-label={theme==='light'?'Ativar tema escuro':'Ativar tema claro'} title={theme==='light'?'Tema escuro':'Tema claro'}>{theme==='light'?<Moon size={17}/>:<Sun size={17}/>}</button><div className="notification-wrap"><button className="icon-btn" onClick={()=>setNotificationsOpen(open=>!open)} aria-label="Abrir notificações" aria-expanded={notificationsOpen}><Bell size={19}/>{unreadCount>0&&<span className="notification-count">{unreadCount}</span>}</button>{notificationsOpen&&<NotificationCenter notifications={visibleNotifications} readIds={readNotificationIds} onClose={()=>setNotificationsOpen(false)} onReadAll={markAllNotificationsRead} onDismiss={dismissNotification} onDismissAll={dismissAllNotifications} onNavigate={(id,page)=>{markNotificationRead(id);setActive(page);setNotificationsOpen(false)}}/>}</div><span className="sync"><i/>Sincronizado agora</span></div></header>
-      {active === 'Visão geral' ? <OverviewView api={api} vehicles={vehicles} navigate={setActive}/> : active === 'Publicações' ? <PublicationsView api={api} vehicles={vehicles} reload={loadVehicles}/> : active === 'Equipe e contas' ? <TeamView team={team} accounts={accounts} onAddUser={addUser} onAddAccount={addAccount}/> : active === 'Relatórios' ? <ReportsView api={api} vehicles={vehicles}/> : active === 'Configurações' ? <SettingsView api={api} onSaved={loadOrganizationName} theme={theme} onThemeChange={changeTheme}/> : <VehiclesView api={api} vehicles={vehicles} accounts={accounts} reload={loadVehicles} notify={message=>{setToast(message);setTimeout(()=>setToast(''),3000)}}/>}
+      {active === 'Visão geral' ? <OverviewView api={api} vehicles={vehicles} navigate={setActive}/> : active === 'Central de IA' ? <AiCenterView api={api} vehicles={vehicles} reloadVehicles={loadVehicles} navigate={setActive}/> : active === 'Publicações' ? <PublicationsView api={api} vehicles={vehicles} reload={loadVehicles}/> : active === 'Equipe e contas' ? <TeamView team={team} accounts={accounts} onAddUser={addUser} onAddAccount={addAccount}/> : active === 'Relatórios' ? <ReportsView api={api} vehicles={vehicles}/> : active === 'Configurações' ? <SettingsView api={api} onSaved={loadOrganizationName} theme={theme} onThemeChange={changeTheme}/> : <VehiclesView api={api} vehicles={vehicles} accounts={accounts} reload={loadVehicles} notify={message=>{setToast(message);setTimeout(()=>setToast(''),3000)}}/>}
     </main>
     {toast&&<div className="toast"><Check size={17}/>{toast}</div>}
   </div>

@@ -2,7 +2,7 @@ import { useDeferredValue, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Car, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Clock3,
-  Edit3, ImagePlus, MoreHorizontal, Plus, Search, Send, Tag, Trash2, X,
+  Edit3, ImagePlus, MoreHorizontal, Plus, Search, Send, Sparkles, Tag, Trash2, X,
 } from 'lucide-react'
 import { FieldLabel, HelpTip } from './HelpTip'
 import {
@@ -215,11 +215,48 @@ function VehicleDrawer({api,vehicle,onClose,onSaved}:{api:ApiFn;vehicle:VehicleR
   const [files,setFiles] = useState<File[]>([])
   const [saving,setSaving] = useState(false)
   const [error,setError] = useState('')
+  const [description, setDescription] = useState(vehicle?.description || '')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiTone, setAiTone] = useState<'vendedor' | 'profissional' | 'amigável' | 'direto'>('vendedor')
 
   useEffect(() => { if(vehicle) api<{images:ImageRecord[]}>(`/vehicles/${vehicle.id}/images`).then(data=>setImages(data.images)).catch(()=>setImages([])) }, [api,vehicle])
 
   async function upload(vehicleId:number) {
     for (const file of files.slice(0,20-images.length)) await api(`/vehicles/${vehicleId}/images`,{method:'POST',body:JSON.stringify(await filePayload(file))})
+  }
+
+  async function generateAiDescription(formElement: HTMLFormElement) {
+    setAiLoading(true)
+    setError('')
+    const form = new FormData(formElement)
+    const vehicleData = {
+      year: Number(form.get('year')), make: form.get('make'), model: form.get('model'), trim: form.get('trim'),
+      price: Number(form.get('price')), km: Number(form.get('km')), vehicleType: form.get('vehicleType'),
+      location: form.get('location'), transmission: form.get('transmission'), fuelType: form.get('fuelType'),
+      bodyType: form.get('bodyType'), exteriorColor: form.get('exteriorColor'), interiorColor: form.get('interiorColor'),
+      condition: form.get('condition'),
+    }
+    if (!vehicleData.make || !vehicleData.model) {
+      setError('Selecione a fabricante e informe o modelo antes de gerar a descrição com IA.')
+      setAiLoading(false)
+      return
+    }
+    try {
+      const res = await api<{ ok: boolean; description: string; provider: string; hashtags?: string[] }>('/ai/generate-description', {
+        method: 'POST',
+        body: JSON.stringify({ vehicle: vehicleData, tone: aiTone }),
+      })
+      if (res.description) {
+        const textWithTags = res.hashtags?.length
+          ? `${res.description}\n\n${res.hashtags.join(' ')}`
+          : res.description
+        setDescription(textWithTags)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao gerar descrição com IA')
+    } finally {
+      setAiLoading(false)
+    }
   }
 
   async function submit(event:React.FormEvent<HTMLFormElement>) {
@@ -277,7 +314,45 @@ function VehicleDrawer({api,vehicle,onClose,onSaved}:{api:ApiFn;vehicle:VehicleR
         <label><FieldLabel help="Selecione a cor externa exatamente como aparece no Marketplace.">Cor externa</FieldLabel><select name="exteriorColor" defaultValue={vehicle?.exteriorColor||''} required><option value="" disabled>Selecione a cor externa</option>{withLegacyOption(VEHICLE_COLORS,vehicle?.exteriorColor).map(item=><option key={item}>{item}</option>)}</select></label>
         <label><FieldLabel help="Selecione a cor predominante do interior. Este campo também é uma lista fixa no Marketplace.">Cor interna</FieldLabel><select name="interiorColor" defaultValue={vehicle?.interiorColor||''} required><option value="" disabled>Selecione a cor interna</option>{withLegacyOption(VEHICLE_COLORS,vehicle?.interiorColor).map(item=><option key={item}>{item}</option>)}</select></label>
         <label><FieldLabel help="O status muda automaticamente ao entrar na fila e ao confirmar a publicação.">Status</FieldLabel><select name="status" defaultValue={vehicle?.status||'Rascunho'}>{VEHICLE_STATUSES.map(item=><option key={item}>{item}</option>)}</select></label>
-      </div><label><FieldLabel help="Inclua conservação, opcionais e condições reais. Evite promessas não verificáveis.">Descrição</FieldLabel><textarea name="description" rows={5} defaultValue={vehicle?.description||''} placeholder="Descreva conservação, opcionais e condições..." required/></label></div>
+      </div>
+      <div className="description-header-actions">
+        <FieldLabel help="Inclua conservação, opcionais e condições reais. Evite promessas não verificáveis.">Descrição</FieldLabel>
+        <div className="ai-gen-controls">
+          <select
+            value={aiTone}
+            onChange={e => setAiTone(e.target.value as typeof aiTone)}
+            className="ai-tone-select"
+            aria-label="Tom da descrição com IA"
+            disabled={aiLoading}
+          >
+            <option value="vendedor">Tom Vendedor</option>
+            <option value="profissional">Tom Profissional</option>
+            <option value="amigável">Tom Amigável</option>
+            <option value="direto">Tom Direto</option>
+          </select>
+          <button
+            type="button"
+            className="ai-gen-button"
+            disabled={aiLoading}
+            onClick={e => {
+              const form = e.currentTarget.closest('form')
+              if (form) void generateAiDescription(form)
+            }}
+          >
+            <Sparkles size={13}/>
+            {aiLoading ? 'Gerando...' : 'Gerar com IA'}
+          </button>
+        </div>
+      </div>
+      <textarea
+        name="description"
+        rows={5}
+        value={description}
+        onChange={e => setDescription(e.target.value)}
+        placeholder="Descreva conservação, opcionais e condições..."
+        required
+      />
+    </div>
       <div className="drawer-section"><h3 className="section-title-help">Fotos <span>{images.length+files.length}/20</span><HelpTip text="A primeira foto vira a capa. Use as setas para reordenar; a extensão envia no máximo 20 na ordem cadastrada."/></h3>
         {images.length>0&&<div className="image-grid">{images.map((image,index)=><div key={image.id}>{index===0&&<span className="cover-badge">Capa</span>}<img src={image.url} alt={image.originalName}/><button type="button" onClick={()=>removeImage(image)} aria-label={`Excluir ${image.originalName}`}><X/></button><div className="move-controls"><button type="button" disabled={index===0} onClick={()=>moveImage(index,-1)} aria-label={`Mover ${image.originalName} para a esquerda`}><ChevronLeft/></button><button type="button" disabled={index===images.length-1} onClick={()=>moveImage(index,1)} aria-label={`Mover ${image.originalName} para a direita`}><ChevronRight/></button></div></div>)}</div>}
         <label className="image-upload"><ImagePlus/><strong>Adicionar fotos</strong><span>JPG, PNG ou WebP · até 12 MB cada</span><input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={event=>setFiles([...event.target.files||[]].slice(0,20-images.length))}/></label>

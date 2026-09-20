@@ -4,6 +4,15 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from '
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomBytes, scrypt, timingSafeEqual, createHmac, createHash } from 'node:crypto'
+import { calculateBackoff } from './lib/retry.ts'
+import { sendCriticalAlert } from './services/alerting.ts'
+import { generateVehicleDescription, type VehicleInput, type CopyTone } from './services/description-generator.ts'
+import { generateVehicleHashtags } from './services/trending-hashtags.ts'
+import { calculateOptimalSchedule } from './services/smart-scheduler.ts'
+import { curateMarketplaceGroups } from './services/group-curator.ts'
+import { findBestAccountForVehicle } from './services/session-manager.ts'
+import { startHealthMonitor, runHealthCheck } from './services/health-monitor.ts'
+import { parseVehicleRawText, auditInventory, runAutopilotPipeline, executeAgentCommand, batchOptimizeDescriptions } from './services/ai-agent.ts'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const configuredSecret = process.env.AUTH_SECRET?.trim()
@@ -121,6 +130,17 @@ ensureColumn('organization_settings','fill_groups','INTEGER NOT NULL DEFAULT 0')
 ensureColumn('organization_settings','target_groups',"TEXT NOT NULL DEFAULT '[]'")
 ensureColumn('organization_settings','auto_publish','INTEGER NOT NULL DEFAULT 0')
 ensureColumn('organization_settings','stuck_timeout_minutes','INTEGER NOT NULL DEFAULT 15')
+ensureColumn('publication_jobs','max_retries','INTEGER NOT NULL DEFAULT 3')
+ensureColumn('publication_jobs','retry_count','INTEGER NOT NULL DEFAULT 0')
+ensureColumn('organization_settings','auto_retry','INTEGER NOT NULL DEFAULT 0')
+ensureColumn('organization_settings','max_retries','INTEGER NOT NULL DEFAULT 3')
+ensureColumn('organization_settings','alert_telegram_token',"TEXT NOT NULL DEFAULT ''")
+ensureColumn('organization_settings','alert_telegram_chat_id',"TEXT NOT NULL DEFAULT ''")
+ensureColumn('organization_settings','alert_webhook_url',"TEXT NOT NULL DEFAULT ''")
+ensureColumn('organization_settings','auto_curate_groups','INTEGER NOT NULL DEFAULT 0')
+ensureColumn('organization_settings','gemini_api_key',"TEXT NOT NULL DEFAULT ''")
+ensureColumn('organization_settings','openai_api_key',"TEXT NOT NULL DEFAULT ''")
+ensureColumn('organization_settings','ai_provider',"TEXT NOT NULL DEFAULT 'auto'")
 db.prepare('UPDATE publication_jobs SET queue_priority=id WHERE queue_priority=0').run()
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_publication_job_events_timeline ON publication_job_events (organization_id,publication_job_id,created_at,id);
@@ -456,6 +476,7 @@ db.prepare("UPDATE vehicles SET vehicle_type='Carro/picape' WHERE vehicle_type='
 db.prepare("UPDATE vehicles SET vehicle_type='Outro' WHERE vehicle_type='Outro veículo'").run()
 db.prepare("UPDATE vehicles SET exterior_color='Prateado' WHERE exterior_color='Prata'").run()
 db.prepare("UPDATE vehicles SET interior_color='Preto' WHERE interior_color='' AND exterior_color!=''").run()
+startHealthMonitor(db, 60000)
 
 createServer(async (req, res) => {
   const originAllowed=applyCors(req,res)
@@ -473,6 +494,10 @@ createServer(async (req, res) => {
       return res.end(readFileSync(path))
     }
     if (req.method === 'GET' && url.pathname === '/api/health') return send(res,200,{ok:true})
+    if (req.method === 'GET' && url.pathname === '/api/health/detailed') {
+      const report = await runHealthCheck(db, { autoRecover: false })
+      return send(res, 200, { ok: true, ...report })
+    }
     if (req.method === 'POST' && url.pathname === '/api/auth/login') {
       const { email, password } = await jsonBody(req) as {email?:string,password?:string}
       const normalizedEmail=String(email||'').trim().toLowerCase().slice(0,254)
@@ -609,8 +634,10 @@ createServer(async (req, res) => {
     const extensionFillResult = url.pathname.match(/^\/api\/extension\/jobs\/(\d+)\/fill-result$/)
     if (req.method === 'PATCH' && extensionFillResult) {
       const b=await jsonBody(req) as Record<string,unknown>
-      const job = db.prepare(`SELECT j.id,j.status,j.social_account_id accountId,j.lease_token leaseToken,j.lease_expires_at leaseExpiresAt,j.fill_report fillReport FROM publication_jobs j
-        WHERE j.id=? AND j.organization_id=?`).get(Number(extensionFillResult[1]),auth.organizationId) as {id:number;status:string;accountId:number;leaseToken?:string;leaseExpiresAt?:string;fillReport?:string}|undefined
+      const job = db.prepare(`SELECT j.id,j.status,j.social_account_id accountId,j.lease_token leaseToken,j.lease_expires_at leaseExpiresAt,j.fill_report fillReport,
+        j.attempt_count attemptCount,COALESCE(j.max_retries,3) maxRetries,j.retry_count retryCount,COALESCE(a.label,'Perfil não definido') accountLabel
+        FROM publication_jobs j LEFT JOIN social_accounts a ON a.id=j.social_account_id
+        WHERE j.id=? AND j.organization_id=?`).get(Number(extensionFillResult[1]),auth.organizationId) as {id:number;status:string;accountId:number;leaseToken?:string;leaseExpiresAt?:string;fillReport?:string;attemptCount?:number;maxRetries?:number;retryCount?:number;accountLabel?:string}|undefined
       if (!job || !allowedExtensionAccount(job.accountId,auth)) return send(res,404,{error:'Trabalho não encontrado para este perfil.'})
       let previousReport:Record<string,unknown>={}
       try{previousReport=JSON.parse(job.fillReport||'{}')}catch{/* relatório legado */}
@@ -624,10 +651,35 @@ createServer(async (req, res) => {
         return send(res,200,{ok:true,status:'awaiting_confirmation'})
       }
       if (error) {
+        const orgSettings = db.prepare('SELECT auto_retry autoRetry, max_retries maxRetries, alert_telegram_token alertTelegramToken, alert_telegram_chat_id alertTelegramChatId, alert_webhook_url alertWebhookUrl FROM organization_settings WHERE organization_id=?').get(auth.organizationId) as {autoRetry?:number;maxRetries?:number;alertTelegramToken?:string;alertTelegramChatId?:string;alertWebhookUrl?:string}|undefined
+        const autoRetryActive = Boolean(orgSettings?.autoRetry) || b.autoRetry === true
+        const maxRetries = Math.max(1, Number(job.maxRetries || orgSettings?.maxRetries || 3))
+        const attempts = Number(job.attemptCount || 1)
+
+        if (autoRetryActive && attempts < maxRetries) {
+          const delayMs = calculateBackoff(attempts, 60000, 600000, true)
+          const nextScheduledAt = new Date(Date.now() + delayMs).toISOString()
+          db.prepare(`UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,scheduled_at=?,error_code=?,retry_count=retry_count+1,extension_version=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
+            .run(nextScheduledAt,error,String(b.extensionVersion||'').slice(0,30),job.id,auth.organizationId)
+          recordJobEvent(auth.organizationId,job.id,'auto_retry_scheduled',null,{attempt:attempts,maxRetries,delaySeconds:Math.round(delayMs/1000),scheduledAt:nextScheduledAt,error,extensionVersion:String(b.extensionVersion||'').slice(0,30)})
+          return send(res,200,{ok:true,status:'pending',autoRetry:true,scheduledAt:nextScheduledAt})
+        }
+
         db.prepare(`UPDATE publication_jobs SET status='error',error_code=?,extension_version=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
           .run(error,String(b.extensionVersion||'').slice(0,30),job.id,auth.organizationId)
-        recordJobEvent(auth.organizationId,job.id,'fill_error',null,{error,extensionVersion:String(b.extensionVersion||'').slice(0,30)})
-        return send(res,200,{ok:true,status:'error'})
+        recordJobEvent(auth.organizationId,job.id,'fill_error',null,{error,extensionVersion:String(b.extensionVersion||'').slice(0,30),retriesExhausted:attempts>=maxRetries})
+        void sendCriticalAlert({
+          jobId: job.id,
+          accountLabel: job.accountLabel,
+          type: 'fill_error',
+          message: error,
+          attemptCount: attempts,
+        }, {
+          telegramBotToken: orgSettings?.alertTelegramToken,
+          telegramChatId: orgSettings?.alertTelegramChatId,
+          webhookUrl: orgSettings?.alertWebhookUrl,
+        })
+        return send(res,200,{ok:true,status:'error',retriesExhausted:attempts>=maxRetries})
       }
       const report={
         ...(soldInterrupted?{saleInterrupted:true}:{}),
@@ -889,13 +941,13 @@ createServer(async (req, res) => {
       const where=`WHERE ${conditions.join(' AND ')}`
       const total=Number((db.prepare(`SELECT COUNT(*) total ${joins} ${where}`).get(...params) as {total:number}).total)
       const totalPages=Math.max(1,Math.ceil(total/pageSize)),currentPage=Math.min(pageRaw,totalPages),offset=(currentPage-1)*pageSize
-      const rows=db.prepare(`SELECT j.id,j.status,j.result_url resultUrl,j.error_code errorCode,j.fill_report fillReport,j.extension_version extensionVersion,j.extension_visible extensionVisible,j.queue_priority queuePriority,j.paused,j.scheduled_at scheduledAt,j.started_at startedAt,j.filled_at filledAt,j.removed_at removedAt,j.created_at createdAt,j.updated_at updatedAt,v.id vehicleId,v.year,v.make,v.model,v.price,j.social_account_id accountId,COALESCE(a.label,'Perfil não definido') accountLabel,COALESCE(u.name,'Não atribuído') seller ${joins} ${where} ORDER BY CASE WHEN ${active} THEN 0 ELSE 1 END,j.paused,j.queue_priority,j.created_at DESC LIMIT ? OFFSET ?`).all(...params,pageSize,offset) as Array<Record<string,unknown>>
+      const rows=db.prepare(`SELECT j.id,j.status,j.result_url resultUrl,j.error_code errorCode,j.fill_report fillReport,j.extension_version extensionVersion,j.extension_visible extensionVisible,j.queue_priority queuePriority,j.paused,j.scheduled_at scheduledAt,j.started_at startedAt,j.filled_at filledAt,j.removed_at removedAt,j.created_at createdAt,j.updated_at updatedAt,j.retry_count retryCount,j.max_retries maxRetries,v.id vehicleId,v.year,v.make,v.model,v.price,j.social_account_id accountId,COALESCE(a.label,'Perfil não definido') accountLabel,COALESCE(u.name,'Não atribuído') seller ${joins} ${where} ORDER BY CASE WHEN ${active} THEN 0 ELSE 1 END,j.paused,j.queue_priority,j.created_at DESC LIMIT ? OFFSET ?`).all(...params,pageSize,offset) as Array<Record<string,unknown>>
       const jobs=rows.map(item=>{try{return{...item,fillReport:item.fillReport?JSON.parse(String(item.fillReport)):null}}catch{return{...item,fillReport:null}}})
       return send(res,200,{jobs,pagination:{totalItems:total,totalPages,currentPage,pageSize}})
     }
     if (req.method === 'GET' && url.pathname === '/api/publications') {
       const rows = db.prepare(`SELECT j.id,j.status,j.result_url resultUrl,j.error_code errorCode,j.fill_report fillReport,
-        j.extension_version extensionVersion,j.extension_visible extensionVisible,j.queue_priority queuePriority,j.paused,j.scheduled_at scheduledAt,j.started_at startedAt,j.filled_at filledAt,j.removed_at removedAt,j.created_at createdAt,j.updated_at updatedAt,
+        j.extension_version extensionVersion,j.extension_visible extensionVisible,j.queue_priority queuePriority,j.paused,j.scheduled_at scheduledAt,j.started_at startedAt,j.filled_at filledAt,j.removed_at removedAt,j.created_at createdAt,j.updated_at updatedAt,j.retry_count retryCount,j.max_retries maxRetries,
         v.id vehicleId,v.year,v.make,v.model,v.price,j.social_account_id accountId,COALESCE(a.label,'Perfil não definido') accountLabel,
         (SELECT previous.label FROM publication_job_events event LEFT JOIN social_accounts previous ON previous.id=event.from_account_id
           WHERE event.publication_job_id=j.id AND event.event_type='reassigned' ORDER BY event.created_at DESC,event.id DESC LIMIT 1) previousAccountLabel,
@@ -1011,12 +1063,16 @@ createServer(async (req, res) => {
         db.prepare("UPDATE vehicles SET status='Atenção',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(vehicle.id,auth.organizationId)
         return send(res,422,{error:'Complete os dados obrigatórios antes de publicar.',missing})
       }
-      const accountId=Number(b.accountId)
+      let accountId=Number(b.accountId)
+      if ((!b.accountId || b.accountId === 'auto' || b.autoAssign === true) && (!Number.isInteger(accountId) || accountId <= 0)) {
+        const best = findBestAccountForVehicle(db, auth.organizationId, vehicle.id)
+        if (best) accountId = best.id
+      }
       if (!Number.isInteger(accountId)||!db.prepare('SELECT id FROM social_accounts WHERE id=? AND organization_id=?').get(accountId,auth.organizationId)) return send(res,400,{error:'Selecione o perfil do Brave que publicará este veículo.'})
       if(!allowedExtensionAccount(accountId,auth))return send(res,403,{error:'Você não pode criar trabalhos para este perfil.'})
       const duplicateRisk=publicationDuplicateRisk(auth.organizationId,vehicle.id)
       if(duplicateRisk)return send(res,409,{error:duplicateRisk.message,duplicate:duplicateRisk})
-      const settings=db.prepare('SELECT daily_limit dailyLimit FROM organization_settings WHERE organization_id=?').get(auth.organizationId) as {dailyLimit:number}|undefined
+      const settings=db.prepare('SELECT daily_limit dailyLimit, max_retries maxRetries FROM organization_settings WHERE organization_id=?').get(auth.organizationId) as {dailyLimit:number;maxRetries?:number}|undefined
       const today=(db.prepare("SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND date(created_at,'localtime')=date('now','localtime') AND status!='canceled'").get(auth.organizationId,accountId) as {total:number}).total
       if(today>=Number(settings?.dailyLimit||10))return send(res,429,{error:`O perfil atingiu o limite diário de ${settings?.dailyLimit||10} trabalhos.`})
       const nextPriority=((db.prepare(`SELECT COALESCE(MAX(queue_priority),0)+1 value FROM publication_jobs
@@ -1026,11 +1082,17 @@ createServer(async (req, res) => {
         const timestamp=Date.parse(String(b.scheduledAt))
         if(!Number.isFinite(timestamp)||timestamp<Date.now()-60000)return send(res,400,{error:'Selecione uma data e hora futura para o agendamento.'})
         scheduledAt=new Date(timestamp).toISOString()
+      } else if (b.smartSchedule === true) {
+        const existing = db.prepare(`SELECT scheduled_at scheduledAt FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND scheduled_at IS NOT NULL AND datetime(scheduled_at)>CURRENT_TIMESTAMP`).all(auth.organizationId, accountId) as Array<{scheduledAt:string}>
+        const existingTimestamps = existing.map(s => Date.parse(s.scheduledAt)).filter(Number.isFinite)
+        const optimal = calculateOptimalSchedule({ existingTimestamps, accountId })
+        scheduledAt = optimal.isoString
       }
-      const result = db.prepare('INSERT INTO publication_jobs (organization_id,vehicle_id,social_account_id,status,queue_priority,scheduled_at) VALUES (?,?,?,?,?,?)').run(auth.organizationId,Number(b.vehicleId),accountId,'pending',nextPriority,scheduledAt)
-      recordJobEvent(auth.organizationId,Number(result.lastInsertRowid),'created',auth.userId,{accountId,scheduledAt,queuePriority:nextPriority})
+      const maxRetries = Math.max(1, Math.min(10, Number(b.maxRetries) || Number(settings?.maxRetries) || 3))
+      const result = db.prepare('INSERT INTO publication_jobs (organization_id,vehicle_id,social_account_id,status,queue_priority,scheduled_at,max_retries) VALUES (?,?,?,?,?,?,?)').run(auth.organizationId,Number(b.vehicleId),accountId,'pending',nextPriority,scheduledAt,maxRetries)
+      recordJobEvent(auth.organizationId,Number(result.lastInsertRowid),'created',auth.userId,{accountId,scheduledAt,queuePriority:nextPriority,maxRetries,smartSchedule:Boolean(b.smartSchedule)})
       db.prepare("UPDATE vehicles SET status='Pronto',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(b.vehicleId),auth.organizationId)
-      return send(res,201,{id:Number(result.lastInsertRowid)})
+      return send(res,201,{id:Number(result.lastInsertRowid),accountId,scheduledAt})
     }
     if (req.method === 'PATCH' && url.pathname === '/api/publications/extension-visibility') {
       const b=await jsonBody(req) as Record<string,unknown>
@@ -1206,9 +1268,14 @@ createServer(async (req, res) => {
       const organization = db.prepare('SELECT id,name FROM organizations WHERE id=?').get(auth.organizationId)
       const settings = db.prepare(`SELECT default_location defaultLocation,daily_limit dailyLimit,stuck_timeout_minutes stuckTimeoutMinutes,
         require_confirmation requireConfirmation,description_template descriptionTemplate,auto_advance autoAdvance,
-        fill_groups fillGroups,target_groups targetGroups,auto_publish autoPublish FROM organization_settings WHERE organization_id=?`).get(auth.organizationId) as Record<string,unknown>
+        fill_groups fillGroups,target_groups targetGroups,auto_publish autoPublish,
+        auto_retry autoRetry,max_retries maxRetries,alert_telegram_token alertTelegramToken,alert_telegram_chat_id alertTelegramChatId,alert_webhook_url alertWebhookUrl,auto_curate_groups autoCurateGroups,
+        gemini_api_key geminiApiKey,openai_api_key openaiApiKey,ai_provider aiProvider
+        FROM organization_settings WHERE organization_id=?`).get(auth.organizationId) as Record<string,unknown>
       try { settings.targetGroups=JSON.parse(String(settings.targetGroups||'[]')) } catch { settings.targetGroups=[] }
       settings.groups=marketplaceGroups(auth.organizationId)
+      if(!settings.geminiApiKey&&process.env.GEMINI_API_KEY)settings.geminiApiKey=process.env.GEMINI_API_KEY
+      if(!settings.openaiApiKey&&process.env.OPENAI_API_KEY)settings.openaiApiKey=process.env.OPENAI_API_KEY
       return send(res,200,{organization,settings})
     }
     if (req.method === 'PATCH' && url.pathname === '/api/settings') {
@@ -1221,6 +1288,15 @@ createServer(async (req, res) => {
       const autoAdvance=b.autoAdvance===true
       const fillGroups=b.fillGroups===true
       const autoPublish=b.autoPublish===true
+      const autoRetry=b.autoRetry===true
+      const maxRetries=Math.max(1,Math.min(10,Number(b.maxRetries)||3))
+      const alertTelegramToken=String(b.alertTelegramToken||'').trim()
+      const alertTelegramChatId=String(b.alertTelegramChatId||'').trim()
+      const alertWebhookUrl=String(b.alertWebhookUrl||'').trim()
+      const autoCurateGroups=b.autoCurateGroups===true
+      const geminiApiKey=String(b.geminiApiKey||'').trim()
+      const openaiApiKey=String(b.openaiApiKey||'').trim()
+      const aiProvider=['auto','gemini','openai','procedural'].includes(String(b.aiProvider))?String(b.aiProvider):'auto'
       const targetGroups=Array.isArray(b.targetGroups)?[...new Set(b.targetGroups.map(value=>String(value).trim()).filter(Boolean))].slice(0,20):[]
       const groupRecords=Array.isArray(b.groups)?b.groups:targetGroups
       if(groupRecords.some((value:unknown)=>!validateGroupTarget(value)))return send(res,400,{error:'Informe um nome e uma URL valida do Facebook para cada grupo.'})
@@ -1228,8 +1304,8 @@ createServer(async (req, res) => {
       if(fillGroups&&!groupRecords.some((value:unknown)=>validateGroupTarget(value)&&(typeof value==='string'||(Boolean(value)&&typeof value==='object'&&(value as Record<string,unknown>).active!==false))))return send(res,400,{error:'Mantenha pelo menos um grupo ativo para preencher.'})
       if(autoPublish&&!autoAdvance)return send(res,400,{error:'Ative o avanço automático antes da publicação automática.'})
       db.prepare('UPDATE organizations SET name=? WHERE id=?').run(String(b.organizationName).trim(),auth.organizationId)
-      db.prepare(`UPDATE organization_settings SET default_location=?,daily_limit=?,stuck_timeout_minutes=?,require_confirmation=?,description_template=?,auto_advance=?,fill_groups=?,target_groups=?,auto_publish=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=?`)
-        .run(String(b.defaultLocation||''),limit,stuckTimeoutMinutes,autoPublish?0:1,String(b.descriptionTemplate||''),autoAdvance?1:0,fillGroups?1:0,JSON.stringify(targetGroups),autoPublish?1:0,auth.organizationId)
+      db.prepare(`UPDATE organization_settings SET default_location=?,daily_limit=?,stuck_timeout_minutes=?,require_confirmation=?,description_template=?,auto_advance=?,fill_groups=?,target_groups=?,auto_publish=?,auto_retry=?,max_retries=?,alert_telegram_token=?,alert_telegram_chat_id=?,alert_webhook_url=?,auto_curate_groups=?,gemini_api_key=?,openai_api_key=?,ai_provider=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=?`)
+        .run(String(b.defaultLocation||''),limit,stuckTimeoutMinutes,autoPublish?0:1,String(b.descriptionTemplate||''),autoAdvance?1:0,fillGroups?1:0,JSON.stringify(targetGroups),autoPublish?1:0,autoRetry?1:0,maxRetries,alertTelegramToken,alertTelegramChatId,alertWebhookUrl,autoCurateGroups?1:0,geminiApiKey,openaiApiKey,aiProvider,auth.organizationId)
       const groups=replaceMarketplaceGroups(auth.organizationId,groupRecords)
       return send(res,200,{ok:true,groups})
     }
@@ -1259,6 +1335,219 @@ createServer(async (req, res) => {
       const result = db.prepare(`INSERT INTO social_accounts (organization_id,user_id,label,browser_profile,status)
         VALUES (?,?,?,?, 'not_connected')`).run(auth.organizationId,Number(b.userId),String(b.label),String(b.browserProfile))
       return send(res,201,{id:Number(result.lastInsertRowid)})
+    }
+    if (req.method === 'POST' && url.pathname === '/api/ai/generate-description') {
+      const b = await jsonBody(req) as Record<string,unknown>
+      const vehicle = (b.vehicle || b) as Record<string,unknown>
+      const input: VehicleInput = {
+        year: Number(vehicle.year) || new Date().getFullYear(),
+        make: String(vehicle.make || '').trim(),
+        model: String(vehicle.model || '').trim(),
+        trim: String(vehicle.trim || vehicle.version || '').trim(),
+        km: Number(vehicle.km) || 0,
+        price: Number(vehicle.price) || 0,
+        transmission: String(vehicle.transmission || 'Automático'),
+        fuelType: String(vehicle.fuelType || vehicle.fuel || 'Flex'),
+        bodyType: String(vehicle.bodyType || 'Sedã'),
+        exteriorColor: String(vehicle.exteriorColor || vehicle.color || ''),
+        interiorColor: String(vehicle.interiorColor || ''),
+        condition: String(vehicle.condition || 'Muito bom'),
+        location: String(vehicle.location || 'São Paulo, SP'),
+      }
+      if (!input.make || !input.model) return send(res, 400, { error: 'Marca e modelo do veículo são obrigatórios.' })
+      const tone = (String(b.tone || 'vendedor') as CopyTone)
+      const aiConf = db.prepare('SELECT gemini_api_key geminiApiKey, openai_api_key openaiApiKey, ai_provider aiProvider FROM organization_settings WHERE organization_id = ?').get(auth.organizationId) as { geminiApiKey?: string; openaiApiKey?: string; aiProvider?: 'auto' | 'gemini' | 'openai' } | undefined
+      const provider = aiConf?.aiProvider || 'auto'
+      const apiKey = provider === 'gemini' ? (aiConf?.geminiApiKey || process.env.GEMINI_API_KEY) : (aiConf?.openaiApiKey || process.env.OPENAI_API_KEY)
+      const result = await generateVehicleDescription(input, { tone, provider, apiKey })
+      const hashtags = generateVehicleHashtags(input)
+      return send(res, 200, { ok: true, description: result.description, provider: result.provider, hashtags })
+    }
+    if (req.method === 'POST' && url.pathname === '/api/ai/parse-text') {
+      const b = await jsonBody(req) as Record<string, unknown>
+      const rawText = String(b.text || b.rawText || '').trim()
+      if (!rawText) return send(res, 400, { error: 'O texto para análise não pode estar vazio.' })
+      const parsed = parseVehicleRawText(rawText)
+      return send(res, 200, { ok: true, vehicle: parsed })
+    }
+    if (req.method === 'GET' && url.pathname === '/api/ai/audit') {
+      const audit = auditInventory(db, auth.organizationId)
+      return send(res, 200, { ok: true, audit })
+    }
+    if (req.method === 'POST' && url.pathname === '/api/ai/autopilot/run') {
+      const result = await runAutopilotPipeline(db, auth.organizationId, auth.userId)
+      return send(res, 200, result)
+    }
+    if (req.method === 'POST' && url.pathname === '/api/ai/command') {
+      const b = await jsonBody(req) as Record<string, unknown>
+      const prompt = String(b.prompt || b.command || '').trim()
+      if (!prompt) return send(res, 400, { error: 'O comando não pode estar vazio.' })
+      const result = await executeAgentCommand(db, auth.organizationId, auth.userId, prompt)
+      return send(res, 200, result)
+    }
+    if (req.method === 'POST' && url.pathname === '/api/ai/batch-optimize') {
+      const b = await jsonBody(req) as Record<string, unknown>
+      const tone = (String(b.tone || 'vendedor') as CopyTone)
+      const result = await batchOptimizeDescriptions(db, auth.organizationId, tone)
+      return send(res, 200, result)
+    }
+    const singleSmartSchedule = url.pathname.match(/^\/api\/publications\/(\d+)\/smart-schedule$/)
+    if (req.method === 'POST' && singleSmartSchedule) {
+      const jobId = Number(singleSmartSchedule[1])
+      const job = db.prepare(`SELECT j.id, j.status, j.social_account_id accountId, v.vehicle_type vehicleType
+        FROM publication_jobs j JOIN vehicles v ON v.id = j.vehicle_id
+        WHERE j.id = ? AND j.organization_id = ?`).get(jobId, auth.organizationId) as { id: number; status: string; accountId: number } | undefined
+      if (!job) return send(res, 404, { error: 'Trabalho não encontrado.' })
+      if (!canManageJobs([job.id], auth)) return send(res, 403, { error: 'Você não pode alterar trabalhos de outro perfil.' })
+      if (!['pending', 'error', 'awaiting_confirmation'].includes(job.status)) return send(res, 409, { error: 'Este trabalho não pode ser agendado agora.' })
+
+      const existing = db.prepare(`SELECT scheduled_at scheduledAt FROM publication_jobs
+        WHERE organization_id = ? AND social_account_id = ? AND id != ? AND scheduled_at IS NOT NULL
+          AND datetime(scheduled_at) > CURRENT_TIMESTAMP`).all(auth.organizationId, job.accountId, job.id) as Array<{ scheduledAt: string }>
+      const existingTimestamps = existing.map(s => Date.parse(s.scheduledAt)).filter(Number.isFinite)
+      const optimal = calculateOptimalSchedule({ existingTimestamps, accountId: job.accountId })
+
+      db.prepare('UPDATE publication_jobs SET scheduled_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?')
+        .run(optimal.isoString, job.id, auth.organizationId)
+      recordJobEvent(auth.organizationId, job.id, 'smart_scheduled', auth.userId, {
+        scheduledAt: optimal.isoString,
+        window: optimal.window,
+        confidence: optimal.confidence,
+        jitterMinutes: optimal.jitterMinutes,
+      })
+      return send(res, 200, { ok: true, scheduledAt: optimal.isoString, window: optimal.window, confidence: optimal.confidence })
+    }
+    if (req.method === 'POST' && url.pathname === '/api/publications/smart-schedule-batch') {
+      const b = await jsonBody(req) as Record<string, unknown>
+      const ids = Array.isArray(b.ids) ? [...new Set(b.ids.map(Number).filter(Number.isInteger))].slice(0, 50) : []
+      if (ids.length < 1) return send(res, 400, { error: 'Selecione pelo menos um trabalho para agendamento inteligente.' })
+      const placeholders = ids.map(() => '?').join(',')
+      const rows = db.prepare(`SELECT id, status, social_account_id accountId FROM publication_jobs WHERE organization_id = ? AND id IN (${placeholders})`)
+        .all(auth.organizationId, ...ids) as Array<{ id: number; status: string; accountId: number }>
+      if (rows.length !== ids.length) return send(res, 400, { error: 'Um ou mais trabalhos não pertencem a esta empresa.' })
+      if (!canManageJobs(ids, auth)) return send(res, 403, { error: 'Você não pode alterar trabalhos de outro perfil.' })
+      if (rows.some(job => !['pending', 'error', 'awaiting_confirmation'].includes(job.status))) return send(res, 409, { error: 'Trabalhos em preenchimento ou encerrados não podem ser agendados.' })
+
+      const byId = new Map(rows.map(job => [job.id, job]))
+      const existing = db.prepare(`SELECT social_account_id accountId, scheduled_at scheduledAt FROM publication_jobs WHERE organization_id = ? AND scheduled_at IS NOT NULL
+        AND datetime(scheduled_at) > CURRENT_TIMESTAMP AND id NOT IN (${placeholders}) AND status IN ('pending', 'error', 'awaiting_confirmation')`)
+        .all(auth.organizationId, ...ids) as Array<{ accountId: number; scheduledAt: string }>
+
+      const occupied = new Map<number, number[]>()
+      for (const item of existing) {
+        const timestamp = Date.parse(item.scheduledAt)
+        if (Number.isFinite(timestamp)) occupied.set(item.accountId, [...(occupied.get(item.accountId) || []), timestamp])
+      }
+
+      const assignments = ids.map((id) => {
+        const job = byId.get(id)!
+        const profileTimes = occupied.get(job.accountId) || []
+        const optimal = calculateOptimalSchedule({ existingTimestamps: profileTimes, accountId: job.accountId })
+        profileTimes.push(optimal.scheduledAt.getTime())
+        occupied.set(job.accountId, profileTimes)
+        return { id, accountId: job.accountId, scheduledAt: optimal.isoString, window: optimal.window }
+      })
+
+      db.exec('BEGIN')
+      try {
+        for (const assignment of assignments) {
+          db.prepare('UPDATE publication_jobs SET scheduled_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?')
+            .run(assignment.scheduledAt, assignment.id, auth.organizationId)
+          recordJobEvent(auth.organizationId, assignment.id, 'smart_scheduled', auth.userId, { scheduledAt: assignment.scheduledAt, window: assignment.window, batch: true })
+        }
+        db.exec('COMMIT')
+      } catch (error) { db.exec('ROLLBACK'); throw error }
+      return send(res, 200, { ok: true, updated: assignments.length, assignments })
+    }
+    if (req.method === 'GET' && url.pathname === '/api/groups/curated') {
+      const locationQuery = String(url.searchParams.get('location') || '')
+      const rawGroups = db.prepare(`SELECT id, name, url, group_key groupKey, active, priority, success_count successCount, failure_count failureCount, last_found_at lastFoundAt
+        FROM marketplace_groups WHERE organization_id = ? ORDER BY priority, id`).all(auth.organizationId) as Array<{
+        id: number; name: string; url: string; groupKey: string; active: number; priority: number; successCount: number; failureCount: number; lastFoundAt?: string
+      }>
+      const curated = curateMarketplaceGroups(rawGroups.map(g => ({ ...g, active: Boolean(g.active) })), locationQuery)
+      return send(res, 200, { ok: true, groups: curated })
+    }
+    if (req.method === 'POST' && url.pathname === '/api/groups/auto-curate') {
+      const current = userById(auth.userId) as { role?: string } | undefined
+      if (current?.role !== 'admin') return send(res, 403, { error: 'Somente administradores podem aplicar curadoria de grupos.' })
+      const rawGroups = db.prepare(`SELECT id, name, url, group_key groupKey, active, priority, success_count successCount, failure_count failureCount, last_found_at lastFoundAt
+        FROM marketplace_groups WHERE organization_id = ? ORDER BY priority, id`).all(auth.organizationId) as Array<{
+        id: number; name: string; url: string; groupKey: string; active: number; priority: number; successCount: number; failureCount: number; lastFoundAt?: string
+      }>
+      const curated = curateMarketplaceGroups(rawGroups.map(g => ({ ...g, active: Boolean(g.active) })), '', 10)
+      db.exec('BEGIN')
+      try {
+        for (let i = 0; i < curated.length; i++) {
+          const item = curated[i]
+          db.prepare('UPDATE marketplace_groups SET priority = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?')
+            .run(i + 1, item.recommendedActive ? 1 : 0, item.group.id, auth.organizationId)
+        }
+        const activeTargets = marketplaceGroups(auth.organizationId, true).map(groupTarget)
+        db.prepare('UPDATE organization_settings SET target_groups = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ?')
+          .run(JSON.stringify(activeTargets), auth.organizationId)
+        db.exec('COMMIT')
+      } catch (err) { db.exec('ROLLBACK'); throw err }
+      return send(res, 200, { ok: true, curatedCount: curated.length, groups: marketplaceGroups(auth.organizationId) })
+    }
+    if (req.method === 'POST' && url.pathname === '/api/alerts/test') {
+      const current = userById(auth.userId) as { role?: string } | undefined
+      if (current?.role !== 'admin') return send(res, 403, { error: 'Somente administradores podem testar alertas.' })
+      const settings = db.prepare('SELECT alert_telegram_token alertTelegramToken, alert_telegram_chat_id alertTelegramChatId, alert_webhook_url alertWebhookUrl FROM organization_settings WHERE organization_id = ?').get(auth.organizationId) as { alertTelegramToken?: string; alertTelegramChatId?: string; alertWebhookUrl?: string } | undefined
+      const result = await sendCriticalAlert({
+        jobId: 0,
+        accountLabel: 'Teste do Sistema',
+        type: 'test_alert',
+        message: 'Este é um disparo de teste da integração de alertas autônomos do AutoFlow.',
+        attemptCount: 1,
+      }, {
+        telegramBotToken: settings?.alertTelegramToken,
+        telegramChatId: settings?.alertTelegramChatId,
+        webhookUrl: settings?.alertWebhookUrl,
+      })
+      return send(res, 200, { ok: true, result })
+    }
+    if (req.method === 'POST' && url.pathname === '/api/ai/test-key') {
+      const current = userById(auth.userId) as { role?: string } | undefined
+      if (current?.role !== 'admin') return send(res, 403, { error: 'Somente administradores podem testar chaves de API.' })
+      const b = await jsonBody(req) as Record<string, unknown>
+      const provider = String(b.provider || 'gemini').toLowerCase()
+      const settings = db.prepare('SELECT gemini_api_key geminiApiKey, openai_api_key openaiApiKey FROM organization_settings WHERE organization_id = ?').get(auth.organizationId) as { geminiApiKey?: string; openaiApiKey?: string } | undefined
+      const key = String(b.apiKey || '').trim() || (provider === 'gemini' ? (settings?.geminiApiKey || process.env.GEMINI_API_KEY) : (settings?.openaiApiKey || process.env.OPENAI_API_KEY)) || ''
+      if (!key) return send(res, 400, { error: 'Informe a chave de API para testar.' })
+
+      if (provider === 'gemini') {
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: 'ping' }] }], generationConfig: { maxOutputTokens: 5 } }),
+          })
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({})) as { error?: { message?: string } }
+            return send(res, 400, { ok: false, error: errData.error?.message || `Erro ${response.status} ao conectar com a API do Google Gemini.` })
+          }
+          return send(res, 200, { ok: true, message: '✓ Chave do Google Gemini validada com sucesso! Conexão estabelecida.' })
+        } catch (err) {
+          return send(res, 500, { ok: false, error: `Falha de rede ao conectar com Google Gemini: ${err instanceof Error ? err.message : err}` })
+        }
+      }
+
+      if (provider === 'openai') {
+        try {
+          const response = await fetch('https://api.openai.com/v1/models', {
+            headers: { Authorization: `Bearer ${key}` },
+          })
+          if (!response.ok) {
+            return send(res, 400, { ok: false, error: `Chave OpenAI inválida (status ${response.status}).` })
+          }
+          return send(res, 200, { ok: true, message: '✓ Chave OpenAI validada com sucesso!' })
+        } catch (err) {
+          return send(res, 500, { ok: false, error: `Falha de rede com OpenAI: ${err instanceof Error ? err.message : err}` })
+        }
+      }
+
+      return send(res, 400, { error: 'Provedor desconhecido.' })
     }
     return send(res,404,{error:'Rota não encontrada.'})
   } catch (error) {
