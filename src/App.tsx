@@ -6,6 +6,7 @@ import { AiCenterView } from './AiCenterView'
 
 type Vehicle = VehicleRecord & {updated?:string}
 type TeamUser = { id:number; name:string; email:string; role:'admin'|'seller' }
+type CurrentUser = { id:number; name:string; email:string; role:'admin'|'seller' }
 type SocialAccount = { id:number; userId:number; label:string; platform:string; status:string; browserProfile:string; lastSeenAt?:string }
 
 const seed: Vehicle[] = [
@@ -50,10 +51,11 @@ export default function App() {
   const [dismissedNotificationIds, setDismissedNotificationIds] = useState<string[]>(() => storedStringList('autoflow_notifications_dismissed_ids'))
   const [team, setTeam] = useState<TeamUser[]>([])
   const [accounts, setAccounts] = useState<SocialAccount[]>([])
+  const [currentUser, setCurrentUser] = useState<CurrentUser|null>(null)
 
   const clearSession=useCallback((message='')=>{
     localStorage.removeItem('autoflow_token')
-    setToken('');setLoading(false);setVehicles([]);setTeam([]);setAccounts([]);setAuthError(message)
+    setToken('');setLoading(false);setVehicles([]);setTeam([]);setAccounts([]);setCurrentUser(null);setAuthError(message)
   },[])
 
   const api=useCallback(async <T=Record<string,unknown>,>(path:string, options:RequestInit = {}):Promise<T> => {
@@ -87,9 +89,10 @@ export default function App() {
       request<{vehicles:Vehicle[]}>(token,'/vehicles'),
       request<{organization:{name:string}}>(token,'/settings'),
       request<{users:TeamUser[];accounts:SocialAccount[]}>(token,'/team'),
-    ]).then(([stock,settings,teamData])=>{
+      request<{user:CurrentUser}>(token,'/me'),
+    ]).then(([stock,settings,teamData,me])=>{
       if(!active)return
-      setVehicles(stock.vehicles);setOrganizationName(settings.organization.name);setTeam(teamData.users);setAccounts(teamData.accounts)
+      setVehicles(stock.vehicles);setOrganizationName(settings.organization.name);setTeam(teamData.users);setAccounts(teamData.accounts);setCurrentUser(me.user)
     }).catch(error=>{
       if(!active)return
       if(error instanceof ApiError&&error.status===401)clearSession('Sua sessão expirou. Entre novamente.')
@@ -161,7 +164,7 @@ export default function App() {
       <div className="brand"><span className="brand-mark"><Car size={22}/></span><span>AutoFlow</span></div>
       <button className="workspace" onClick={()=>{setActive('Configurações');setMobileMenuOpen(false)}}><span className="workspace-logo">{organizationName.split(' ').map(n=>n[0]).slice(0,2).join('')}</span><div><small>Empresa</small><strong>{organizationName}</strong></div><ChevronDown size={16}/></button>
       <nav>{nav.map(([label, Icon]) => <button key={label} className={active===label?'active':''} onClick={()=>{setActive(label);setMobileMenuOpen(false)}}><Icon size={19}/>{label}{label==='Publicações'&&vehicles.filter(v=>v.status==='Pronto').length>0&&<span className="count">{vehicles.filter(v=>v.status==='Pronto').length}</span>}</button>)}</nav>
-      <div className="sidebar-foot"><button className={active==='Configurações'?'active':''} onClick={()=>{setActive('Configurações');setMobileMenuOpen(false)}}><Settings size={19}/>Configurações</button><div className="profile"><span>DC</span><div><strong>Daniel Costa</strong><small>Administrador</small></div><button className="logout" onClick={logout} title="Sair"><MoreHorizontal size={18}/></button></div></div>
+      <div className="sidebar-foot"><button className={active==='Configurações'?'active':''} onClick={()=>{setActive('Configurações');setMobileMenuOpen(false)}}><Settings size={19}/>Configurações</button><div className="profile"><span>{currentUser?currentUser.name.split(' ').map(n=>n[0]).slice(0,2).join(''):''}</span><div><strong>{currentUser?.name||'Carregando...'}</strong><small>{currentUser?.role==='admin'?'Administrador':currentUser?.role==='seller'?'Vendedor':''}</small></div><button className="logout" onClick={logout} title="Sair"><MoreHorizontal size={18}/></button></div></div>
     </aside>
     {mobileMenuOpen&&<button className="mobile-overlay" onClick={()=>setMobileMenuOpen(false)} aria-label="Fechar menu"/>}
 
