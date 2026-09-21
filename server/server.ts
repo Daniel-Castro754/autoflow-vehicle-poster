@@ -8,8 +8,9 @@ import { calculateBackoff } from './lib/retry.ts'
 import { sendCriticalAlert } from './services/alerting.ts'
 import { generateVehicleDescription, type VehicleInput, type CopyTone } from './services/description-generator.ts'
 import { generateVehicleHashtags } from './services/trending-hashtags.ts'
-import { calculateOptimalSchedule } from './services/smart-scheduler.ts'
+import { calculateOptimalSchedule, type HistoricalEngagement } from './services/smart-scheduler.ts'
 import { curateMarketplaceGroups } from './services/group-curator.ts'
+import { applyGroupCuration, startGroupCurationWorker } from './services/group-curation-worker.ts'
 import { findBestAccountForVehicle } from './services/session-manager.ts'
 import { startHealthMonitor, runHealthCheck } from './services/health-monitor.ts'
 import { parseVehicleRawText, auditInventory, runAutopilotPipeline, executeAgentCommand, batchOptimizeDescriptions } from './services/ai-agent.ts'
@@ -273,6 +274,16 @@ function replaceMarketplaceGroups(organizationId:number,values:unknown[]) {
   db.prepare('UPDATE organization_settings SET target_groups=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=?').run(JSON.stringify(activeTargets),organizationId)
   return marketplaceGroups(organizationId)
 }
+// Janelas dia-da-semana/hora com publicações concluídas nos últimos 180 dias, para o
+// agendamento inteligente aprender com o que realmente funcionou em vez de só a heurística
+// estática de horário de pico. Agregado por organização (não por conta) para acumular
+// os registros mínimos mais rápido.
+function organizationScheduleHistory(organizationId:number):HistoricalEngagement[] {
+  return db.prepare(`SELECT CAST(strftime('%w',filled_at) AS INTEGER) dayOfWeek,CAST(strftime('%H',filled_at) AS INTEGER) hour,COUNT(*) successCount
+    FROM publication_jobs WHERE organization_id=? AND status='completed' AND filled_at IS NOT NULL
+      AND datetime(filled_at)>=datetime('now','-180 days')
+    GROUP BY dayOfWeek,hour`).all(organizationId) as unknown as HistoricalEngagement[]
+}
 
 function derivePassword(password:string,salt:string) {
   return new Promise<Buffer>((resolve,reject)=>scrypt(password,salt,64,(error,key)=>error?reject(error):resolve(key)))
@@ -479,6 +490,7 @@ db.prepare("UPDATE vehicles SET vehicle_type='Outro' WHERE vehicle_type='Outro v
 db.prepare("UPDATE vehicles SET exterior_color='Prateado' WHERE exterior_color='Prata'").run()
 db.prepare("UPDATE vehicles SET interior_color='Preto' WHERE interior_color='' AND exterior_color!=''").run()
 startHealthMonitor(db, 60000)
+startGroupCurationWorker(db)
 
 createServer(async (req, res) => {
   const originAllowed=applyCors(req,res)
@@ -1120,7 +1132,7 @@ createServer(async (req, res) => {
       } else if (b.smartSchedule === true) {
         const existing = db.prepare(`SELECT scheduled_at scheduledAt FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND scheduled_at IS NOT NULL AND datetime(scheduled_at)>CURRENT_TIMESTAMP`).all(auth.organizationId, accountId) as Array<{scheduledAt:string}>
         const existingTimestamps = existing.map(s => Date.parse(s.scheduledAt)).filter(Number.isFinite)
-        const optimal = calculateOptimalSchedule({ existingTimestamps, accountId })
+        const optimal = calculateOptimalSchedule({ existingTimestamps, accountId, historicalData: organizationScheduleHistory(auth.organizationId) })
         scheduledAt = optimal.isoString
       }
       const maxRetries = Math.max(1, Math.min(10, Number(b.maxRetries) || Number(settings?.maxRetries) || 3))
@@ -1444,7 +1456,7 @@ createServer(async (req, res) => {
         WHERE organization_id = ? AND social_account_id = ? AND id != ? AND scheduled_at IS NOT NULL
           AND datetime(scheduled_at) > CURRENT_TIMESTAMP`).all(auth.organizationId, job.accountId, job.id) as Array<{ scheduledAt: string }>
       const existingTimestamps = existing.map(s => Date.parse(s.scheduledAt)).filter(Number.isFinite)
-      const optimal = calculateOptimalSchedule({ existingTimestamps, accountId: job.accountId })
+      const optimal = calculateOptimalSchedule({ existingTimestamps, accountId: job.accountId, historicalData: organizationScheduleHistory(auth.organizationId) })
 
       db.prepare('UPDATE publication_jobs SET scheduled_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?')
         .run(optimal.isoString, job.id, auth.organizationId)
@@ -1478,10 +1490,11 @@ createServer(async (req, res) => {
         if (Number.isFinite(timestamp)) occupied.set(item.accountId, [...(occupied.get(item.accountId) || []), timestamp])
       }
 
+      const scheduleHistory = organizationScheduleHistory(auth.organizationId)
       const assignments = ids.map((id) => {
         const job = byId.get(id)!
         const profileTimes = occupied.get(job.accountId) || []
-        const optimal = calculateOptimalSchedule({ existingTimestamps: profileTimes, accountId: job.accountId })
+        const optimal = calculateOptimalSchedule({ existingTimestamps: profileTimes, accountId: job.accountId, historicalData: scheduleHistory })
         profileTimes.push(optimal.scheduledAt.getTime())
         occupied.set(job.accountId, profileTimes)
         return { id, accountId: job.accountId, scheduledAt: optimal.isoString, window: optimal.window }
@@ -1510,24 +1523,8 @@ createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/groups/auto-curate') {
       const current = userById(auth.userId) as { role?: string } | undefined
       if (current?.role !== 'admin') return send(res, 403, { error: 'Somente administradores podem aplicar curadoria de grupos.' })
-      const rawGroups = db.prepare(`SELECT id, name, url, group_key groupKey, active, priority, success_count successCount, failure_count failureCount, last_found_at lastFoundAt
-        FROM marketplace_groups WHERE organization_id = ? ORDER BY priority, id`).all(auth.organizationId) as Array<{
-        id: number; name: string; url: string; groupKey: string; active: number; priority: number; successCount: number; failureCount: number; lastFoundAt?: string
-      }>
-      const curated = curateMarketplaceGroups(rawGroups.map(g => ({ ...g, active: Boolean(g.active) })), '', 10)
-      db.exec('BEGIN')
-      try {
-        for (let i = 0; i < curated.length; i++) {
-          const item = curated[i]
-          db.prepare('UPDATE marketplace_groups SET priority = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?')
-            .run(i + 1, item.recommendedActive ? 1 : 0, item.group.id, auth.organizationId)
-        }
-        const activeTargets = marketplaceGroups(auth.organizationId, true).map(groupTarget)
-        db.prepare('UPDATE organization_settings SET target_groups = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ?')
-          .run(JSON.stringify(activeTargets), auth.organizationId)
-        db.exec('COMMIT')
-      } catch (err) { db.exec('ROLLBACK'); throw err }
-      return send(res, 200, { ok: true, curatedCount: curated.length, groups: marketplaceGroups(auth.organizationId) })
+      const { curatedCount, groups } = applyGroupCuration(db, auth.organizationId)
+      return send(res, 200, { ok: true, curatedCount, groups })
     }
     if (req.method === 'POST' && url.pathname === '/api/alerts/test') {
       const current = userById(auth.userId) as { role?: string } | undefined

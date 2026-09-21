@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { runHealthCheck } from '../server/services/health-monitor.ts'
+import { runGroupCurationSweep } from '../server/services/group-curation-worker.ts'
 
 const port=3455
 const base=`http://127.0.0.1:${port}/api`
@@ -95,8 +96,34 @@ try{
   if(driftReport.layoutDriftSuspected!==true)throw new Error('O sinal de suspeita de mudança de layout não foi persistido no relatório.')
   if(JSON.stringify(driftReport.notFoundFields)!==JSON.stringify(['Ano','Fabricante']))throw new Error('Os campos não localizados não foram persistidos corretamente.')
 
+  // 5. auto_curate_groups=1 deve aplicar a curadoria sozinho (sem clique manual no painel)
+  //    quando o worker periódico roda — mesmo resultado que POST /api/groups/auto-curate já produz.
+  await call('/settings',adminToken,{method:'PATCH',body:JSON.stringify({organizationName:'Safety Test',dailyLimit:10,stuckTimeoutMinutes:1,maxRetries:3,descriptionTemplate:'',autoAdvance:true,fillGroups:true,autoPublish:false,autoCurateGroups:true,groups:[{name:'Grupo Bom',url:'https://www.facebook.com/groups/111111',active:true,priority:1},{name:'Grupo Ruim',url:'https://www.facebook.com/groups/222222',active:true,priority:2}]})})
+  const curationSettings=await call('/settings',adminToken)
+  if(!curationSettings.settings.autoCurateGroups)throw new Error('O toggle de curadoria automática não foi persistido.')
+  const goodGroup=curationSettings.settings.groups.find(item=>item.name==='Grupo Bom')
+  const badGroup=curationSettings.settings.groups.find(item=>item.name==='Grupo Ruim')
+  testDb.prepare('UPDATE marketplace_groups SET success_count=20,failure_count=0,last_found_at=CURRENT_TIMESTAMP WHERE id=?').run(goodGroup.id)
+  testDb.prepare('UPDATE marketplace_groups SET success_count=1,failure_count=10 WHERE id=?').run(badGroup.id)
+  runGroupCurationSweep(testDb)
+  const curatedGood=testDb.prepare('SELECT active,priority FROM marketplace_groups WHERE id=?').get(goodGroup.id)
+  const curatedBad=testDb.prepare('SELECT active,priority FROM marketplace_groups WHERE id=?').get(badGroup.id)
+  if(!curatedGood.active||curatedGood.priority!==1)throw new Error('O grupo com bom histórico deveria continuar ativo e em primeiro lugar após a curadoria automática.')
+  if(curatedBad.active)throw new Error('O grupo com histórico ruim deveria ter sido desativado pela curadoria automática.')
+
+  // 6. O agendamento inteligente deve usar o histórico real de sucesso quando houver dados
+  //    suficientes (5+ combinações dia/hora), em vez de sempre cair na heurística estática.
+  const vehicleE=await createReadyVehicle(adminToken)
+  const publicationE=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:vehicleE.id,accountId:account.id})})
+  const vehicleEOrgId=testDb.prepare('SELECT organization_id organizationId FROM vehicles WHERE id=?').get(vehicleE.id).organizationId
+  for(let dayOffset=10;dayOffset<15;dayOffset++){
+    testDb.prepare(`INSERT INTO publication_jobs (organization_id,vehicle_id,status,filled_at) VALUES (?,?,'completed',datetime('now','-${dayOffset} days'))`).run(vehicleEOrgId,vehicleE.id)
+  }
+  const smartScheduled=await call(`/publications/${publicationE.id}/smart-schedule`,adminToken,{method:'POST'})
+  if(smartScheduled.confidence!=='historical')throw new Error('O agendamento deveria usar o histórico real quando há dados suficientes.')
+
   testDb.close()
-  console.log(JSON.stringify({ok:true,idempotentFillResult:true,staleRecoveryRequiresConfirmation:true,safeRecoveryRespectsMaxRetries:true,layoutDriftSignalPersisted:true},null,2))
+  console.log(JSON.stringify({ok:true,idempotentFillResult:true,staleRecoveryRequiresConfirmation:true,safeRecoveryRespectsMaxRetries:true,layoutDriftSignalPersisted:true,autoGroupCurationApplied:true,scheduleLearnsFromHistory:true},null,2))
 }finally{
   if(server.exitCode===null){server.kill();await new Promise(resolve=>server.once('exit',resolve))}
   await rm(dataDir,{recursive:true,force:true})
