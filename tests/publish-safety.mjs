@@ -122,8 +122,40 @@ try{
   const smartScheduled=await call(`/publications/${publicationE.id}/smart-schedule`,adminToken,{method:'POST'})
   if(smartScheduled.confidence!=='historical')throw new Error('O agendamento deveria usar o histórico real quando há dados suficientes.')
 
+  // 7. A partir da 2ª falha consecutiva do mesmo job, o auto-retry deve rerotear para uma
+  //    conta saudável com espaço disponível em vez de insistir sempre na mesma conta.
+  const accountB=await call('/social-accounts',adminToken,{method:'POST',body:JSON.stringify({userId:(await call('/team',adminToken)).users[0].id,label:'Facebook Teste 2',browserProfile:'Brave Perfil Teste 2'})})
+  const vehicleF=await createReadyVehicle(adminToken)
+  const publicationF=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:vehicleF.id,accountId:account.id})})
+  const preparedF1=await call(`/extension/jobs/${publicationF.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_instance_f1'})})
+  const firstFailure=await call(`/extension/jobs/${publicationF.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedF1.leaseToken,error:'Falha simulada 1',autoRetry:true,extensionVersion:'0.15.0'})})
+  if(firstFailure.accountId!==account.id)throw new Error('A primeira falha não deveria rerotear a conta ainda.')
+  testDb.prepare('UPDATE publication_jobs SET scheduled_at=NULL WHERE id=?').run(publicationF.id)
+  const preparedF2=await call(`/extension/jobs/${publicationF.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_instance_f1'})})
+  const secondFailure=await call(`/extension/jobs/${publicationF.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedF2.leaseToken,error:'Falha simulada 2',autoRetry:true,extensionVersion:'0.15.0'})})
+  if(secondFailure.accountId!==accountB.id)throw new Error('A segunda falha consecutiva deveria rerotear o job para a conta saudável disponível.')
+  const rerouted=testDb.prepare('SELECT social_account_id accountId FROM publication_jobs WHERE id=?').get(publicationF.id)
+  if(rerouted.accountId!==accountB.id)throw new Error('O job não foi persistido na nova conta após o reroteamento automático.')
+  const reroutedEvent=testDb.prepare("SELECT details FROM publication_job_events WHERE publication_job_id=? AND event_type='reassigned' ORDER BY id DESC LIMIT 1").get(publicationF.id)
+  const reroutedDetails=JSON.parse(reroutedEvent?.details||'{}')
+  if(reroutedDetails.auto!==true||reroutedDetails.reason!=='repeated_failures')throw new Error('O evento de reroteamento automático não foi registrado com os detalhes esperados.')
+
+  // 8. Sem conta alternativa elegível (todas no limite diário), o job continua na mesma conta.
+  const accountBOrgId=testDb.prepare('SELECT organization_id organizationId FROM social_accounts WHERE id=?').get(accountB.id).organizationId
+  for(let i=0;i<9;i++){
+    testDb.prepare(`INSERT INTO publication_jobs (organization_id,vehicle_id,social_account_id,status) VALUES (?,?,?,'error')`).run(accountBOrgId,vehicleF.id,accountB.id)
+  }
+  const vehicleG=await createReadyVehicle(adminToken)
+  const publicationG=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:vehicleG.id,accountId:account.id})})
+  const preparedG1=await call(`/extension/jobs/${publicationG.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_instance_g1'})})
+  await call(`/extension/jobs/${publicationG.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedG1.leaseToken,error:'Falha simulada 1',autoRetry:true,extensionVersion:'0.15.0'})})
+  testDb.prepare('UPDATE publication_jobs SET scheduled_at=NULL WHERE id=?').run(publicationG.id)
+  const preparedG2=await call(`/extension/jobs/${publicationG.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_instance_g1'})})
+  const noAlternative=await call(`/extension/jobs/${publicationG.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedG2.leaseToken,error:'Falha simulada 2',autoRetry:true,extensionVersion:'0.15.0'})})
+  if(noAlternative.accountId!==account.id)throw new Error('Sem conta alternativa disponível, o job deveria permanecer na mesma conta.')
+
   testDb.close()
-  console.log(JSON.stringify({ok:true,idempotentFillResult:true,staleRecoveryRequiresConfirmation:true,safeRecoveryRespectsMaxRetries:true,layoutDriftSignalPersisted:true,autoGroupCurationApplied:true,scheduleLearnsFromHistory:true},null,2))
+  console.log(JSON.stringify({ok:true,idempotentFillResult:true,staleRecoveryRequiresConfirmation:true,safeRecoveryRespectsMaxRetries:true,layoutDriftSignalPersisted:true,autoGroupCurationApplied:true,scheduleLearnsFromHistory:true,retryReroutedToHealthyAccount:true,retryStaysWithoutAlternative:true},null,2))
 }finally{
   if(server.exitCode===null){server.kill();await new Promise(resolve=>server.once('exit',resolve))}
   await rm(dataDir,{recursive:true,force:true})
