@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { sendCriticalAlert } from './alerting.ts'
+import { logger } from '../lib/logger.ts'
 
 export interface HealthStatusReport {
   timestamp: string
@@ -23,7 +24,7 @@ export async function runHealthCheck(
   const stuckRows = db
     .prepare(`
       SELECT j.id, j.organization_id organizationId, j.social_account_id accountId, j.started_at startedAt,
-        j.publish_attempt_at publishAttemptAt, j.attempt_count attemptCount,
+        j.publish_attempt_at publishAttemptAt, j.attempt_count attemptCount, j.retry_count retryCount,
         COALESCE(j.max_retries, s.max_retries, 3) maxRetries,
         COALESCE(s.stuck_timeout_minutes, 15) timeoutMinutes,
         COALESCE(a.label, 'Sistema') accountLabel,
@@ -44,6 +45,7 @@ export async function runHealthCheck(
       startedAt: string
       publishAttemptAt: string | null
       attemptCount: number
+      retryCount: number
       maxRetries: number
       timeoutMinutes: number
       accountLabel: string
@@ -101,7 +103,7 @@ export async function runHealthCheck(
             recoveredCount++
           } catch (txErr) {
             db.exec('ROLLBACK')
-            console.warn(`[HealthMonitor] Falha ao processar job ambíguo #${job.id}:`, txErr)
+            logger.warn('HealthMonitor', `Falha ao processar job ambíguo #${job.id}`, { error: txErr })
           }
 
           void sendCriticalAlert({
@@ -115,8 +117,9 @@ export async function runHealthCheck(
         }
 
         // Sem sinal de que o clique em Publicar tenha sido tentado: seguro devolver à fila,
-        // respeitando o mesmo limite de tentativas usado no retry automático do fill-result.
-        const exhausted = job.attemptCount >= job.maxRetries
+        // respeitando o mesmo orçamento de retry automático usado pelo fill-result — retry_count
+        // (não attempt_count, que também conta reaberturas manuais e não deve gatilhar esgotamento).
+        const exhausted = job.retryCount >= job.maxRetries
         db.exec('BEGIN')
         try {
           if (exhausted) {
@@ -134,14 +137,14 @@ export async function runHealthCheck(
             `).run(
               job.organizationId,
               job.id,
-              JSON.stringify({ elapsedMinutes, attemptCount: job.attemptCount, maxRetries: job.maxRetries })
+              JSON.stringify({ elapsedMinutes, retryCount: job.retryCount, maxRetries: job.maxRetries })
             )
           } else {
             db.prepare(`
               UPDATE publication_jobs
               SET status = 'pending', paused = 0, extension_visible = 1, error_code = NULL,
                 fill_report = '', started_at = NULL, filled_at = NULL, last_lease_token = NULL,
-                publish_attempt_at = NULL, lease_token = NULL,
+                publish_attempt_at = NULL, retry_count = retry_count + 1, lease_token = NULL,
                 lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
               WHERE id = ? AND organization_id = ?
             `).run(job.id, job.organizationId)
@@ -160,7 +163,7 @@ export async function runHealthCheck(
           recoveredCount++
         } catch (txErr) {
           db.exec('ROLLBACK')
-          console.warn(`[HealthMonitor] Falha ao recuperar job #${job.id}:`, txErr)
+          logger.warn('HealthMonitor', `Falha ao recuperar job #${job.id}`, { error: txErr })
         }
 
         // Notifica via alerta caso o travamento tenha sido excessivo (> 30 min) ou as tentativas se esgotaram
@@ -170,13 +173,13 @@ export async function runHealthCheck(
             accountLabel: job.accountLabel,
             type: exhausted ? 'job_stalled_exhausted' : 'job_stalled_auto_recovered',
             message: exhausted
-              ? `Trabalho travado (${job.year} ${job.make} ${job.model}) esgotou as tentativas (${job.attemptCount}/${job.maxRetries}) e foi marcado como erro pelo Health Monitor.`
+              ? `Trabalho travado (${job.year} ${job.make} ${job.model}) esgotou as tentativas de retry (${job.retryCount}/${job.maxRetries}) e foi marcado como erro pelo Health Monitor.`
               : `Trabalho travado há ${elapsedMinutes} min (${job.year} ${job.make} ${job.model}) foi recuperado automaticamente pelo Health Monitor.`,
             attemptCount: job.attemptCount,
           })
         }
       } catch (err) {
-        console.warn(`[HealthMonitor] Erro no processamento de job travado #${job.id}:`, err)
+        logger.warn('HealthMonitor', `Erro no processamento de job travado #${job.id}`, { error: err })
       }
     }
   }
@@ -212,7 +215,7 @@ export function startHealthMonitor(
     try {
       await runHealthCheck(db, { autoRecover: true })
     } catch (err) {
-      console.warn('[HealthMonitor] Erro na verificação periódica de saúde:', err)
+      logger.warn('HealthMonitor', 'Erro na verificação periódica de saúde', { error: err })
     }
   }, intervalMs)
 
