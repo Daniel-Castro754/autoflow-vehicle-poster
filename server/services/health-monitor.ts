@@ -23,6 +23,8 @@ export async function runHealthCheck(
   const stuckRows = db
     .prepare(`
       SELECT j.id, j.organization_id organizationId, j.social_account_id accountId, j.started_at startedAt,
+        j.publish_attempt_at publishAttemptAt, j.attempt_count attemptCount,
+        COALESCE(j.max_retries, s.max_retries, 3) maxRetries,
         COALESCE(s.stuck_timeout_minutes, 15) timeoutMinutes,
         COALESCE(a.label, 'Sistema') accountLabel,
         v.year, v.make, v.model
@@ -40,6 +42,9 @@ export async function runHealthCheck(
       organizationId: number
       accountId: number
       startedAt: string
+      publishAttemptAt: string | null
+      attemptCount: number
+      maxRetries: number
       timeoutMinutes: number
       accountLabel: string
       year: number
@@ -65,24 +70,91 @@ export async function runHealthCheck(
           Math.floor((Date.now() - new Date(job.startedAt.replace(' ', 'T') + 'Z').getTime()) / 60000)
         )
 
+        // O checkpoint de publish-check foi registrado: o clique em "Publicar" pode já ter
+        // acontecido antes de perdermos contato. Não é seguro assumir que nada foi publicado —
+        // o job vai para confirmação manual em vez de voltar direto para a fila.
+        if (job.publishAttemptAt) {
+          db.exec('BEGIN')
+          try {
+            db.prepare(`
+              UPDATE publication_jobs
+              SET status = 'awaiting_confirmation', paused = 1, extension_visible = 0, error_code = NULL,
+                fill_report = ?, last_lease_token = NULL, publish_attempt_at = NULL,
+                lease_token = NULL, lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ? AND organization_id = ?
+            `).run(
+              JSON.stringify({ publishAttempted: true, published: false, staleRecovery: true, reason: 'lease_lost_after_publish_attempt' }),
+              job.id,
+              job.organizationId
+            )
+
+            db.prepare(`
+              INSERT INTO publication_job_events (organization_id, publication_job_id, event_type, created_by, details)
+              VALUES (?, ?, 'stalled_publish_ambiguous', NULL, ?)
+            `).run(
+              job.organizationId,
+              job.id,
+              JSON.stringify({ elapsedMinutes, recoveredBy: 'health_monitor' })
+            )
+
+            db.exec('COMMIT')
+            recoveredCount++
+          } catch (txErr) {
+            db.exec('ROLLBACK')
+            console.warn(`[HealthMonitor] Falha ao processar job ambíguo #${job.id}:`, txErr)
+          }
+
+          void sendCriticalAlert({
+            jobId: job.id,
+            accountLabel: job.accountLabel,
+            type: 'job_stalled_publish_ambiguous',
+            message: `Trabalho travado há ${elapsedMinutes} min (${job.year} ${job.make} ${job.model}) pode já ter sido publicado no Facebook antes da falha. Verifique "Seus classificados" antes de liberar uma nova tentativa.`,
+            attemptCount: job.attemptCount,
+          })
+          continue
+        }
+
+        // Sem sinal de que o clique em Publicar tenha sido tentado: seguro devolver à fila,
+        // respeitando o mesmo limite de tentativas usado no retry automático do fill-result.
+        const exhausted = job.attemptCount >= job.maxRetries
         db.exec('BEGIN')
         try {
-          db.prepare(`
-            UPDATE publication_jobs
-            SET status = 'pending', paused = 0, extension_visible = 1, error_code = NULL,
-              fill_report = '', started_at = NULL, filled_at = NULL, lease_token = NULL,
-              lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND organization_id = ?
-          `).run(job.id, job.organizationId)
+          if (exhausted) {
+            db.prepare(`
+              UPDATE publication_jobs
+              SET status = 'error', error_code = 'Travado repetidamente sem confirmação da extensão.',
+                last_lease_token = NULL, publish_attempt_at = NULL, lease_token = NULL,
+                lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ? AND organization_id = ?
+            `).run(job.id, job.organizationId)
 
-          db.prepare(`
-            INSERT INTO publication_job_events (organization_id, publication_job_id, event_type, created_by, details)
-            VALUES (?, ?, 'stalled_recovered', NULL, ?)
-          `).run(
-            job.organizationId,
-            job.id,
-            JSON.stringify({ elapsedMinutes, recoveredBy: 'health_monitor' })
-          )
+            db.prepare(`
+              INSERT INTO publication_job_events (organization_id, publication_job_id, event_type, created_by, details)
+              VALUES (?, ?, 'stalled_exhausted', NULL, ?)
+            `).run(
+              job.organizationId,
+              job.id,
+              JSON.stringify({ elapsedMinutes, attemptCount: job.attemptCount, maxRetries: job.maxRetries })
+            )
+          } else {
+            db.prepare(`
+              UPDATE publication_jobs
+              SET status = 'pending', paused = 0, extension_visible = 1, error_code = NULL,
+                fill_report = '', started_at = NULL, filled_at = NULL, last_lease_token = NULL,
+                publish_attempt_at = NULL, lease_token = NULL,
+                lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ? AND organization_id = ?
+            `).run(job.id, job.organizationId)
+
+            db.prepare(`
+              INSERT INTO publication_job_events (organization_id, publication_job_id, event_type, created_by, details)
+              VALUES (?, ?, 'stalled_recovered', NULL, ?)
+            `).run(
+              job.organizationId,
+              job.id,
+              JSON.stringify({ elapsedMinutes, recoveredBy: 'health_monitor' })
+            )
+          }
 
           db.exec('COMMIT')
           recoveredCount++
@@ -91,14 +163,16 @@ export async function runHealthCheck(
           console.warn(`[HealthMonitor] Falha ao recuperar job #${job.id}:`, txErr)
         }
 
-        // Notifica via alerta caso o travamento tenha sido excessivo (> 30 min)
-        if (elapsedMinutes >= 30) {
+        // Notifica via alerta caso o travamento tenha sido excessivo (> 30 min) ou as tentativas se esgotaram
+        if (elapsedMinutes >= 30 || exhausted) {
           void sendCriticalAlert({
             jobId: job.id,
             accountLabel: job.accountLabel,
-            type: 'job_stalled_auto_recovered',
-            message: `Trabalho travado há ${elapsedMinutes} min (${job.year} ${job.make} ${job.model}) foi recuperado automaticamente pelo Health Monitor.`,
-            attemptCount: 1,
+            type: exhausted ? 'job_stalled_exhausted' : 'job_stalled_auto_recovered',
+            message: exhausted
+              ? `Trabalho travado (${job.year} ${job.make} ${job.model}) esgotou as tentativas (${job.attemptCount}/${job.maxRetries}) e foi marcado como erro pelo Health Monitor.`
+              : `Trabalho travado há ${elapsedMinutes} min (${job.year} ${job.make} ${job.model}) foi recuperado automaticamente pelo Health Monitor.`,
+            attemptCount: job.attemptCount,
           })
         }
       } catch (err) {
