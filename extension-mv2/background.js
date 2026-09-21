@@ -5,6 +5,38 @@ const HEARTBEAT_ALARM='autoflow-heartbeat'
 function ensureHeartbeatAlarm(){
   chrome.alarms.get(HEARTBEAT_ALARM,alarm=>{if(!alarm)chrome.alarms.create(HEARTBEAT_ALARM,{delayInMinutes:.5,periodInMinutes:1})})
 }
+
+// Backoff para o reenvio de um resultado pendente: evita bater no servidor a cada
+// batimento (~60s) indefinidamente se ele estiver fora do ar por muito tempo.
+function pendingResultRetryDelayMs(attempts){return Math.min(30000*Math.pow(2,Math.max(0,attempts)),300000)}
+
+function sendFillResult(jobId,token,payload){
+  return fetch(`${API}/extension/jobs/${jobId}/fill-result`,{
+    method:'PATCH',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(payload)
+  }).then(async response=>{
+    const data=await response.json().catch(()=>({}))
+    if(!response.ok){const error=new Error(data.error||'Falha ao atualizar o trabalho');error.status=response.status;throw error}
+    return data
+  })
+}
+
+// Reenvia um resultado que não teve a entrega confirmada anteriormente (aba fechada,
+// falha de rede). Roda a cada batimento, independente de a aba original ainda existir.
+function flushPendingResult(){
+  chrome.storage.local.get(['pendingResult','token'],({pendingResult,token})=>{
+    if(!pendingResult?.jobId||!pendingResult?.leaseToken||!token)return
+    const lastAttemptAt=pendingResult.lastAttemptAt||pendingResult.queuedAt||0
+    if(Date.now()-lastAttemptAt<pendingResultRetryDelayMs(pendingResult.attempts||0))return
+    chrome.storage.local.set({pendingResult:{...pendingResult,attempts:(pendingResult.attempts||0)+1,lastAttemptAt:Date.now()}})
+    sendFillResult(pendingResult.jobId,token,pendingResult.payload)
+      .then(()=>chrome.storage.local.remove(['pendingResult','pendingJob','pendingPublish']))
+      .catch(error=>{
+        // Uma execução legitimamente diferente já assumiu o bloqueio: reenviar não ajuda mais.
+        if(error.status===409)chrome.storage.local.remove(['pendingResult','pendingJob','pendingPublish'])
+      })
+  })
+}
+
 function heartbeat(){
   chrome.storage.local.get(['pendingJob','token'],data=>{
     const job=data.pendingJob
@@ -12,6 +44,7 @@ function heartbeat(){
     fetch(`${API}/extension/jobs/${job.jobId}/heartbeat`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+data.token},body:JSON.stringify({leaseToken:job.leaseToken})})
       .then(response=>{if(response.status===409)chrome.storage.local.remove(['pendingJob','pendingPublish'])}).catch(()=>{})
   })
+  flushPendingResult()
 }
 chrome.runtime.onInstalled.addListener(()=>{console.info('AutoFlow instalado no Brave');ensureHeartbeatAlarm()})
 chrome.runtime.onStartup.addListener(ensureHeartbeatAlarm)
@@ -23,10 +56,14 @@ chrome.tabs.onUpdated.addListener((tabId,changeInfo)=>{
   chrome.storage.local.get(['pendingPublish','token'],data=>{
     const pending=data.pendingPublish
     if(!pending||pending.tabId!==tabId||!data.token)return
-    fetch(`${API}/extension/jobs/${pending.jobId}/fill-result`,{
-      method:'PATCH',headers:{'Content-Type':'application/json','Authorization':'Bearer '+data.token},
-      body:JSON.stringify({...pending.report,leaseToken:pending.leaseToken,published:true,resultUrl:changeInfo.url,extensionVersion:chrome.runtime.getManifest().version})
-    }).then(response=>{if(response.ok||response.status===409)chrome.storage.local.remove(['pendingPublish','pendingJob'])}).catch(()=>{})
+    const payload={...pending.report,leaseToken:pending.leaseToken,published:true,resultUrl:changeInfo.url,extensionVersion:chrome.runtime.getManifest().version}
+    // Mesma persistência durável do listener de mensagens: se a aba fechar logo em
+    // seguida à navegação, o batimento ainda consegue confirmar a publicação depois.
+    chrome.storage.local.set({pendingResult:{jobId:pending.jobId,leaseToken:pending.leaseToken,payload,queuedAt:Date.now(),attempts:0}},()=>{
+      sendFillResult(pending.jobId,data.token,payload)
+        .then(()=>chrome.storage.local.remove(['pendingResult','pendingPublish','pendingJob']))
+        .catch(error=>{if(error.status===409)chrome.storage.local.remove(['pendingResult','pendingPublish','pendingJob'])})
+    })
   })
 })
 
@@ -77,11 +114,22 @@ chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
     const report=message.type==='AUTOFLOW_FILL_ERROR'
       ?{error:String(message.error||'Falha no preenchimento')}
       :message.report
-    fetch(`${API}/extension/jobs/${message.jobId}/fill-result`,{
-      method:'PATCH',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-      body:JSON.stringify({...report,leaseToken:pendingJob.leaseToken,extensionVersion:chrome.runtime.getManifest().version})
-    }).then(async response=>{const data=await response.json();if(!response.ok){if(response.status===409)chrome.storage.local.remove(['pendingJob','pendingPublish']);throw new Error(data.error||'Falha ao atualizar o trabalho')}chrome.storage.local.remove('pendingJob');if(message.report?.published)chrome.storage.local.remove('pendingPublish');sendResponse({ok:true,data})})
-      .catch(error=>sendResponse({ok:false,error:error.message}))
+    const payload={...report,leaseToken:pendingJob.leaseToken,extensionVersion:chrome.runtime.getManifest().version}
+    // Persistimos antes de tentar: se a entrega falhar (rede, aba fechada logo em seguida),
+    // o batimento reenvia sozinho até confirmar, sem depender desta aba continuar aberta.
+    chrome.storage.local.set({pendingResult:{jobId:message.jobId,leaseToken:pendingJob.leaseToken,payload,queuedAt:Date.now(),attempts:0}},()=>{
+      sendFillResult(message.jobId,token,payload)
+        .then(data=>{
+          chrome.storage.local.remove('pendingResult')
+          chrome.storage.local.remove('pendingJob')
+          if(message.report?.published)chrome.storage.local.remove('pendingPublish')
+          sendResponse({ok:true,data})
+        })
+        .catch(error=>{
+          if(error.status===409){chrome.storage.local.remove(['pendingResult','pendingJob','pendingPublish']);sendResponse({ok:false,error:error.message});return}
+          sendResponse({ok:false,error:error.message,willRetry:true})
+        })
+    })
   })
   return true
 })

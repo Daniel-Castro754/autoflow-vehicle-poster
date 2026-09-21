@@ -11,7 +11,8 @@
     "test:queue": "node tests/queue-flow.mjs",
     "test:stock": "node tests/stock-state.mjs",
     "test:autonomous": "node tests/autonomous-flow.mjs",
-    "test": "npm run test:stock && npm run test:queue && npm run test:autonomous",
+    "test:publish-safety": "node tests/publish-safety.mjs",
+    "test": "npm run test:stock && npm run test:queue && npm run test:autonomous && npm run test:publish-safety",
     "lint": "eslint .",
     "preview": "vite preview"
   },

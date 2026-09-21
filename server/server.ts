@@ -137,6 +137,8 @@ ensureColumn('organization_settings','max_retries','INTEGER NOT NULL DEFAULT 3')
 ensureColumn('organization_settings','alert_telegram_token',"TEXT NOT NULL DEFAULT ''")
 ensureColumn('organization_settings','alert_telegram_chat_id',"TEXT NOT NULL DEFAULT ''")
 ensureColumn('organization_settings','alert_webhook_url',"TEXT NOT NULL DEFAULT ''")
+ensureColumn('publication_jobs','publish_attempt_at','TEXT')
+ensureColumn('publication_jobs','last_lease_token','TEXT')
 ensureColumn('organization_settings','auto_curate_groups','INTEGER NOT NULL DEFAULT 0')
 ensureColumn('organization_settings','gemini_api_key',"TEXT NOT NULL DEFAULT ''")
 ensureColumn('organization_settings','openai_api_key',"TEXT NOT NULL DEFAULT ''")
@@ -620,6 +622,7 @@ createServer(async (req, res) => {
         AND lease_token=? AND datetime(lease_expires_at)>CURRENT_TIMESTAMP`).get(Number(publishCheck[1]),auth.organizationId,String(b.leaseToken||'')) as {id:number;accountId:number}|undefined
       if(!job||!allowedExtensionAccount(job.accountId,auth))return send(res,409,{error:'Esta execução não está mais autorizada a publicar.'})
       if(jobsIncludeSoldVehicle([job.id],auth.organizationId))return send(res,409,{error:'O veículo foi vendido. A publicação foi interrompida.'})
+      db.prepare('UPDATE publication_jobs SET publish_attempt_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?').run(job.id,auth.organizationId)
       return send(res,200,{ok:true})
     }
     const extensionHeartbeat=url.pathname.match(/^\/api\/extension\/jobs\/(\d+)\/heartbeat$/)
@@ -635,18 +638,21 @@ createServer(async (req, res) => {
     if (req.method === 'PATCH' && extensionFillResult) {
       const b=await jsonBody(req) as Record<string,unknown>
       const job = db.prepare(`SELECT j.id,j.status,j.social_account_id accountId,j.lease_token leaseToken,j.lease_expires_at leaseExpiresAt,j.fill_report fillReport,
-        j.attempt_count attemptCount,COALESCE(j.max_retries,3) maxRetries,j.retry_count retryCount,COALESCE(a.label,'Perfil não definido') accountLabel
+        j.attempt_count attemptCount,COALESCE(j.max_retries,3) maxRetries,j.retry_count retryCount,j.last_lease_token lastLeaseToken,COALESCE(a.label,'Perfil não definido') accountLabel
         FROM publication_jobs j LEFT JOIN social_accounts a ON a.id=j.social_account_id
-        WHERE j.id=? AND j.organization_id=?`).get(Number(extensionFillResult[1]),auth.organizationId) as {id:number;status:string;accountId:number;leaseToken?:string;leaseExpiresAt?:string;fillReport?:string;attemptCount?:number;maxRetries?:number;retryCount?:number;accountLabel?:string}|undefined
+        WHERE j.id=? AND j.organization_id=?`).get(Number(extensionFillResult[1]),auth.organizationId) as {id:number;status:string;accountId:number;leaseToken?:string;leaseExpiresAt?:string;fillReport?:string;attemptCount?:number;maxRetries?:number;retryCount?:number;lastLeaseToken?:string;accountLabel?:string}|undefined
       if (!job || !allowedExtensionAccount(job.accountId,auth)) return send(res,404,{error:'Trabalho não encontrado para este perfil.'})
+      // Reenvio de um resultado já processado nesta execução: responde de forma idempotente sem repetir efeitos colaterais.
+      if(job.lastLeaseToken&&String(b.leaseToken||'')===job.lastLeaseToken)return send(res,200,{ok:true,status:job.status,idempotent:true})
       let previousReport:Record<string,unknown>={}
       try{previousReport=JSON.parse(job.fillReport||'{}')}catch{/* relatório legado */}
       // A venda interrompe a execução, mas conserva a identidade para reconciliar um resultado tardio.
       const soldInterrupted=job.status==='awaiting_confirmation'&&previousReport.saleInterrupted===true&&jobsIncludeSoldVehicle([job.id],auth.organizationId)
       if(!job.leaseToken||String(b.leaseToken||'')!==job.leaseToken||(!soldInterrupted&&(job.status!=='filling'||!job.leaseExpiresAt||Date.parse(job.leaseExpiresAt.replace(' ','T')+'Z')<=Date.now())))return send(res,409,{error:'A execução perdeu o bloqueio exclusivo. Reabra o trabalho pela extensão.'})
+      const validatedLeaseToken=String(b.leaseToken||'')
       const error=String(b.error||'').slice(0,240)
       if (error&&soldInterrupted) {
-        db.prepare('UPDATE publication_jobs SET error_code=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?').run(error,job.id,auth.organizationId)
+        db.prepare('UPDATE publication_jobs SET error_code=?,last_lease_token=?,publish_attempt_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?').run(error,validatedLeaseToken,job.id,auth.organizationId)
         recordJobEvent(auth.organizationId,job.id,'fill_error',null,{error,saleInterrupted:true})
         return send(res,200,{ok:true,status:'awaiting_confirmation'})
       }
@@ -659,14 +665,14 @@ createServer(async (req, res) => {
         if (autoRetryActive && attempts < maxRetries) {
           const delayMs = calculateBackoff(attempts, 60000, 600000, true)
           const nextScheduledAt = new Date(Date.now() + delayMs).toISOString()
-          db.prepare(`UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,scheduled_at=?,error_code=?,retry_count=retry_count+1,extension_version=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
-            .run(nextScheduledAt,error,String(b.extensionVersion||'').slice(0,30),job.id,auth.organizationId)
+          db.prepare(`UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,scheduled_at=?,error_code=?,retry_count=retry_count+1,extension_version=?,last_lease_token=?,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
+            .run(nextScheduledAt,error,String(b.extensionVersion||'').slice(0,30),validatedLeaseToken,job.id,auth.organizationId)
           recordJobEvent(auth.organizationId,job.id,'auto_retry_scheduled',null,{attempt:attempts,maxRetries,delaySeconds:Math.round(delayMs/1000),scheduledAt:nextScheduledAt,error,extensionVersion:String(b.extensionVersion||'').slice(0,30)})
           return send(res,200,{ok:true,status:'pending',autoRetry:true,scheduledAt:nextScheduledAt})
         }
 
-        db.prepare(`UPDATE publication_jobs SET status='error',error_code=?,extension_version=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
-          .run(error,String(b.extensionVersion||'').slice(0,30),job.id,auth.organizationId)
+        db.prepare(`UPDATE publication_jobs SET status='error',error_code=?,extension_version=?,last_lease_token=?,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
+          .run(error,String(b.extensionVersion||'').slice(0,30),validatedLeaseToken,job.id,auth.organizationId)
         recordJobEvent(auth.organizationId,job.id,'fill_error',null,{error,extensionVersion:String(b.extensionVersion||'').slice(0,30),retriesExhausted:attempts>=maxRetries})
         void sendCriticalAlert({
           jobId: job.id,
@@ -703,16 +709,16 @@ createServer(async (req, res) => {
         const vehicleId=(db.prepare('SELECT vehicle_id vehicleId FROM publication_jobs WHERE id=? AND organization_id=?').get(job.id,auth.organizationId) as {vehicleId:number}).vehicleId
         db.exec('BEGIN')
         try{
-          db.prepare(`UPDATE publication_jobs SET status='completed',fill_report=?,extension_version=?,result_url=?,error_code=NULL,filled_at=CURRENT_TIMESTAMP,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
-            .run(JSON.stringify(report),String(b.extensionVersion||'').slice(0,30),String(b.resultUrl||'').slice(0,500),job.id,auth.organizationId)
+          db.prepare(`UPDATE publication_jobs SET status='completed',fill_report=?,extension_version=?,result_url=?,error_code=NULL,filled_at=CURRENT_TIMESTAMP,last_lease_token=?,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
+            .run(JSON.stringify(report),String(b.extensionVersion||'').slice(0,30),String(b.resultUrl||'').slice(0,500),validatedLeaseToken,job.id,auth.organizationId)
           refreshVehiclePublicationStatus(vehicleId,auth.organizationId)
           recordJobEvent(auth.organizationId,job.id,'auto_published',null,{resultUrl:String(b.resultUrl||'').slice(0,500),selectedGroups:report.selectedGroups.length,extensionVersion:String(b.extensionVersion||'').slice(0,30)})
           db.exec('COMMIT')
         }catch(error){db.exec('ROLLBACK');throw error}
         return send(res,200,{ok:true,status:'completed'})
       }
-      db.prepare(`UPDATE publication_jobs SET status='awaiting_confirmation',fill_report=?,extension_version=?,error_code=NULL,filled_at=CURRENT_TIMESTAMP,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
-        .run(JSON.stringify(report),String(b.extensionVersion||'').slice(0,30),job.id,auth.organizationId)
+      db.prepare(`UPDATE publication_jobs SET status='awaiting_confirmation',fill_report=?,extension_version=?,error_code=NULL,filled_at=CURRENT_TIMESTAMP,last_lease_token=?,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
+        .run(JSON.stringify(report),String(b.extensionVersion||'').slice(0,30),validatedLeaseToken,job.id,auth.organizationId)
       if(soldInterrupted)db.prepare('UPDATE publication_jobs SET lease_token=? WHERE id=? AND organization_id=?').run(job.leaseToken!,job.id,auth.organizationId)
       recordJobEvent(auth.organizationId,job.id,'filled_waiting_confirmation',null,{filledCount:report.filledCount,totalCount:report.totalCount,imageCount:report.imageCount,advanced:report.advanced,publishAttempted:report.publishAttempted,missing:report.missing,missingGroups:report.missingGroups,flowIssues:report.flowIssues,extensionVersion:String(b.extensionVersion||'').slice(0,30)})
       return send(res,200,{ok:true,status:'awaiting_confirmation'})
@@ -1018,7 +1024,7 @@ createServer(async (req, res) => {
     if(req.method==='POST'&&recoverPublication){
       const currentUser=userById(auth.userId) as {role?:string}|undefined
       if(currentUser?.role!=='admin')return send(res,403,{error:'Somente administradores podem recuperar trabalhos em preenchimento.'})
-      const job=db.prepare(`SELECT id,status,started_at startedAt,lease_expires_at leaseExpiresAt FROM publication_jobs WHERE id=? AND organization_id=?`).get(Number(recoverPublication[1]),auth.organizationId) as {id:number;status:string;startedAt?:string;leaseExpiresAt?:string}|undefined
+      const job=db.prepare(`SELECT id,status,started_at startedAt,lease_expires_at leaseExpiresAt,publish_attempt_at publishAttemptAt FROM publication_jobs WHERE id=? AND organization_id=?`).get(Number(recoverPublication[1]),auth.organizationId) as {id:number;status:string;startedAt?:string;leaseExpiresAt?:string;publishAttemptAt?:string}|undefined
       if(!job)return send(res,404,{error:'Trabalho não encontrado.'})
       if(job.status!=='filling')return send(res,409,{error:'Somente trabalhos em preenchimento podem ser recuperados.'})
       const elapsedMinutes=job.startedAt?Math.max(0,Math.floor((Date.now()-Date.parse(job.startedAt.replace(' ','T')+'Z'))/60000)):0
@@ -1026,9 +1032,23 @@ createServer(async (req, res) => {
       if(elapsedMinutes<timeout)return send(res,409,{error:`Este trabalho ainda está dentro do tempo normal de preenchimento (${timeout} min).`})
       const leaseExpiresAt=job.leaseExpiresAt?Date.parse(job.leaseExpiresAt.replace(' ','T')+'Z'):0
       if(leaseExpiresAt>Date.now())return send(res,409,{error:'A extensao ainda esta trabalhando neste item. Aguarde o fim do bloqueio exclusivo.'})
+      // Se o checkpoint anterior ao clique em Publicar foi registrado, o clique pode já ter ocorrido:
+      // não é seguro reabrir a fila automaticamente sem confirmação humana de que o anúncio não foi criado.
+      if(job.publishAttemptAt){
+        db.exec('BEGIN')
+        try{
+          db.prepare(`UPDATE publication_jobs SET status='awaiting_confirmation',paused=1,extension_visible=0,
+            fill_report=?,error_code=NULL,last_lease_token=NULL,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP
+            WHERE id=? AND organization_id=?`)
+            .run(JSON.stringify({publishAttempted:true,published:false,staleRecovery:true,reason:'lease_lost_after_publish_attempt'}),job.id,auth.organizationId)
+          recordJobEvent(auth.organizationId,job.id,'stalled_publish_ambiguous',auth.userId,{elapsedMinutes})
+          db.exec('COMMIT')
+        }catch(error){db.exec('ROLLBACK');throw error}
+        return send(res,200,{ok:true,status:'awaiting_confirmation',ambiguous:true})
+      }
       db.exec('BEGIN')
       try{
-        db.prepare("UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',started_at=NULL,filled_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(job.id,auth.organizationId)
+        db.prepare("UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',started_at=NULL,filled_at=NULL,last_lease_token=NULL,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(job.id,auth.organizationId)
         recordJobEvent(auth.organizationId,job.id,'stalled_recovered',auth.userId,{elapsedMinutes})
         db.exec('COMMIT')
       }catch(error){db.exec('ROLLBACK');throw error}
@@ -1254,7 +1274,7 @@ createServer(async (req, res) => {
       if(nextStatus==='pending'&&previousReport.publishAttempted&&b.confirmNoPublication!==true)return send(res,409,{error:'Antes de repetir, verifique em “Seus classificados” se o anúncio foi criado. Confirme no painel que ele NÃO foi publicado para liberar uma nova tentativa.'})
       db.exec('BEGIN')
       try{
-        if(nextStatus==='pending')db.prepare("UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',started_at=NULL,filled_at=NULL,removed_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
+        if(nextStatus==='pending')db.prepare("UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',started_at=NULL,filled_at=NULL,removed_at=NULL,last_lease_token=NULL,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
         else if(nextStatus==='removed')db.prepare("UPDATE publication_jobs SET status='removed',removed_at=CURRENT_TIMESTAMP,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
         else db.prepare('UPDATE publication_jobs SET status=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?').run(nextStatus,Number(publication[1]),auth.organizationId)
         if(nextStatus==='completed'||nextStatus==='removed')refreshVehiclePublicationStatus(job.vehicleId,auth.organizationId)

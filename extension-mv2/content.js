@@ -532,9 +532,15 @@
     const missing=results.filter(item=>!item[1]).map(item=>item[0])
     if(advanced&&missing.length)flowIssues.push(`O Facebook aceitou o avanço, mas o diagnóstico interno não confirmou: ${missing.join(', ')}.`)
     showNotice(results,vehicle,{automation,advanced,selectedGroups,missingGroups,published,flowIssues})
-    if(jobId){
-      chrome.runtime.sendMessage({type:'AUTOFLOW_FILL_RESULT',jobId,report:{filledCount:results.length-missing.length,totalCount:results.length,imageCount,missing,fields:results.map(item=>({name:item[0],ok:Boolean(item[1])})),advanced,selectedGroups,missingGroups,published,publishAttempted,flowIssues,resultUrl:published?location.href:''}})
-    }
+    if(!jobId)return true
+    return reportResult({type:'AUTOFLOW_FILL_RESULT',jobId,report:{filledCount:results.length-missing.length,totalCount:results.length,imageCount,missing,fields:results.map(item=>({name:item[0],ok:Boolean(item[1])})),advanced,selectedGroups,missingGroups,published,publishAttempted,flowIssues,resultUrl:published?location.href:''}})
+  }
+
+  // Envia o resultado ao background e aguarda confirmação de entrega ao servidor,
+  // em vez de disparar e esquecer: só assim sabemos se é seguro limpar o job local.
+  async function reportResult(message){
+    try{await runtimeMessage(message);return true}
+    catch(error){console.warn('AutoFlow: falha ao entregar resultado, mantendo job local para reenvio',error);return false}
   }
 
   function showNotice(results,vehicle,flow){
@@ -566,7 +572,14 @@
     document.body.appendChild(box)
   }
 
-  function run(task){return fill(task).catch(error=>{console.error('AutoFlow: falha no preenchimento',error);if(task?.jobId)chrome.runtime.sendMessage({type:'AUTOFLOW_FILL_ERROR',jobId:task.jobId,error:error.message||String(error)})})}
+  async function run(task){
+    try{return await fill(task)}
+    catch(error){
+      console.error('AutoFlow: falha no preenchimento',error)
+      if(!task?.jobId)return true
+      return reportResult({type:'AUTOFLOW_FILL_ERROR',jobId:task.jobId,error:error.message||String(error)})
+    }
+  }
   chrome.storage.local.get(['pendingJob','pendingVehicle'],data=>{
     const task=data.pendingJob||data.pendingVehicle
     if(!task)return
@@ -575,10 +588,13 @@
       attempts++
       if(document.querySelector('input,textarea,[role="combobox"],[contenteditable="true"]')){
         clearInterval(timer)
-        run(task).finally(()=>chrome.storage.local.remove(['pendingJob','pendingVehicle']))
+        // Só limpamos o job local depois de confirmar que o resultado chegou ao servidor.
+        // Se a entrega falhar, o job permanece para o reenvio durável do background.js.
+        run(task).then(delivered=>{if(delivered)chrome.storage.local.remove(['pendingJob','pendingVehicle'])})
       }else if(attempts>40){
         clearInterval(timer)
-        if(task?.jobId)chrome.runtime.sendMessage({type:'AUTOFLOW_FILL_ERROR',jobId:task.jobId,error:'O formulário do Marketplace não ficou disponível.'})
+        if(!task?.jobId)return
+        reportResult({type:'AUTOFLOW_FILL_ERROR',jobId:task.jobId,error:'O formulário do Marketplace não ficou disponível.'}).then(delivered=>{if(delivered)chrome.storage.local.remove(['pendingJob','pendingVehicle'])})
       }
     },500)
   })
