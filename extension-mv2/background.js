@@ -10,6 +10,26 @@ function ensureHeartbeatAlarm(){
 // batimento (~60s) indefinidamente se ele estiver fora do ar por muito tempo.
 function pendingResultRetryDelayMs(attempts){return Math.min(30000*Math.pow(2,Math.max(0,attempts)),300000)}
 
+// Backoff curto para chamadas em primeiro plano, dentro do fluxo síncrono de
+// preenchimento (diferente do reenvio durável acima, que pode esperar minutos).
+function quickRetryDelayMs(attempt){return Math.min(500*Math.pow(2,attempt),4000)}
+
+// Repete apenas falhas de transporte (rede fora do ar, DNS, timeout via AbortController).
+// Uma resposta HTTP que chegou — mesmo 4xx/409 — nunca é repetida: é devolvida normalmente
+// para quem chamou decidir, já que ela representa uma rejeição legítima do servidor.
+async function fetchWithRetry(url,options,{attempts=3,timeoutMs=8000}={}){
+  let lastError
+  for(let attempt=0;attempt<attempts;attempt++){
+    if(attempt>0)await new Promise(resolve=>setTimeout(resolve,quickRetryDelayMs(attempt-1)))
+    const controller=new AbortController()
+    const timer=setTimeout(()=>controller.abort(),timeoutMs)
+    try{return await fetch(url,{...options,signal:controller.signal})}
+    catch(error){lastError=error}
+    finally{clearTimeout(timer)}
+  }
+  throw lastError
+}
+
 function sendFillResult(jobId,token,payload){
   return fetch(`${API}/extension/jobs/${jobId}/fill-result`,{
     method:'PATCH',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(payload)
@@ -78,9 +98,9 @@ chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
   if(message.type==='AUTOFLOW_PUBLISH_CHECK'){
     chrome.storage.local.get(['pendingJob','token'],({pendingJob,token})=>{
       if(!token||pendingJob?.jobId!==message.jobId||!pendingJob?.leaseToken){sendResponse({ok:false,error:'A execução não está mais ativa.'});return}
-      fetch(`${API}/extension/jobs/${pendingJob.jobId}/publish-check`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({leaseToken:pendingJob.leaseToken})})
-        .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error||'A publicação não foi autorizada.');sendResponse({ok:true})})
-        .catch(error=>sendResponse({ok:false,error:error.message}))
+      fetchWithRetry(`${API}/extension/jobs/${pendingJob.jobId}/publish-check`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({leaseToken:pendingJob.leaseToken})},{attempts:3,timeoutMs:8000})
+        .then(async response=>{const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'A publicação não foi autorizada.');sendResponse({ok:true})})
+        .catch(error=>sendResponse({ok:false,error:error.name==='AbortError'?'Tempo esgotado ao confirmar a publicação com o servidor.':error.message}))
     })
     return true
   }
@@ -96,7 +116,7 @@ chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
       imageUrl=new URL(String(message.url||''))
       if(imageUrl.origin!==API_ORIGIN||!/^\/uploads\/[a-f0-9]{24}\.(?:jpg|jpeg|png|webp)$/.test(imageUrl.pathname))throw new Error('Endereço de imagem inválido.')
     }catch(error){sendResponse({ok:false,error:error.message||String(error)});return}
-    fetch(imageUrl.href)
+    fetchWithRetry(imageUrl.href,{},{attempts:3,timeoutMs:15000})
       .then(async response=>{
         if(!response.ok)throw new Error(`HTTP ${response.status}`)
         const bytes=new Uint8Array(await response.arrayBuffer())
@@ -104,7 +124,7 @@ chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
         for(let offset=0;offset<bytes.length;offset+=32768)binary+=String.fromCharCode.apply(null,bytes.subarray(offset,offset+32768))
         sendResponse({ok:true,dataBase64:btoa(binary),mimeType:response.headers.get('content-type')||'image/jpeg'})
       })
-      .catch(error=>sendResponse({ok:false,error:error.message||String(error)}))
+      .catch(error=>sendResponse({ok:false,error:error.name==='AbortError'?'Tempo esgotado ao baixar a foto.':(error.message||String(error))}))
     return true
   }
   if(message.type!=='AUTOFLOW_FILL_RESULT'&&message.type!=='AUTOFLOW_FILL_ERROR')return
