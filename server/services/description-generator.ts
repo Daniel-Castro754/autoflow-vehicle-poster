@@ -1,3 +1,5 @@
+import { logger } from '../lib/logger.ts'
+
 export interface VehicleInput {
   year: number
   make: string
@@ -158,10 +160,10 @@ REGRAS:
           return { description: text, provider: 'gemini' }
         }
       } else {
-        console.warn(`[AutoFlow AI] Gemini API respondeu com status ${response.status}`)
+        logger.warn('AutoFlowAI', `Gemini API respondeu com status ${response.status}`)
       }
     } catch (err) {
-      console.warn('[AutoFlow AI] Falha na chamada ao Gemini API:', err instanceof Error ? err.message : err)
+      logger.warn('AutoFlowAI', 'Falha na chamada ao Gemini API', { error: err instanceof Error ? err.message : err })
     }
   }
 
@@ -191,10 +193,10 @@ REGRAS:
           return { description: text, provider: 'openai' }
         }
       } else {
-        console.warn(`[AutoFlow AI] OpenAI API respondeu com status ${response.status}`)
+        logger.warn('AutoFlowAI', `OpenAI API respondeu com status ${response.status}`)
       }
     } catch (err) {
-      console.warn('[AutoFlow AI] Falha na chamada à OpenAI API:', err instanceof Error ? err.message : err)
+      logger.warn('AutoFlowAI', 'Falha na chamada à OpenAI API', { error: err instanceof Error ? err.message : err })
     }
   }
 

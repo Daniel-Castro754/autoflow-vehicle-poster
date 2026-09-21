@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomBytes, scrypt, timingSafeEqual, createHmac, createHash } from 'node:crypto'
 import { calculateBackoff } from './lib/retry.ts'
+import { logger } from './lib/logger.ts'
 import { sendCriticalAlert } from './services/alerting.ts'
 import { generateVehicleDescription, type VehicleInput, type CopyTone } from './services/description-generator.ts'
 import { generateVehicleHashtags } from './services/trending-hashtags.ts'
@@ -672,17 +673,20 @@ createServer(async (req, res) => {
         const orgSettings = db.prepare('SELECT auto_retry autoRetry, max_retries maxRetries, alert_telegram_token alertTelegramToken, alert_telegram_chat_id alertTelegramChatId, alert_webhook_url alertWebhookUrl FROM organization_settings WHERE organization_id=?').get(auth.organizationId) as {autoRetry?:number;maxRetries?:number;alertTelegramToken?:string;alertTelegramChatId?:string;alertWebhookUrl?:string}|undefined
         const autoRetryActive = Boolean(orgSettings?.autoRetry) || b.autoRetry === true
         const maxRetries = Math.max(1, Number(job.maxRetries || orgSettings?.maxRetries || 3))
-        const attempts = Number(job.attemptCount || 1)
+        // retryCount (não attemptCount) governa o orçamento de retry automático: attemptCount também
+        // conta reaberturas manuais e de recuperação de job travado, e não deve pesar nessa decisão —
+        // veja a mesma distinção em health-monitor.ts. Começa em 0 (a 1ª falha ainda não gastou retry nenhum).
+        const retriesUsed = Number(job.retryCount || 0)
 
-        if (autoRetryActive && attempts < maxRetries) {
-          const delayMs = calculateBackoff(attempts, 60000, 600000, true)
+        if (autoRetryActive && retriesUsed < maxRetries) {
+          const delayMs = calculateBackoff(retriesUsed + 1, 60000, 600000, true)
           const nextScheduledAt = new Date(Date.now() + delayMs).toISOString()
           // A partir da 2ª falha consecutiva, considera mover para uma conta mais saudável em vez
           // de insistir sempre na mesma — findBestAccountForVehicle já exclui a conta atual, pois
           // este job ainda está ativo (status='error') para o mesmo veículo no momento da checagem.
           let targetAccountId = job.accountId
           let nextPriority: number | null = null
-          if (attempts >= 2) {
+          if (retriesUsed >= 1) {
             const healthier = findBestAccountForVehicle(db, auth.organizationId, job.vehicleId)
             if (healthier && healthier.id !== job.accountId) {
               targetAccountId = healthier.id
@@ -693,30 +697,30 @@ createServer(async (req, res) => {
           if (nextPriority !== null) {
             db.prepare(`UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,scheduled_at=?,error_code=?,retry_count=retry_count+1,extension_version=?,last_lease_token=?,publish_attempt_at=NULL,social_account_id=?,queue_priority=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
               .run(nextScheduledAt,error,String(b.extensionVersion||'').slice(0,30),validatedLeaseToken,targetAccountId,nextPriority,job.id,auth.organizationId)
-            recordJobEvent(auth.organizationId,job.id,'reassigned',null,{auto:true,reason:'repeated_failures',attempt:attempts,queuePriority:nextPriority},job.accountId,targetAccountId)
+            recordJobEvent(auth.organizationId,job.id,'reassigned',null,{auto:true,reason:'repeated_failures',attempt:retriesUsed+1,queuePriority:nextPriority},job.accountId,targetAccountId)
           } else {
             db.prepare(`UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,scheduled_at=?,error_code=?,retry_count=retry_count+1,extension_version=?,last_lease_token=?,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
               .run(nextScheduledAt,error,String(b.extensionVersion||'').slice(0,30),validatedLeaseToken,job.id,auth.organizationId)
           }
-          recordJobEvent(auth.organizationId,job.id,'auto_retry_scheduled',null,{attempt:attempts,maxRetries,delaySeconds:Math.round(delayMs/1000),scheduledAt:nextScheduledAt,error,extensionVersion:String(b.extensionVersion||'').slice(0,30),rerouted:nextPriority!==null})
+          recordJobEvent(auth.organizationId,job.id,'auto_retry_scheduled',null,{attempt:retriesUsed+1,maxRetries,delaySeconds:Math.round(delayMs/1000),scheduledAt:nextScheduledAt,error,extensionVersion:String(b.extensionVersion||'').slice(0,30),rerouted:nextPriority!==null})
           return send(res,200,{ok:true,status:'pending',autoRetry:true,scheduledAt:nextScheduledAt,accountId:targetAccountId})
         }
 
         db.prepare(`UPDATE publication_jobs SET status='error',error_code=?,extension_version=?,last_lease_token=?,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
           .run(error,String(b.extensionVersion||'').slice(0,30),validatedLeaseToken,job.id,auth.organizationId)
-        recordJobEvent(auth.organizationId,job.id,'fill_error',null,{error,extensionVersion:String(b.extensionVersion||'').slice(0,30),retriesExhausted:attempts>=maxRetries})
+        recordJobEvent(auth.organizationId,job.id,'fill_error',null,{error,extensionVersion:String(b.extensionVersion||'').slice(0,30),retriesExhausted:retriesUsed>=maxRetries})
         void sendCriticalAlert({
           jobId: job.id,
           accountLabel: job.accountLabel,
           type: 'fill_error',
           message: error,
-          attemptCount: attempts,
+          attemptCount: Number(job.attemptCount || 1),
         }, {
           telegramBotToken: orgSettings?.alertTelegramToken,
           telegramChatId: orgSettings?.alertTelegramChatId,
           webhookUrl: orgSettings?.alertWebhookUrl,
         })
-        return send(res,200,{ok:true,status:'error',retriesExhausted:attempts>=maxRetries})
+        return send(res,200,{ok:true,status:'error',retriesExhausted:retriesUsed>=maxRetries})
       }
       const report={
         ...(soldInterrupted?{saleInterrupted:true}:{}),
@@ -902,7 +906,7 @@ createServer(async (req, res) => {
         }
         db.exec('COMMIT')
       } catch (error) { db.exec('ROLLBACK'); throw error }
-      for(const path of filesToDelete)try{if(existsSync(path))unlinkSync(path)}catch(error){console.warn(`Não foi possível remover o arquivo órfão ${path}:`,error)}
+      for(const path of filesToDelete)try{if(existsSync(path))unlinkSync(path)}catch(error){logger.warn('Server',`Não foi possível remover o arquivo órfão ${path}`,{error})}
       return send(res,200,{deleted:owned.length,removedJobs})
     }
     if (req.method === 'GET' && url.pathname === '/api/team') {
@@ -1607,6 +1611,6 @@ createServer(async (req, res) => {
     return send(res,404,{error:'Rota não encontrada.'})
   } catch (error) {
     if(error instanceof HttpError)return send(res,error.status,{error:error.message})
-    console.error(error); return send(res,500,{error:'Erro interno da aplicação.'})
+    logger.error('Server','Erro não tratado na requisição',{error}); return send(res,500,{error:'Erro interno da aplicação.'})
   }
 }).listen(port,host,() => console.log(`API AutoFlow em ${publicOrigin}`))

@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { curateMarketplaceGroups, type GroupRecord } from './group-curator.ts'
+import { logger } from '../lib/logger.ts'
 
 function groupTarget(group: { name: string; url: string }) {
   return group.url ? `${group.name} | ${group.url}` : group.name
@@ -61,7 +62,7 @@ export function runGroupCurationSweep(db: DatabaseSync): { organizationsCurated:
       applyGroupCuration(db, org.organizationId)
       organizationsCurated++
     } catch (err) {
-      console.warn(`[GroupCurationWorker] Falha ao curar grupos da organização #${org.organizationId}:`, err)
+      logger.warn('GroupCurationWorker', `Falha ao curar grupos da organização #${org.organizationId}`, { error: err })
     }
   }
   return { organizationsCurated }
@@ -76,7 +77,7 @@ export function startGroupCurationWorker(db: DatabaseSync, intervalMs = 21600000
     try {
       runGroupCurationSweep(db)
     } catch (err) {
-      console.warn('[GroupCurationWorker] Erro na varredura periódica de curadoria:', err)
+      logger.warn('GroupCurationWorker', 'Erro na varredura periódica de curadoria', { error: err })
     }
   }, intervalMs)
 

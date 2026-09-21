@@ -34,7 +34,7 @@ try{
   await call('/settings',adminToken,{method:'PATCH',body:JSON.stringify({organizationName:'Safety Test',dailyLimit:10,stuckTimeoutMinutes:1,maxRetries:3,descriptionTemplate:'',autoAdvance:true,fillGroups:false,autoPublish:false})})
   const account=await call('/social-accounts',adminToken,{method:'POST',body:JSON.stringify({userId:(await call('/team',adminToken)).users[0].id,label:'Facebook Teste',browserProfile:'Brave Perfil Teste'})})
   const testDb=new DatabaseSync(join(dataDir,'autoflow.db'))
-  const jobRow=id=>testDb.prepare('SELECT status,paused,fill_report fillReport,attempt_count attemptCount,publish_attempt_at publishAttemptAt,last_lease_token lastLeaseToken FROM publication_jobs WHERE id=?').get(id)
+  const jobRow=id=>testDb.prepare('SELECT status,paused,fill_report fillReport,attempt_count attemptCount,retry_count retryCount,publish_attempt_at publishAttemptAt,last_lease_token lastLeaseToken FROM publication_jobs WHERE id=?').get(id)
   const backdateStuck=id=>{
     testDb.prepare("UPDATE publication_jobs SET started_at=datetime('now','-5 minutes') WHERE id=?").run(id)
     testDb.prepare("UPDATE publication_jobs SET lease_expires_at=datetime('now','-1 second') WHERE id=?").run(id)
@@ -68,7 +68,9 @@ try{
   if(jobRow(publicationB.id).status!=='pending')throw new Error('A confirmação manual deveria liberar o trabalho para a fila.')
 
   // 3. Sem sinal de publish-check, a recuperação automática continua segura (volta para
-  //    "pending"), mas passa a respeitar max_retries em vez de poder repetir para sempre.
+  //    "pending"), mas passa a respeitar max_retries (via retry_count, não attempt_count) em
+  //    vez de poder repetir para sempre. Uma recuperação não-esgotada também passa a contar
+  //    para esse orçamento (retry_count incrementa), coisa que antes não acontecia.
   const vehicleC=await createReadyVehicle(adminToken)
   const publicationC=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:vehicleC.id,accountId:account.id})})
   await call(`/extension/jobs/${publicationC.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_instance_gamma'})})
@@ -76,13 +78,29 @@ try{
   await runHealthCheck(testDb,{autoRecover:true})
   const recoveredC=jobRow(publicationC.id)
   if(recoveredC.status!=='pending'||recoveredC.publishAttemptAt)throw new Error('Um job sem sinal de publicação deveria voltar normalmente para a fila.')
+  if(recoveredC.retryCount!==1)throw new Error('Uma recuperação automática não-esgotada deveria incrementar retry_count.')
 
-  testDb.prepare('UPDATE publication_jobs SET attempt_count=? WHERE id=?').run(recoveredC.attemptCount+2,publicationC.id)
+  testDb.prepare('UPDATE publication_jobs SET retry_count=3 WHERE id=?').run(publicationC.id)
   await call(`/extension/jobs/${publicationC.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_instance_gamma'})})
   backdateStuck(publicationC.id)
   await runHealthCheck(testDb,{autoRecover:true})
   const exhaustedC=jobRow(publicationC.id)
-  if(exhaustedC.status!=='error')throw new Error('Um job que esgotou as tentativas de recuperação deveria virar erro em vez de repetir para sempre.')
+  if(exhaustedC.status!=='error')throw new Error('Um job que esgotou o orçamento de retry deveria virar erro em vez de repetir para sempre.')
+
+  // 3b. attempt_count alto por causa de falhas sem auto-retry ativo (equivalente a reaberturas
+  //     fora do mecanismo de retry automático) não deve, sozinho, esgotar o auto-retry do
+  //     fill-result quando ele finalmente for ativado — só retry_count governa essa decisão.
+  const vehicleH=await createReadyVehicle(adminToken)
+  const publicationH=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:vehicleH.id,accountId:account.id})})
+  for(let i=0;i<5;i++){
+    const prepared=await call(`/extension/jobs/${publicationH.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_instance_h'})})
+    await call(`/extension/jobs/${publicationH.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:prepared.leaseToken,error:'Falha sem auto-retry ativo',extensionVersion:'0.16.0'})})
+  }
+  const beforeAutoRetry=jobRow(publicationH.id)
+  if(beforeAutoRetry.attemptCount<5||beforeAutoRetry.retryCount!==0||beforeAutoRetry.status!=='error')throw new Error('O cenário deveria simular várias falhas sem auto-retry, sem nenhum retry automático contabilizado ainda.')
+  const preparedH=await call(`/extension/jobs/${publicationH.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_instance_h'})})
+  const lateAutoRetryResult=await call(`/extension/jobs/${publicationH.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedH.leaseToken,error:'Agora com auto-retry ativo',autoRetry:true,extensionVersion:'0.16.0'})})
+  if(lateAutoRetryResult.status!=='pending'||lateAutoRetryResult.autoRetry!==true)throw new Error('attempt_count alto por falhas anteriores não deveria esgotar o auto-retry, que ainda não tinha sido usado.')
 
   // 4. Um relatório de preenchimento parcial que sinaliza suspeita de mudança de layout do
   //    Facebook deve persistir esse sinal no fill_report (o disparo do alerta em si não é
@@ -155,7 +173,7 @@ try{
   if(noAlternative.accountId!==account.id)throw new Error('Sem conta alternativa disponível, o job deveria permanecer na mesma conta.')
 
   testDb.close()
-  console.log(JSON.stringify({ok:true,idempotentFillResult:true,staleRecoveryRequiresConfirmation:true,safeRecoveryRespectsMaxRetries:true,layoutDriftSignalPersisted:true,autoGroupCurationApplied:true,scheduleLearnsFromHistory:true,retryReroutedToHealthyAccount:true,retryStaysWithoutAlternative:true},null,2))
+  console.log(JSON.stringify({ok:true,idempotentFillResult:true,staleRecoveryRequiresConfirmation:true,safeRecoveryRespectsMaxRetries:true,layoutDriftSignalPersisted:true,autoGroupCurationApplied:true,scheduleLearnsFromHistory:true,retryReroutedToHealthyAccount:true,retryStaysWithoutAlternative:true,retryCountGatesAutoRetryNotAttemptCount:true},null,2))
 }finally{
   if(server.exitCode===null){server.kill();await new Promise(resolve=>server.once('exit',resolve))}
   await rm(dataDir,{recursive:true,force:true})
