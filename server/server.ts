@@ -1276,6 +1276,10 @@ createServer(async (req, res) => {
       settings.groups=marketplaceGroups(auth.organizationId)
       if(!settings.geminiApiKey&&process.env.GEMINI_API_KEY)settings.geminiApiKey=process.env.GEMINI_API_KEY
       if(!settings.openaiApiKey&&process.env.OPENAI_API_KEY)settings.openaiApiKey=process.env.OPENAI_API_KEY
+      if(!isAdmin(auth)){
+        delete settings.geminiApiKey;delete settings.openaiApiKey
+        delete settings.alertTelegramToken;delete settings.alertTelegramChatId;delete settings.alertWebhookUrl
+      }
       return send(res,200,{organization,settings})
     }
     if (req.method === 'PATCH' && url.pathname === '/api/settings') {
