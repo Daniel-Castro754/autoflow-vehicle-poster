@@ -83,8 +83,20 @@ try{
   const exhaustedC=jobRow(publicationC.id)
   if(exhaustedC.status!=='error')throw new Error('Um job que esgotou as tentativas de recuperação deveria virar erro em vez de repetir para sempre.')
 
+  // 4. Um relatório de preenchimento parcial que sinaliza suspeita de mudança de layout do
+  //    Facebook deve persistir esse sinal no fill_report (o disparo do alerta em si não é
+  //    verificável sem Telegram/webhook configurado, mas degrada graciosamente sem erro).
+  const vehicleD=await createReadyVehicle(adminToken)
+  const publicationD=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:vehicleD.id,accountId:account.id})})
+  const preparedD=await call(`/extension/jobs/${publicationD.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_instance_delta'})})
+  const driftResult=await call(`/extension/jobs/${publicationD.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedD.leaseToken,filledCount:12,totalCount:14,imageCount:1,missing:['Ano','Fabricante'],fields:[],advanced:false,selectedGroups:[],missingGroups:[],flowIssues:['O Facebook não liberou a segunda etapa após as tentativas de preenchimento e correção.'],published:false,publishAttempted:false,layoutDriftSuspected:true,notFoundFields:['Ano','Fabricante'],extensionVersion:'0.14.0'})})
+  if(driftResult.status!=='awaiting_confirmation')throw new Error('Um preenchimento parcial sem exceção deveria aguardar confirmação normalmente.')
+  const driftReport=JSON.parse(jobRow(publicationD.id).fillReport||'{}')
+  if(driftReport.layoutDriftSuspected!==true)throw new Error('O sinal de suspeita de mudança de layout não foi persistido no relatório.')
+  if(JSON.stringify(driftReport.notFoundFields)!==JSON.stringify(['Ano','Fabricante']))throw new Error('Os campos não localizados não foram persistidos corretamente.')
+
   testDb.close()
-  console.log(JSON.stringify({ok:true,idempotentFillResult:true,staleRecoveryRequiresConfirmation:true,safeRecoveryRespectsMaxRetries:true},null,2))
+  console.log(JSON.stringify({ok:true,idempotentFillResult:true,staleRecoveryRequiresConfirmation:true,safeRecoveryRespectsMaxRetries:true,layoutDriftSignalPersisted:true},null,2))
 }finally{
   if(server.exitCode===null){server.kill();await new Promise(resolve=>server.once('exit',resolve))}
   await rm(dataDir,{recursive:true,force:true})

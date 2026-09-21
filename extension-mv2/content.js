@@ -4,6 +4,10 @@
 
   const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms))
   const randomDelay=(min,max)=>sleep(min+Math.random()*(max-min))
+  // Marcado por fillText/selectCustom quando o controle não é localizado no DOM (diferente
+  // de "localizado, mas o valor não confirmou") — usado por step() para sinalizar possível
+  // mudança de layout do Facebook em vez de um problema pontual de dados do veículo.
+  let lastFieldNotFound=false
   const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()
   const visible=element=>{const box=element.getBoundingClientRect();const style=getComputedStyle(element);return box.width>0&&box.height>0&&style.visibility!=='hidden'&&style.display!=='none'}
   const attributeText=element=>{
@@ -110,7 +114,7 @@
   async function fillText(labels,value){
     if(value===undefined||value===null||value==='')return false
     const element=await waitField(labels,'input:not([type="file"]),textarea,[contenteditable="true"],[role="textbox"]')
-    if(!element)return false
+    if(!element){lastFieldNotFound=true;return false}
     element.scrollIntoView({block:'center',behavior:'auto'})
     await sleep(180)
     if(element instanceof HTMLInputElement||element instanceof HTMLTextAreaElement){
@@ -159,7 +163,7 @@
   async function selectCustom(labels,value){
     if(value===undefined||value===null||value==='')return false
     const trigger=await waitField(labels,'select,[role="combobox"],[aria-haspopup="listbox"],input[aria-autocomplete]')
-    if(!trigger)return false
+    if(!trigger){lastFieldNotFound=true;return false}
     const wanted=valuesFor(value)
     if(trigger instanceof HTMLSelectElement){
       const option=[...trigger.options].find(item=>wanted.some(candidate=>fuzzyMatch(item.textContent,candidate)))
@@ -457,11 +461,14 @@
   }
 
   async function step(label,run){
+    let notFound=false
     for(let attempt=0;attempt<2;attempt++){
       await randomDelay(attempt?420:260,attempt?760:560)
+      lastFieldNotFound=false
       try{if(await run())return[label,true]}catch(error){console.warn(`AutoFlow: falha em ${label}`,error)}
+      notFound=lastFieldNotFound
     }
-    return[label,false]
+    return[label,false,notFound]
   }
 
   async function fill(task){
@@ -531,9 +538,13 @@
     const results=[...resultMap.values()]
     const missing=results.filter(item=>!item[1]).map(item=>item[0])
     if(advanced&&missing.length)flowIssues.push(`O Facebook aceitou o avanço, mas o diagnóstico interno não confirmou: ${missing.join(', ')}.`)
+    // Campos críticos cujo controle não foi encontrado no DOM (não apenas valor não confirmado)
+    // são um sinal muito mais forte de mudança de layout do que um dado que não bate com nenhuma opção.
+    const notFoundFields=fieldSteps.filter(field=>field.critical&&resultMap.get(field.label)?.[2]).map(field=>field.label)
+    const layoutDriftSuspected=notFoundFields.length>=2||(automation.autoAdvance&&!advanced&&notFoundFields.length>=1)
     showNotice(results,vehicle,{automation,advanced,selectedGroups,missingGroups,published,flowIssues})
     if(!jobId)return true
-    return reportResult({type:'AUTOFLOW_FILL_RESULT',jobId,report:{filledCount:results.length-missing.length,totalCount:results.length,imageCount,missing,fields:results.map(item=>({name:item[0],ok:Boolean(item[1])})),advanced,selectedGroups,missingGroups,published,publishAttempted,flowIssues,resultUrl:published?location.href:''}})
+    return reportResult({type:'AUTOFLOW_FILL_RESULT',jobId,report:{filledCount:results.length-missing.length,totalCount:results.length,imageCount,missing,fields:results.map(item=>({name:item[0],ok:Boolean(item[1])})),advanced,selectedGroups,missingGroups,published,publishAttempted,flowIssues,resultUrl:published?location.href:'',layoutDriftSuspected,notFoundFields}})
   }
 
   // Envia o resultado ao background e aguarda confirmação de entrega ao servidor,
