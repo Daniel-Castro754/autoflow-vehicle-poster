@@ -649,10 +649,10 @@ createServer(async (req, res) => {
     const extensionFillResult = url.pathname.match(/^\/api\/extension\/jobs\/(\d+)\/fill-result$/)
     if (req.method === 'PATCH' && extensionFillResult) {
       const b=await jsonBody(req) as Record<string,unknown>
-      const job = db.prepare(`SELECT j.id,j.status,j.social_account_id accountId,j.lease_token leaseToken,j.lease_expires_at leaseExpiresAt,j.fill_report fillReport,
+      const job = db.prepare(`SELECT j.id,j.status,j.vehicle_id vehicleId,j.social_account_id accountId,j.lease_token leaseToken,j.lease_expires_at leaseExpiresAt,j.fill_report fillReport,
         j.attempt_count attemptCount,COALESCE(j.max_retries,3) maxRetries,j.retry_count retryCount,j.last_lease_token lastLeaseToken,COALESCE(a.label,'Perfil não definido') accountLabel
         FROM publication_jobs j LEFT JOIN social_accounts a ON a.id=j.social_account_id
-        WHERE j.id=? AND j.organization_id=?`).get(Number(extensionFillResult[1]),auth.organizationId) as {id:number;status:string;accountId:number;leaseToken?:string;leaseExpiresAt?:string;fillReport?:string;attemptCount?:number;maxRetries?:number;retryCount?:number;lastLeaseToken?:string;accountLabel?:string}|undefined
+        WHERE j.id=? AND j.organization_id=?`).get(Number(extensionFillResult[1]),auth.organizationId) as {id:number;status:string;vehicleId:number;accountId:number;leaseToken?:string;leaseExpiresAt?:string;fillReport?:string;attemptCount?:number;maxRetries?:number;retryCount?:number;lastLeaseToken?:string;accountLabel?:string}|undefined
       if (!job || !allowedExtensionAccount(job.accountId,auth)) return send(res,404,{error:'Trabalho não encontrado para este perfil.'})
       // Reenvio de um resultado já processado nesta execução: responde de forma idempotente sem repetir efeitos colaterais.
       if(job.lastLeaseToken&&String(b.leaseToken||'')===job.lastLeaseToken)return send(res,200,{ok:true,status:job.status,idempotent:true})
@@ -677,10 +677,29 @@ createServer(async (req, res) => {
         if (autoRetryActive && attempts < maxRetries) {
           const delayMs = calculateBackoff(attempts, 60000, 600000, true)
           const nextScheduledAt = new Date(Date.now() + delayMs).toISOString()
-          db.prepare(`UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,scheduled_at=?,error_code=?,retry_count=retry_count+1,extension_version=?,last_lease_token=?,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
-            .run(nextScheduledAt,error,String(b.extensionVersion||'').slice(0,30),validatedLeaseToken,job.id,auth.organizationId)
-          recordJobEvent(auth.organizationId,job.id,'auto_retry_scheduled',null,{attempt:attempts,maxRetries,delaySeconds:Math.round(delayMs/1000),scheduledAt:nextScheduledAt,error,extensionVersion:String(b.extensionVersion||'').slice(0,30)})
-          return send(res,200,{ok:true,status:'pending',autoRetry:true,scheduledAt:nextScheduledAt})
+          // A partir da 2ª falha consecutiva, considera mover para uma conta mais saudável em vez
+          // de insistir sempre na mesma — findBestAccountForVehicle já exclui a conta atual, pois
+          // este job ainda está ativo (status='error') para o mesmo veículo no momento da checagem.
+          let targetAccountId = job.accountId
+          let nextPriority: number | null = null
+          if (attempts >= 2) {
+            const healthier = findBestAccountForVehicle(db, auth.organizationId, job.vehicleId)
+            if (healthier && healthier.id !== job.accountId) {
+              targetAccountId = healthier.id
+              nextPriority = ((db.prepare(`SELECT COALESCE(MAX(queue_priority),0)+1 value FROM publication_jobs WHERE organization_id=? AND social_account_id=?
+                AND status IN ('pending','filling','error','awaiting_confirmation')`).get(auth.organizationId, targetAccountId) as { value: number }).value) || 1
+            }
+          }
+          if (nextPriority !== null) {
+            db.prepare(`UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,scheduled_at=?,error_code=?,retry_count=retry_count+1,extension_version=?,last_lease_token=?,publish_attempt_at=NULL,social_account_id=?,queue_priority=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
+              .run(nextScheduledAt,error,String(b.extensionVersion||'').slice(0,30),validatedLeaseToken,targetAccountId,nextPriority,job.id,auth.organizationId)
+            recordJobEvent(auth.organizationId,job.id,'reassigned',null,{auto:true,reason:'repeated_failures',attempt:attempts,queuePriority:nextPriority},job.accountId,targetAccountId)
+          } else {
+            db.prepare(`UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,scheduled_at=?,error_code=?,retry_count=retry_count+1,extension_version=?,last_lease_token=?,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
+              .run(nextScheduledAt,error,String(b.extensionVersion||'').slice(0,30),validatedLeaseToken,job.id,auth.organizationId)
+          }
+          recordJobEvent(auth.organizationId,job.id,'auto_retry_scheduled',null,{attempt:attempts,maxRetries,delaySeconds:Math.round(delayMs/1000),scheduledAt:nextScheduledAt,error,extensionVersion:String(b.extensionVersion||'').slice(0,30),rerouted:nextPriority!==null})
+          return send(res,200,{ok:true,status:'pending',autoRetry:true,scheduledAt:nextScheduledAt,accountId:targetAccountId})
         }
 
         db.prepare(`UPDATE publication_jobs SET status='error',error_code=?,extension_version=?,last_lease_token=?,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
