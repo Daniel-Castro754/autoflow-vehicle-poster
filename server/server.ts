@@ -694,7 +694,22 @@ createServer(async (req, res) => {
         fields:Array.isArray(b.fields)?b.fields.slice(0,30):[],advanced:Boolean(b.advanced),
         selectedGroups:Array.isArray(b.selectedGroups)?b.selectedGroups.map(String).slice(0,20):[],
         missingGroups:Array.isArray(b.missingGroups)?b.missingGroups.map(String).slice(0,20):[],
-        flowIssues:Array.isArray(b.flowIssues)?b.flowIssues.map(value=>String(value).slice(0,240)).slice(0,10):[],published:Boolean(b.published),publishAttempted:Boolean(b.publishAttempted)
+        flowIssues:Array.isArray(b.flowIssues)?b.flowIssues.map(value=>String(value).slice(0,240)).slice(0,10):[],published:Boolean(b.published),publishAttempted:Boolean(b.publishAttempted),
+        layoutDriftSuspected:Boolean(b.layoutDriftSuspected),notFoundFields:Array.isArray(b.notFoundFields)?b.notFoundFields.map(String).slice(0,20):[]
+      }
+      if(report.layoutDriftSuspected){
+        const alertSettings=db.prepare('SELECT alert_telegram_token alertTelegramToken, alert_telegram_chat_id alertTelegramChatId, alert_webhook_url alertWebhookUrl FROM organization_settings WHERE organization_id=?').get(auth.organizationId) as {alertTelegramToken?:string;alertTelegramChatId?:string;alertWebhookUrl?:string}|undefined
+        void sendCriticalAlert({
+          jobId: job.id,
+          accountLabel: job.accountLabel,
+          type: 'layout_drift_suspected',
+          message: `Possível mudança de layout do Facebook: campos não localizados (${report.notFoundFields.join(', ')||'diversos'}). Verifique se o formulário do Marketplace mudou antes de repetir automaticamente.`,
+          details: { notFoundFields: report.notFoundFields },
+        }, {
+          telegramBotToken: alertSettings?.alertTelegramToken,
+          telegramChatId: alertSettings?.alertTelegramChatId,
+          webhookUrl: alertSettings?.alertWebhookUrl,
+        })
       }
       const registeredGroups=marketplaceGroups(auth.organizationId)
       for(const target of report.selectedGroups){
