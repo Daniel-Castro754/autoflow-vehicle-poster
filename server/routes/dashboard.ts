@@ -87,7 +87,8 @@ export function handleDashboardRoute(
       .all(auth.organizationId)
     const accounts = db
       .prepare(
-        `SELECT a.id,a.user_id userId,a.label,a.platform,a.status,a.browser_profile browserProfile,a.last_seen_at lastSeenAt,u.name owner
+        `SELECT a.id,a.user_id userId,a.label,a.platform,a.status,a.browser_profile browserProfile,a.last_seen_at lastSeenAt,
+        a.automation_paused automationPaused,a.automation_pause_reason automationPauseReason,a.automation_paused_at automationPausedAt,u.name owner
       FROM social_accounts a JOIN users u ON u.id=a.user_id WHERE a.organization_id=? ORDER BY u.name,a.label`,
       )
       .all(auth.organizationId)
