@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
+import { jpegBase64, pngFixtureBase64, webpFixtureBase64 } from './helpers/images.mjs'
 
 const port=3399
 const base=`http://127.0.0.1:${port}/api`
@@ -15,7 +16,6 @@ const adminEmail='admin-test@autoflow.local'
 const adminPassword='admin-test-password-strong'
 const sellerEmail='seller-test@autoflow.local'
 const sellerPassword='seller-test-password'
-const jpegBase64=value=>Buffer.concat([Buffer.from([0xff,0xd8,0xff,0xe0]),Buffer.from(value)]).toString('base64')
 const server=spawn(process.execPath,['server/server.ts'],{cwd:process.cwd(),env:{...process.env,HOST:'127.0.0.1',PORT:String(port),DATA_DIR:dataDir,AUTH_SECRET:'queue-test-secret-with-at-least-32-characters',INITIAL_ADMIN_NAME:'Administrador Teste',INITIAL_ADMIN_EMAIL:adminEmail,INITIAL_ADMIN_PASSWORD:adminPassword,LOGIN_MAX_ATTEMPTS:'3',LOGIN_IP_MAX_ATTEMPTS:'100',LOGIN_WINDOW_SECONDS:'60'},stdio:['ignore','pipe','pipe']})
 let serverOutput=''
 server.stdout.on('data',chunk=>serverOutput+=chunk)
@@ -23,9 +23,27 @@ server.stderr.on('data',chunk=>serverOutput+=chunk)
 
 async function waitForServer(){for(let attempt=0;attempt<40;attempt++){try{const response=await fetch(base+'/health');if(response.ok)return}catch{/* API ainda inicializando */}await new Promise(resolve=>setTimeout(resolve,100))}throw new Error(`A API de teste não iniciou. ${serverOutput}`)}
 async function login(email,password){const response=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});const data=await response.json();if(!response.ok)throw new Error(data.error);return data.token}
-async function call(path,token,options={}){const response=await fetch(base+path,{...options,headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`}});const data=await response.json();if(!response.ok)throw Object.assign(new Error(`${response.status} ${path}: ${data.error}`),{status:response.status,body:data});return data}
+async function call(path,token,options={}){const requestOptions={...options};if(requestOptions.body&&/^\/extension\/jobs\/\d+\//.test(path)){const body=JSON.parse(requestOptions.body);body.tabId=body.tabId||101;body.document=body.document||'/marketplace/create/vehicle';requestOptions.body=JSON.stringify(body)}const response=await fetch(base+path,{...requestOptions,headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`}});const data=await response.json();if(!response.ok)throw Object.assign(new Error(`${response.status} ${path}: ${data.error}`),{status:response.status,body:data});return data}
+const callWithoutDocumentBinding=call
+// eslint-disable-next-line no-func-assign -- adapt the shared test client to the document-binding contract
+call=async function(path,token,options={}){
+  const requestOptions={...options}
+  if(requestOptions.body&&/^\/extension\/jobs\/\d+\//.test(path)){
+    const body=JSON.parse(requestOptions.body)
+    body.documentId=body.documentId||'test_document_id'
+    requestOptions.body=JSON.stringify(body)
+  }
+  const result=await callWithoutDocumentBinding(path,token,requestOptions)
+  const preparePath=path.match(/^\/extension\/jobs\/(\d+)\/prepare$/)
+  if(preparePath&&result.leaseToken){
+    await callWithoutDocumentBinding(`/extension/jobs/${preparePath[1]}/bind-document`,token,{method:'POST',body:JSON.stringify({
+      leaseToken:result.leaseToken,tabId:result.tabId,document:result.document,documentId:'test_document_id',
+    })})
+    result.documentId='test_document_id'
+  }
+  return result
+}
 async function expectStatus(status,operation){try{await operation();throw new Error(`A operação deveria responder ${status}.`)}catch(error){if(error.status!==status)throw error}}
-
 async function expectMissingSecretFailure(){
   const env={...process.env,PORT:'3398',DATA_DIR:join(dataDir,'missing-secret')}
   delete env.AUTH_SECRET
@@ -37,6 +55,10 @@ async function expectMissingSecretFailure(){
 
 try{
   await waitForServer()
+  const migrationDb=new DatabaseSync(join(dataDir,'autoflow.db'),{readOnly:true})
+  const migrations=migrationDb.prepare('SELECT version,checksum FROM schema_migrations ORDER BY version').all()
+  migrationDb.close()
+  if(migrations.length!==6||migrations.map(item=>item.version).join(',')!=='1,2,3,4,5,6'||migrations.some(item=>!/^[a-f0-9]{64}$/.test(item.checksum)))throw new Error('O banco não registrou as migrations versionadas com checksum.')
   const malformedJson=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:'{'})
   if(malformedJson.status!==400)throw new Error('JSON inválido não retornou 400.')
   const oversizedBody=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:'x'.repeat(1024*1024),password:'x'})})
@@ -49,18 +71,20 @@ try{
   if(deniedCors.status!==403||deniedCors.headers.has('access-control-allow-origin'))throw new Error('Uma origem externa recebeu acesso CORS à API.')
   const contentScript=await readFile('extension-mv2/content.js','utf8')
   if(/\.innerHTML\s*=/.test(contentScript))throw new Error('O content script voltou a inserir HTML dinâmico diretamente.')
+  if(!contentScript.includes('AUTOFLOW_EXECUTION_ACTIVITY')||!contentScript.includes('setInterval(ping,30_000)'))throw new Error('O heartbeat não está condicionado à atividade do documento que executa o trabalho.')
   const extensionManifest=JSON.parse(await readFile('extension-mv2/manifest.json','utf8'))
   const extensionBackground=await readFile('extension-mv2/background.js','utf8')
   if(extensionManifest.manifest_version!==3||extensionManifest.background?.service_worker!=='background.js'||!extensionManifest.action)throw new Error('A extensão não está configurada como Manifest V3.')
   if(!extensionManifest.permissions?.includes('alarms')||!extensionManifest.host_permissions?.includes('http://127.0.0.1:3333/*'))throw new Error('As permissões do Manifest V3 estão incompletas.')
-  if(extensionBackground.includes('setInterval(')||!extensionBackground.includes('chrome.alarms.onAlarm'))throw new Error('O heartbeat ainda depende de um background persistente.')
+  if(extensionBackground.includes('setInterval(')||!extensionBackground.includes('chrome.alarms.onAlarm')||!extensionBackground.includes('chrome.tabs.get(job.tabId')||!extensionBackground.includes('senderMatchesExecution')||!extensionBackground.includes('AUTOFLOW_EXECUTION_STARTED'))throw new Error('A execução não está vinculada à aba e ao documento reais.')
   const serverSource=await readFile('server/server.ts','utf8')
+  const databaseSchema=await readFile('server/database/schema.ts','utf8')
   if(serverSource.includes('scryptSync'))throw new Error('O login voltou a usar derivação de senha síncrona.')
-  const automationStart=serverSource.indexOf("if (req.method === 'GET' && url.pathname === '/api/automation/overview')")
-  const automationEnd=serverSource.indexOf("if (req.method === 'GET' && url.pathname === '/api/publications/paged')",automationStart)
-  const automationHandler=serverSource.slice(automationStart,automationEnd)
-  if(!serverSource.includes('const automationStatements=')||automationHandler.includes('db.prepare('))throw new Error('A Central voltou a preparar SQL durante cada request.')
-  if(serverSource.includes("date(created_at)=date('now')")||!serverSource.includes("date(created_at,'localtime')=date('now','localtime')"))throw new Error('Os limites diários voltaram a usar a data UTC.')
+  const dashboardRoutes=await readFile('server/routes/dashboard.ts','utf8')
+  const automationStart=dashboardRoutes.indexOf('function automationOverview')
+  const automationHandler=dashboardRoutes.slice(automationStart)
+  if(!serverSource.includes('const automationStatements=createAutomationStatements(db)')||automationHandler.includes('db.prepare('))throw new Error('A Central voltou a preparar SQL durante cada request.')
+  if(dashboardRoutes.includes("date(created_at)=date('now')")||!dashboardRoutes.includes("date(created_at,'localtime')=date('now','localtime')"))throw new Error('Os limites diários voltaram a usar a data UTC.')
   const invalidPassword=randomUUID()
   for(let attempt=0;attempt<2;attempt++){
     const response=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:adminEmail,password:invalidPassword})})
@@ -75,13 +99,14 @@ try{
   if(blockedLogin.status!==429||!blockedLogin.headers.get('retry-after'))throw new Error('O rate-limit de login não retornou 429 com Retry-After.')
   await call('/team/users',adminToken,{method:'POST',body:JSON.stringify({name:'Marina Costa',email:sellerEmail,password:sellerPassword,role:'seller'})})
   const sellerToken=await login(sellerEmail,sellerPassword)
+  await expectStatus(403,()=>call('/ai/audit',sellerToken))
   const team=await call('/team',adminToken)
   const admin=team.users.find(user=>user.email===adminEmail)
   const marina=team.users.find(user=>user.email===sellerEmail)
   const first=await call('/social-accounts',adminToken,{method:'POST',body:JSON.stringify({userId:admin.id,label:'Facebook Daniel',browserProfile:'Brave Perfil 1'})})
   const second=await call('/social-accounts',adminToken,{method:'POST',body:JSON.stringify({userId:marina.id,label:'Facebook Marina',browserProfile:'Brave Perfil 2'})})
-  await call('/settings',adminToken,{method:'PATCH',body:JSON.stringify({organizationName:'AutoPrime Veículos',defaultLocation:'São Paulo, SP',dailyLimit:10,descriptionTemplate:'',autoAdvance:true,fillGroups:true,targetGroups:['Compra-se e Vende-se | https://www.facebook.com/groups/123456','Carros e Motos Criciúma e Região'],autoPublish:false})})
-  await call('/settings',adminToken,{method:'PATCH',body:JSON.stringify({organizationName:'AutoPrime Veículos',defaultLocation:'São Paulo, SP',dailyLimit:10,stuckTimeoutMinutes:1,descriptionTemplate:'',autoAdvance:true,fillGroups:true,groups:[{name:'Compra-se e Vende-se',url:'https://www.facebook.com/groups/123456',active:true,priority:1},{name:'Carros e Motos Criciúma e Região',url:'',active:true,priority:2}],autoPublish:false})})
+  await call('/settings',adminToken,{method:'PATCH',body:JSON.stringify({organizationName:'AutoPrime Veículos',defaultLocation:'São Paulo, SP',dailyLimit:10,executionIntervalMinutes:0,descriptionTemplate:'',autoAdvance:true,fillGroups:true,targetGroups:['Compra-se e Vende-se | https://www.facebook.com/groups/123456','Carros e Motos Criciúma e Região'],autoPublish:false,autoRetry:true,maxRetries:4})})
+  await call('/settings',adminToken,{method:'PATCH',body:JSON.stringify({organizationName:'AutoPrime Veículos',defaultLocation:'São Paulo, SP',dailyLimit:10,stuckTimeoutMinutes:1,executionIntervalMinutes:0,descriptionTemplate:'',autoAdvance:true,fillGroups:true,groups:[{name:'Compra-se e Vende-se',url:'https://www.facebook.com/groups/123456',active:true,priority:1},{name:'Carros e Motos Criciúma e Região',url:'',active:true,priority:2}],autoPublish:false,autoRetry:true,maxRetries:4})})
   const structuredSettings=await call('/settings',adminToken)
   if(structuredSettings.settings.groups.length!==2||structuredSettings.settings.groups[0].groupKey!=='123456'||structuredSettings.settings.groups[0].priority!==1)throw new Error('O gerenciador estruturado de grupos nao preservou ID e prioridade.')
   await expectStatus(400,()=>call('/settings',adminToken,{method:'PATCH',body:JSON.stringify({organizationName:'AutoPrime Veículos',defaultLocation:'São Paulo, SP',dailyLimit:10,descriptionTemplate:'',autoAdvance:true,fillGroups:true,groups:[{name:'Grupo invalido',url:'https://example.com/groups/1',active:true}],autoPublish:false})}))
@@ -101,6 +126,8 @@ try{
   const vehiclePageOne=await call('/vehicles/paged?page=1&limit=2',adminToken)
   const vehiclePageTwo=await call('/vehicles/paged?page=2&limit=2',adminToken)
   if(vehiclePageOne.vehicles.length!==2||vehiclePageOne.pagination.totalItems<6||vehiclePageOne.vehicles.some(item=>vehiclePageTwo.vehicles.some(next=>next.id===item.id)))throw new Error('A paginação de veículos retornou quantidade ou itens incorretos.')
+  const inventorySummary=await call('/vehicles/summary',adminToken)
+  if(inventorySummary.total!==vehiclePageOne.pagination.totalItems||inventorySummary.sellers.reduce((sum,item)=>sum+item.total,0)!==inventorySummary.total||typeof inventorySummary.photos10plus!=='number')throw new Error('O resumo agregado do estoque não corresponde à paginação.')
   const vehicleSearch=await call('/vehicles/paged?page=1&limit=25&query=City&status=Pronto',adminToken)
   if(vehicleSearch.vehicles.length!==1||vehicleSearch.vehicles[0].id!==sellerVehicle.id)throw new Error('A busca paginada de veículos não aplicou query e status.')
   await expectStatus(400,()=>call('/vehicles/paged?page=0',adminToken))
@@ -109,8 +136,14 @@ try{
   await call(`/vehicles/${sellerVehicle.id}`,sellerToken,{method:'PATCH',body:JSON.stringify({...sellerVehiclePayload,km:30500})})
   await expectStatus(400,()=>call(`/vehicles/${sellerVehicle.id}/images`,sellerToken,{method:'POST',body:JSON.stringify({name:'invalida.jpg',mimeType:'image/jpeg',dataBase64:'%%%%'})}))
   await expectStatus(400,()=>call(`/vehicles/${sellerVehicle.id}/images`,sellerToken,{method:'POST',body:JSON.stringify({name:'mime-falso.png',mimeType:'image/png',dataBase64:jpegBase64('mime-falso')})}))
+  const truncatedJpeg=Buffer.from(jpegBase64('truncated-image'),'base64').subarray(0,-20).toString('base64')
+  await expectStatus(400,()=>call(`/vehicles/${sellerVehicle.id}/images`,sellerToken,{method:'POST',body:JSON.stringify({name:'truncada.jpg',mimeType:'image/jpeg',dataBase64:truncatedJpeg})}))
   const sellerImage=await call(`/vehicles/${sellerVehicle.id}/images`,sellerToken,{method:'POST',body:JSON.stringify({name:'seller.jpg',mimeType:'image/jpeg',dataBase64:jpegBase64('seller-photo')})})
-  await call(`/vehicles/${sellerVehicle.id}/images/reorder`,sellerToken,{method:'PATCH',body:JSON.stringify({order:[sellerImage.id]})})
+  const sellerPng=await call(`/vehicles/${sellerVehicle.id}/images`,sellerToken,{method:'POST',body:JSON.stringify({name:'seller.png',mimeType:'image/png',dataBase64:pngFixtureBase64})})
+  const sellerWebp=await call(`/vehicles/${sellerVehicle.id}/images`,sellerToken,{method:'POST',body:JSON.stringify({name:'seller.webp',mimeType:'image/webp',dataBase64:webpFixtureBase64})})
+  await expectStatus(400,()=>call(`/vehicles/${sellerVehicle.id}/images`,sellerToken,{method:'POST',body:JSON.stringify({name:'truncada.png',mimeType:'image/png',dataBase64:Buffer.from(pngFixtureBase64,'base64').subarray(0,-10).toString('base64')})}))
+  await expectStatus(400,()=>call(`/vehicles/${sellerVehicle.id}/images`,sellerToken,{method:'POST',body:JSON.stringify({name:'truncada.webp',mimeType:'image/webp',dataBase64:Buffer.from(webpFixtureBase64,'base64').subarray(0,-10).toString('base64')})}))
+  await call(`/vehicles/${sellerVehicle.id}/images/reorder`,sellerToken,{method:'PATCH',body:JSON.stringify({order:[sellerImage.id,sellerPng.id,sellerWebp.id]})})
   await expectStatus(403,()=>call('/publications',sellerToken,{method:'POST',body:JSON.stringify({vehicleId:sellerVehicle.id,accountId:first.id})}))
   const sellerPublication=await call('/publications',sellerToken,{method:'POST',body:JSON.stringify({vehicleId:sellerVehicle.id,accountId:second.id})})
   await call('/publications/queue-state',sellerToken,{method:'PATCH',body:JSON.stringify({ids:[sellerPublication.id],action:'pause'})})
@@ -121,7 +154,7 @@ try{
   await call('/publications/extension-visibility',sellerToken,{method:'PATCH',body:JSON.stringify({ids:[sellerPublication.id],visible:false})})
   await call('/publications/extension-visibility',sellerToken,{method:'PATCH',body:JSON.stringify({ids:[sellerPublication.id],visible:true})})
   const sellerPrepared=await call(`/extension/jobs/${sellerPublication.id}/prepare`,sellerToken,{method:'POST',body:JSON.stringify({accountId:second.id,instanceId:extensionTwo})})
-  await call(`/extension/jobs/${sellerPublication.id}/fill-result`,sellerToken,{method:'PATCH',body:JSON.stringify({leaseToken:sellerPrepared.leaseToken,filledCount:15,totalCount:15,imageCount:1,missing:[],fields:[],advanced:false,selectedGroups:[],missingGroups:[],flowIssues:[],published:false,publishAttempted:false,extensionVersion:'0.12.1'})})
+  await call(`/extension/jobs/${sellerPublication.id}/fill-result`,sellerToken,{method:'PATCH',body:JSON.stringify({leaseToken:sellerPrepared.leaseToken,filledCount:15,totalCount:15,imageCount:3,missing:[],fields:[],advanced:false,selectedGroups:[],missingGroups:[],flowIssues:[],published:false,publishAttempted:false,extensionVersion:'0.12.1'})})
   await call(`/publications/${sellerPublication.id}`,sellerToken,{method:'PATCH',body:JSON.stringify({status:'completed'})})
   await expectStatus(409,()=>call(`/publications/${sellerPublication.id}`,sellerToken,{method:'PATCH',body:JSON.stringify({status:'pending'})}))
   await call(`/publications/${sellerPublication.id}`,sellerToken,{method:'PATCH',body:JSON.stringify({status:'removed'})})
@@ -142,6 +175,9 @@ try{
 
   const imageOne=await call('/vehicles/1/images',adminToken,{method:'POST',body:JSON.stringify({name:'foto-1.jpg',mimeType:'image/jpeg',dataBase64:jpegBase64('foto-um')})})
   if(new URL(imageOne.url).origin!==`http://127.0.0.1:${port}`)throw new Error('A URL da imagem ignorou HOST ou PORT da API.')
+  const duplicateImage=await call('/vehicles/1/images',adminToken,{method:'POST',body:JSON.stringify({name:'foto-1-retry.jpg',mimeType:'image/jpeg',dataBase64:jpegBase64('foto-um')})})
+  if(!duplicateImage.duplicate||duplicateImage.id!==imageOne.id)throw new Error('O retry de upload não reutilizou a foto já persistida.')
+  if((await call('/vehicles/1/images',adminToken)).images.length!==1)throw new Error('O retry de upload criou uma cópia da foto.')
   const imageTwo=await call('/vehicles/1/images',adminToken,{method:'POST',body:JSON.stringify({name:'foto-2.jpg',mimeType:'image/jpeg',dataBase64:jpegBase64('foto-dois')})})
   const orderedBefore=(await call('/vehicles/1/images',adminToken)).images.map(item=>item.id)
   if(orderedBefore[0]!==imageOne.id||orderedBefore[1]!==imageTwo.id)throw new Error('A ordem inicial das fotos não respeitou o upload.')
@@ -156,6 +192,7 @@ try{
   await call('/vehicles/1',adminToken,{method:'PATCH',body:JSON.stringify({...vehicleOne,condition:'Excelente',exteriorColor:'Prateado',interiorColor:'Preto',status:'Pronto'})})
 
   const publication=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:1,accountId:first.id})})
+  await expectStatus(409,()=>call('/vehicles',adminToken,{method:'DELETE',body:JSON.stringify({ids:[1]})}))
   await expectStatus(409,()=>call(`/publications/${publication.id}`,adminToken,{method:'PATCH',body:JSON.stringify({status:'completed'})}))
   await expectStatus(409,()=>call(`/publications/${publication.id}`,adminToken,{method:'PATCH',body:JSON.stringify({status:'filling'})}))
   await expectStatus(403,()=>call('/publications/queue-state',sellerToken,{method:'PATCH',body:JSON.stringify({ids:[publication.id],action:'pause'})}))
@@ -221,10 +258,19 @@ try{
   if(!priorityTimeline.events.some(event=>event.eventType==='reassigned'&&event.fromAccount&&event.toAccount))throw new Error('O histórico não identificou os perfis da redistribuição.')
   const prepared=await call(`/extension/jobs/${publication.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:first.id,instanceId:extensionOne})})
   if(!prepared.leaseToken||prepared.leaseSeconds!==120)throw new Error('A reserva exclusiva não foi entregue à extensão.')
+  if(prepared.documentId!=='test_document_id')throw new Error('O documento não foi vinculado à execução reservada.')
+  await expectStatus(409,()=>call(`/extension/jobs/${publication.id}/publish-check`,adminToken,{method:'POST',body:JSON.stringify({leaseToken:prepared.leaseToken,documentId:'another_document_id'})}))
   await expectStatus(409,()=>call(`/extension/jobs/${publication.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:first.id,instanceId:extensionTwo})}))
+  const competingVehicle=await call('/vehicles',adminToken,{method:'POST',body:JSON.stringify({year:2022,make:'Toyota',model:'Yaris',trim:'XL',price:87900,km:31000,vehicleType:'Carro/picape',location:'São Paulo, SP',transmission:'Automático',fuelType:'Flex',bodyType:'Hatch',condition:'Excelente',exteriorColor:'Prateado',interiorColor:'Preto',description:'Trabalho para provar exclusividade do perfil.',status:'Pronto'})})
+  await call(`/vehicles/${competingVehicle.id}/images`,adminToken,{method:'POST',body:JSON.stringify({name:'concorrente.jpg',mimeType:'image/jpeg',dataBase64:jpegBase64('concorrencia')})})
+  const competingJob=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:competingVehicle.id,accountId:first.id})})
+  await expectStatus(409,()=>call(`/extension/jobs/${competingJob.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:first.id,instanceId:extensionOne})}))
+  await call(`/publications/${competingJob.id}`,adminToken,{method:'PATCH',body:JSON.stringify({status:'canceled'})})
   const lockedQueue=await call(`/extension/queue?accountId=${first.id}`,adminToken)
   if(!lockedQueue.jobs.find(item=>item.jobId===publication.id)?.locked)throw new Error('A fila não sinalizou que o trabalho está em uso por outra aba.')
   await expectStatus(409,()=>call(`/extension/jobs/${publication.id}/heartbeat`,adminToken,{method:'POST',body:JSON.stringify({leaseToken:'token-incorreto'})}))
+  await expectStatus(409,()=>call(`/extension/jobs/${publication.id}/heartbeat`,adminToken,{method:'POST',body:JSON.stringify({leaseToken:prepared.leaseToken,tabId:999})}))
+  await expectStatus(409,()=>call(`/extension/jobs/${publication.id}/heartbeat`,adminToken,{method:'POST',body:JSON.stringify({leaseToken:prepared.leaseToken,documentId:'wrong-document'})}))
   await call(`/extension/jobs/${publication.id}/heartbeat`,adminToken,{method:'POST',body:JSON.stringify({leaseToken:prepared.leaseToken})})
   await expectStatus(409,()=>call(`/extension/jobs/${publication.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:'token-incorreto',error:'Resultado de outra aba'})}))
   await expectStatus(409,()=>call('/publications/reassign',adminToken,{method:'PATCH',body:JSON.stringify({ids:[publication.id],accountId:second.id})}))
@@ -236,7 +282,11 @@ try{
   if(prepared.vehicle.interiorColor!=='Preto')throw new Error('A cor interna não chegou à extensão.')
   if(prepared.vehicle.condition!=='Excelente')throw new Error('A condição do veículo não chegou à extensão.')
   if(!prepared.automation.autoAdvance||!prepared.automation.fillGroups||prepared.automation.autoPublish||prepared.automation.targetGroups.length!==2)throw new Error('As regras de automação não chegaram à extensão.')
-  await call(`/extension/jobs/${publication.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:prepared.leaseToken,error:'Falha temporária antes do teste de recuperação',extensionVersion:'0.11.0'})})
+  await call(`/extension/jobs/${publication.id}/publish-started`,adminToken,{method:'POST',body:JSON.stringify({leaseToken:prepared.leaseToken,report:{publishAttempted:true}})})
+  await call(`/extension/jobs/${publication.id}/publish-not-clicked`,adminToken,{method:'POST',body:JSON.stringify({leaseToken:prepared.leaseToken})})
+  await call(`/extension/jobs/${publication.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:prepared.leaseToken,error:'Falha temporária antes do teste de recuperação',autoRetry:true,extensionVersion:'0.11.0'})})
+  let abortedAttempt=(await call('/publications',adminToken)).jobs.find(item=>item.id===publication.id)
+  if(abortedAttempt.status!=='error'||abortedAttempt.fillReport?.publishAttempted)throw new Error('Uma publicação abortada antes do clique ficou ambígua ou aceitou retry definido pelo cliente.')
   let issueReport=await call('/reports/issues',adminToken)
   const activeExecutionError=issueReport.issues.find(item=>item.jobId===publication.id&&item.category==='execution')
   if(!activeExecutionError?.active||activeExecutionError.severity!=='error'||activeExecutionError.extensionVersion!=='0.11.0')throw new Error('O relatório não registrou o erro ativo da extensão.')
@@ -246,14 +296,15 @@ try{
   await expectStatus(409,()=>call(`/publications/${publication.id}/recover`,adminToken,{method:'POST'}))
   const testDb=new DatabaseSync(join(dataDir,'autoflow.db'))
   const journalMode=testDb.prepare('PRAGMA journal_mode').get().journal_mode
-  if(journalMode!=='wal'||!serverSource.includes('PRAGMA busy_timeout = 5000;'))throw new Error('A configuração de concorrência do SQLite não foi aplicada.')
+  if(journalMode!=='wal'||!databaseSchema.includes('PRAGMA busy_timeout = 5000;'))throw new Error('A configuração de concorrência do SQLite não foi aplicada.')
   const indexes=new Set(testDb.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(item=>item.name))
   for(const name of ['idx_publication_jobs_account_queue','idx_publication_jobs_vehicle_status','idx_publication_jobs_created','idx_vehicles_org_updated','idx_vehicles_status_updated','idx_vehicle_images_vehicle_position','idx_social_accounts_org_user','idx_marketplace_groups_org_active_priority'])if(!indexes.has(name))throw new Error(`O índice ${name} não foi criado.`)
   testDb.prepare("UPDATE publication_jobs SET started_at=datetime('now','-2 minutes') WHERE id=?").run(publication.id)
   await expectStatus(409,()=>call(`/publications/${publication.id}/recover`,adminToken,{method:'POST'}))
   testDb.prepare("UPDATE publication_jobs SET lease_expires_at=datetime('now','-1 second') WHERE id=?").run(publication.id)
   testDb.close()
-  await call(`/publications/${publication.id}/recover`,adminToken,{method:'POST'})
+  const recovery=await call(`/publications/${publication.id}/recover`,adminToken,{method:'POST'})
+  if(recovery.recovery?.jobId!==publication.id||recovery.recovery.fromStatus!=='filling'||recovery.recovery.toStatus!=='pending'||recovery.recovery.leaseExpired!==true)throw new Error('O contrato do relatório de recuperação não identificou a transição nem a expiração do bloqueio.')
   let recovered=(await call('/publications',adminToken)).jobs.find(item=>item.id===publication.id)
   if(recovered.status!=='pending')throw new Error('A recuperação não devolveu o trabalho travado para a fila.')
   if(!recoveryPrepared.leaseToken)throw new Error('A segunda execução não recebeu uma nova reserva.')
@@ -261,6 +312,8 @@ try{
   await call(`/extension/jobs/${publication.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:reviewPrepared.leaseToken,filledCount:14,totalCount:15,imageCount:7,missing:['Cor interna'],fields:[{name:'Cor interna',ok:false}],advanced:true,selectedGroups:[],missingGroups:[],flowIssues:['O Facebook recebeu o clique em Publicar, mas não confirmou o resultado.'],published:false,publishAttempted:true,extensionVersion:'0.12.0'})})
   let job=(await call('/publications',adminToken)).jobs.find(item=>item.id===publication.id)
   if(job.status!=='awaiting_confirmation'||job.fillReport?.missing?.[0]!=='Cor interna'||job.fillReport?.flowIssues?.length!==1)throw new Error('O relatório de preenchimento não foi persistido.')
+  const publicationDetail=await call(`/publications/${publication.id}`,adminToken)
+  if(publicationDetail.job.id!==publication.id||publicationDetail.job.status!=='awaiting_confirmation'||publicationDetail.job.fillReport?.publishAttempted!==true)throw new Error('A consulta pontual da publicação não preservou o estado ambíguo.')
   issueReport=await call('/reports/issues',adminToken)
   const currentWarnings=issueReport.issues.filter(item=>item.jobId===publication.id&&item.active)
   if(!currentWarnings.some(item=>item.category==='fields'&&item.message.includes('Cor interna'))||!currentWarnings.some(item=>item.category==='flow'))throw new Error('O relatório não separou avisos de campo e fluxo.')
@@ -301,6 +354,18 @@ try{
   const photoClone=await call('/vehicles',adminToken,{method:'POST',body:JSON.stringify({year:2019,make:'Renault',model:'Sandero',trim:'Zen',price:45900,km:62000,vehicleType:'Carro/picape',location:'São Paulo, SP',transmission:'Manual',fuelType:'Flex',bodyType:'Hatch',condition:'Excelente',exteriorColor:'Prateado',interiorColor:'Preto',description:'Cadastro duplicado para validar a proteção por foto.',status:'Pronto'})})
   await call(`/vehicles/${photoClone.id}/images`,adminToken,{method:'POST',body:JSON.stringify({name:'foto-repetida.jpg',mimeType:'image/jpeg',dataBase64:jpegBase64('foto-um')})})
   await expectStatus(409,()=>call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:photoClone.id,accountId:second.id})}))
+  const lateVehicle=await call('/vehicles',adminToken,{method:'POST',body:JSON.stringify({year:2021,make:'Honda',model:'Fit',trim:'EX',price:89900,km:42000,vehicleType:'Carro/picape',location:'São Paulo, SP',transmission:'Automático',fuelType:'Flex',bodyType:'Hatch',condition:'Excelente',exteriorColor:'Prateado',interiorColor:'Preto',description:'Trabalho de teste para confirmação tardia.',status:'Pronto'})})
+  await call(`/vehicles/${lateVehicle.id}/images`,adminToken,{method:'POST',body:JSON.stringify({name:'late.jpg',mimeType:'image/jpeg',dataBase64:jpegBase64('late-confirmation')})})
+  const lateJob=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:lateVehicle.id,accountId:second.id})})
+  const latePrepared=await call(`/extension/jobs/${lateJob.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:second.id,instanceId:extensionTwo})})
+  await call(`/extension/jobs/${lateJob.id}/publish-started`,adminToken,{method:'POST',body:JSON.stringify({leaseToken:latePrepared.leaseToken,report:{publishAttempted:true}})})
+  const unknown=await call(`/extension/jobs/${lateJob.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:latePrepared.leaseToken,error:'A resposta do Facebook não chegou.',autoRetry:true})})
+  if(unknown.status!=='awaiting_confirmation'||!unknown.publishResultUnknown)throw new Error('A falha posterior à autorização do clique foi repetida automaticamente.')
+  const lateConfirmation={leaseToken:latePrepared.leaseToken,published:true,publishAttempted:true,resultUrl:'https://www.facebook.com/marketplace/item/late-1'}
+  const lateResult=await call(`/extension/jobs/${lateJob.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify(lateConfirmation)})
+  const repeatedLateResult=await call(`/extension/jobs/${lateJob.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify(lateConfirmation)})
+  const lateTimeline=await call(`/publications/${lateJob.id}/timeline`,adminToken)
+  if(lateResult.status!=='completed'||!repeatedLateResult.idempotent||lateTimeline.events.filter(event=>event.eventType==='late_publish_confirmed').length!==1)throw new Error('A confirmação tardia não foi conciliada uma única vez ao trabalho correto.')
 
   await call('/vehicles/1/mark-sold',adminToken,{method:'POST'})
   let soldVehicle=(await call('/vehicles',adminToken)).vehicles.find(item=>item.id===1)
@@ -322,6 +387,15 @@ try{
   const overviewStats=await call('/overview',adminToken)
   const allJobs=(await call('/publications',adminToken)).jobs
   if(globalStats.vehicles.total!==overviewStats.vehicleStats.total||globalStats.vehicles.published!==overviewStats.vehicleStats.published||globalStats.publications.total!==allJobs.length||globalStats.publications.errors!==allJobs.filter(item=>item.status==='error').length)throw new Error('Os indicadores globais divergiram dos dados operacionais.')
+  const reportPerformance=await call('/reports/performance?period=all',adminToken)
+  if(reportPerformance.summary.total!==allJobs.length||reportPerformance.summary.completed!==allJobs.filter(item=>['completed','removed'].includes(item.status)).length||reportPerformance.recent.length!==Math.min(8,allJobs.length)||reportPerformance.sellerPerformance.reduce((sum,item)=>sum+item.total,0)!==allJobs.length||reportPerformance.profilePerformance.reduce((sum,item)=>sum+item.total,0)!==allJobs.length)throw new Error('O relatório agregado não corresponde ao histórico completo da fila.')
+  await expectStatus(400,()=>call('/reports/performance?period=0',adminToken))
+  await expectStatus(400,()=>call('/reports/performance?period=3651',adminToken))
+  const oneDayPerformance=await call('/reports/performance?period=1',adminToken)
+  if(typeof oneDayPerformance.summary.total!=='number')throw new Error('O filtro de período permitido não retornou um resumo válido.')
+  const sellerSlice=reportPerformance.sellerPerformance[0]
+  const filteredSellerPerformance=await call(`/reports/performance?period=all&seller=${encodeURIComponent(sellerSlice.name)}`,adminToken)
+  if(filteredSellerPerformance.summary.total!==sellerSlice.total||filteredSellerPerformance.sellerPerformance.length!==1||filteredSellerPerformance.profilePerformance.reduce((sum,item)=>sum+item.total,0)!==sellerSlice.total)throw new Error('O filtro de responsável não preservou os totais agregados.')
   const deletion=await call('/vehicles',adminToken,{method:'DELETE',body:JSON.stringify({ids:[1,1]})})
   if(deletion.deleted!==1||deletion.removedJobs!==1)throw new Error('A exclusão não informou corretamente o veículo e o histórico removidos.')
   if(existsSync(uploadedFile))throw new Error('O arquivo da foto permaneceu no disco após excluir o veículo.')
@@ -329,6 +403,36 @@ try{
   if((await call('/publications',adminToken)).jobs.some(item=>item.id===publication.id))throw new Error('O trabalho de publicação continuou após excluir o veículo.')
   if((await call('/reports/issues',adminToken)).issues.some(item=>item.jobId===publication.id))throw new Error('O relatório manteve eventos órfãos após excluir o veículo.')
   await expectStatus(404,()=>call('/vehicles',adminToken,{method:'DELETE',body:JSON.stringify({ids:[1]})}))
+
+  const members=(await call('/team',adminToken)).users
+  const adminMember=members.find(user=>user.email===adminEmail)
+  const sellerMember=members.find(user=>user.email===sellerEmail)
+  if(!adminMember||!sellerMember)throw new Error('A equipe não retornou os usuários do teste.')
+  await expectStatus(409,()=>call(`/team/users/${adminMember.id}`,adminToken,{method:'PATCH',body:JSON.stringify({active:false})}))
+  const secondSellerToken=await login(sellerEmail,sellerPassword)
+  await call(`/team/users/${sellerMember.id}`,adminToken,{method:'PATCH',body:JSON.stringify({active:false})})
+  await expectStatus(401,()=>call('/me',sellerToken))
+  await expectStatus(401,()=>call('/me',secondSellerToken))
+  const disabledLogin=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:sellerEmail,password:sellerPassword})})
+  if(disabledLogin.status!==401)throw new Error('Um usuário desativado conseguiu iniciar sessão.')
+  await call(`/team/users/${sellerMember.id}`,adminToken,{method:'PATCH',body:JSON.stringify({active:true})})
+  const logoutToken=await login(sellerEmail,sellerPassword)
+  await call('/auth/logout',logoutToken,{method:'POST'})
+  await expectStatus(401,()=>call('/me',logoutToken))
+
+  await call('/settings',adminToken,{method:'PATCH',body:JSON.stringify({organizationName:'AutoPrime Veículos',defaultLocation:'Florianópolis, SC',dailyLimit:10,executionIntervalMinutes:0,descriptionTemplate:'Cadastro {ano} {marca} {modelo} - {km} km. Fale conosco.',autoAdvance:false,fillGroups:false,autoPublish:false,autoRetry:true,maxRetries:4})})
+  await expectStatus(400,()=>call('/settings',adminToken,{method:'PATCH',body:JSON.stringify({organizationName:'AutoPrime Veículos',defaultLocation:'Florianópolis, SC',dailyLimit:10,descriptionTemplate:'Veículo {opcional}',autoAdvance:false,fillGroups:false,autoPublish:false})}))
+  const defaultedVehicle=await call('/vehicles',adminToken,{method:'POST',body:JSON.stringify({year:2024,make:'Hyundai',model:'Creta',trim:'Limited',price:139900,km:0,vehicleType:'Carro/picape',location:'',transmission:'Automático',fuelType:'Flex',bodyType:'SUV',condition:'Excelente',exteriorColor:'Prateado',interiorColor:'Preto',description:'',status:'Rascunho'})})
+  const savedDefaultVehicle=(await call('/vehicles',adminToken)).vehicles.find(vehicle=>vehicle.id===defaultedVehicle.id)
+  if(savedDefaultVehicle.location!=='Florianópolis, SC'||savedDefaultVehicle.description!=='Cadastro 2024 Hyundai Creta - 0 km. Fale conosco.')throw new Error('As configurações de localização padrão e modelo de descrição não foram aplicadas no cadastro.')
+  const retryVehicle=await call('/vehicles',adminToken,{method:'POST',body:JSON.stringify({year:2023,make:'Toyota',model:'Corolla Cross',trim:'XRE',price:159900,km:12000,vehicleType:'Carro/picape',location:'Florianópolis, SC',transmission:'Automático',fuelType:'Flex',bodyType:'SUV',condition:'Excelente',exteriorColor:'Prateado',interiorColor:'Preto',description:'Trabalho de teste para retry transitório.',status:'Pronto'})})
+  await call(`/vehicles/${retryVehicle.id}/images`,adminToken,{method:'POST',body:JSON.stringify({name:'retry-transient.jpg',mimeType:'image/jpeg',dataBase64:jpegBase64('retry-transient')})})
+  const retryJob=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:retryVehicle.id,accountId:first.id})})
+  const retryPrepared=await call(`/extension/jobs/${retryJob.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:first.id,instanceId:extensionOne})})
+  const retryResult=await call(`/extension/jobs/${retryJob.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:retryPrepared.leaseToken,error:'O formulário do Marketplace não ficou disponível.',failureCode:'marketplace_form_timeout'})})
+  if(!retryResult.autoRetry||retryResult.status!=='pending'||!(new Date(retryResult.scheduledAt)>new Date()))throw new Error('A falha transitória do formulário não recebeu retry com agendamento futuro.')
+  const retryListed=(await call('/publications',adminToken)).jobs.find(job=>job.id===retryJob.id)
+  if(retryListed.status!=='pending'||retryListed.retryCount!==1)throw new Error('O retry transitório não foi persistido na fila.')
 
   console.log(JSON.stringify({ok:true,profileIsolation:true,sellerIsolation:true,writeAuthorization:true,loopbackBinding:true,dynamicImageOrigin:true,requestLimits:true,uploadValidation:true,imageLimit:true,asyncPasswordHashing:true,loginRateLimit:true,stateTransitions:true,terminalVehicleStatuses:true,sqliteWal:true,sqliteIndexes:true,aggregatedAutomationQueries:true,reusedAutomationStatements:true,manifestV3:true,alarmHeartbeat:true,issueCursorPagination:true,vehiclePagination:true,serverVehicleSearch:true,publicationPagination:true,serverPublicationFilters:true,localBusinessDay:true,globalStatsEndpoint:true,jobId:publication.id,preparedVehicle:prepared.vehicle.model,finalStatus:job.status,vehicleStatus:soldVehicle.status},null,2))
 }finally{

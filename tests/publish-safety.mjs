@@ -1,3 +1,4 @@
+import { jpegBase64 } from './helpers/images.mjs'
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -5,13 +6,39 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { runHealthCheck } from '../server/services/health-monitor.ts'
 import { runGroupCurationSweep } from '../server/services/group-curation-worker.ts'
+import { initializeBaseSchema } from '../server/database/schema.ts'
+import { applyMigrations } from '../server/database/migrations.ts'
+import assert from 'node:assert/strict'
+
+// Upgrading main must preserve its checkpoint. Upgrading PR schema v5 must keep
+// the checksums of migrations already applied and add only the new migration.
+for(const legacy of [true,false]){
+  const migrationDb=new DatabaseSync(':memory:')
+  initializeBaseSchema(migrationDb)
+  let originalChecksums
+  if(legacy){
+    migrationDb.exec(`ALTER TABLE publication_jobs ADD COLUMN publish_attempt_at TEXT;
+      INSERT INTO organizations(id,name) VALUES(1,'Legacy');
+      INSERT INTO vehicles(id,organization_id,year,make,model) VALUES(1,1,2023,'Toyota','Corolla');
+      INSERT INTO publication_jobs(id,organization_id,vehicle_id,publish_attempt_at) VALUES(1,1,1,'2026-09-20 12:00:00');`)
+  }else{
+    applyMigrations(migrationDb)
+    migrationDb.exec('DELETE FROM schema_migrations WHERE version=6; ALTER TABLE publication_jobs DROP COLUMN publish_attempt_at;')
+    originalChecksums=migrationDb.prepare('SELECT version,checksum FROM schema_migrations ORDER BY version').all()
+  }
+  applyMigrations(migrationDb)
+  applyMigrations(migrationDb)
+  assert.equal(migrationDb.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count,6)
+  if(legacy)assert.equal(migrationDb.prepare('SELECT publish_attempt_at FROM publication_jobs WHERE id=1').get().publish_attempt_at,'2026-09-20 12:00:00')
+  else assert.deepEqual(migrationDb.prepare('SELECT version,checksum FROM schema_migrations WHERE version<=5 ORDER BY version').all(),originalChecksums)
+  migrationDb.close()
+}
 
 const port=3455
 const base=`http://127.0.0.1:${port}/api`
 const dataDir=await mkdtemp(join(tmpdir(),'autoflow-safety-test-'))
 const adminEmail='admin-safety@autoflow.local'
 const adminPassword='admin-safety-password-strong'
-const jpegBase64=value=>Buffer.concat([Buffer.from([0xff,0xd8,0xff,0xe0]),Buffer.from(value)]).toString('base64')
 const server=spawn(process.execPath,['server/server.ts'],{cwd:process.cwd(),env:{...process.env,HOST:'127.0.0.1',PORT:String(port),DATA_DIR:dataDir,AUTH_SECRET:'publish-safety-test-secret-with-32-chars',INITIAL_ADMIN_NAME:'Administrador Teste',INITIAL_ADMIN_EMAIL:adminEmail,INITIAL_ADMIN_PASSWORD:adminPassword},stdio:['ignore','pipe','pipe']})
 let serverOutput=''
 server.stdout.on('data',chunk=>serverOutput+=chunk)
@@ -19,7 +46,21 @@ server.stderr.on('data',chunk=>serverOutput+=chunk)
 
 async function waitForServer(){for(let attempt=0;attempt<40;attempt++){try{const response=await fetch(base+'/health');if(response.ok)return}catch{/* API ainda inicializando */}await new Promise(resolve=>setTimeout(resolve,100))}throw new Error(`A API de teste não iniciou. ${serverOutput}`)}
 async function login(email,password){const response=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});const data=await response.json();if(!response.ok)throw new Error(data.error);return data.token}
-async function call(path,token,options={}){const response=await fetch(base+path,{...options,headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`}});const data=await response.json();if(!response.ok)throw Object.assign(new Error(`${response.status} ${path}: ${data.error}`),{status:response.status,body:data});return data}
+async function call(path,token,options={}){
+  const requestOptions={...options}
+  if(requestOptions.body&&/^\/extension\/jobs\/\d+\//.test(path)){
+    const body=JSON.parse(requestOptions.body)
+    Object.assign(body,{tabId:101,document:'/marketplace/create/vehicle',documentId:'safety_test_document'})
+    if(body.error)body.failureCode='marketplace_form_timeout'
+    requestOptions.body=JSON.stringify(body)
+  }
+  const response=await fetch(base+path,{...requestOptions,headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`}})
+  const data=await response.json()
+  if(!response.ok)throw Object.assign(new Error(`${response.status} ${path}: ${data.error}`),{status:response.status,body:data})
+  const prepared=path.match(/^\/extension\/jobs\/(\d+)\/prepare$/)
+  if(prepared&&data.leaseToken)await call(`/extension/jobs/${prepared[1]}/bind-document`,token,{method:'POST',body:JSON.stringify({leaseToken:data.leaseToken})})
+  return data
+}
 async function expectStatus(status,operation){try{await operation();throw new Error(`A operação deveria responder ${status}.`)}catch(error){if(error.status!==status)throw error}}
 
 async function createReadyVehicle(token,overrides={}){
@@ -31,7 +72,7 @@ async function createReadyVehicle(token,overrides={}){
 try{
   await waitForServer()
   const adminToken=await login(adminEmail,adminPassword)
-  await call('/settings',adminToken,{method:'PATCH',body:JSON.stringify({organizationName:'Safety Test',dailyLimit:10,stuckTimeoutMinutes:1,maxRetries:3,descriptionTemplate:'',autoAdvance:true,fillGroups:false,autoPublish:false})})
+  await call('/settings',adminToken,{method:'PATCH',body:JSON.stringify({organizationName:'Safety Test',dailyLimit:50,executionIntervalMinutes:0,stuckTimeoutMinutes:1,maxRetries:3,descriptionTemplate:'',autoAdvance:true,fillGroups:false,autoPublish:false})})
   const account=await call('/social-accounts',adminToken,{method:'POST',body:JSON.stringify({userId:(await call('/team',adminToken)).users[0].id,label:'Facebook Teste',browserProfile:'Brave Perfil Teste'})})
   const testDb=new DatabaseSync(join(dataDir,'autoflow.db'))
   const jobRow=id=>testDb.prepare('SELECT status,paused,fill_report fillReport,attempt_count attemptCount,retry_count retryCount,publish_attempt_at publishAttemptAt,last_lease_token lastLeaseToken FROM publication_jobs WHERE id=?').get(id)
@@ -51,13 +92,14 @@ try{
   if(jobRow(publicationA.id).status!=='completed')throw new Error('O reenvio idempotente não deveria alterar o estado do trabalho.')
   await expectStatus(409,()=>call(`/extension/jobs/${publicationA.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:'token-diferente-de-qualquer-ciclo',error:'Não deveria ser aceito'})}))
 
-  // 2. Um job travado cujo checkpoint de publish-check foi registrado não pode voltar
+  // 2. Um job travado cujo checkpoint de publish-started foi registrado não pode voltar
   //    direto para "pending" automaticamente: o clique em Publicar pode já ter ocorrido.
   const vehicleB=await createReadyVehicle(adminToken)
   const publicationB=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:vehicleB.id,accountId:account.id})})
   const preparedB=await call(`/extension/jobs/${publicationB.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_instance_beta'})})
   await call(`/extension/jobs/${publicationB.id}/publish-check`,adminToken,{method:'POST',body:JSON.stringify({leaseToken:preparedB.leaseToken})})
-  if(!jobRow(publicationB.id).publishAttemptAt)throw new Error('O checkpoint de publish-check não foi persistido.')
+  await call(`/extension/jobs/${publicationB.id}/publish-started`,adminToken,{method:'POST',body:JSON.stringify({leaseToken:preparedB.leaseToken,report:{publishAttempted:true}})})
+  if(!jobRow(publicationB.id).publishAttemptAt)throw new Error('O checkpoint de publish-started não foi persistido.')
   backdateStuck(publicationB.id)
   await runHealthCheck(testDb,{autoRecover:true})
   const recoveredB=jobRow(publicationB.id)
@@ -66,6 +108,28 @@ try{
   await expectStatus(409,()=>call(`/publications/${publicationB.id}`,adminToken,{method:'PATCH',body:JSON.stringify({status:'pending'})}))
   await call(`/publications/${publicationB.id}`,adminToken,{method:'PATCH',body:JSON.stringify({status:'pending',confirmNoPublication:true})})
   if(jobRow(publicationB.id).status!=='pending')throw new Error('A confirmação manual deveria liberar o trabalho para a fila.')
+
+  // The PR's bound document can still reconcile a confirmed result after main's
+  // watchdog recovery, including records that predate the checkpoint column.
+  for(const recovery of ['manual','monitor']){
+    const lateVehicle=await createReadyVehicle(adminToken)
+    const lateJob=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:lateVehicle.id,accountId:account.id})})
+    const latePrepared=await call(`/extension/jobs/${lateJob.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_late_instance'})})
+    await call(`/extension/jobs/${lateJob.id}/publish-check`,adminToken,{method:'POST',body:JSON.stringify({leaseToken:latePrepared.leaseToken})})
+    assert.equal(jobRow(lateJob.id).publishAttemptAt,null,'Preflight alone is not evidence of a click')
+    await call(`/extension/jobs/${lateJob.id}/publish-started`,adminToken,{method:'POST',body:JSON.stringify({leaseToken:latePrepared.leaseToken,report:{publishAttempted:true}})})
+    if(recovery==='monitor')testDb.prepare('UPDATE publication_jobs SET publish_attempt_at=NULL WHERE id=?').run(lateJob.id)
+    backdateStuck(lateJob.id)
+    await expectStatus(409,()=>call(`/extension/jobs/${lateJob.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_late_instance'})}))
+    if(recovery==='manual')await call(`/publications/${lateJob.id}/recover`,adminToken,{method:'POST'})
+    else await runHealthCheck(testDb,{autoRecover:true})
+    assert.equal(jobRow(lateJob.id).status,'awaiting_confirmation')
+    const report={leaseToken:latePrepared.leaseToken,published:true,publishAttempted:true,resultUrl:'https://www.facebook.com/marketplace/item/321'}
+    const confirmed=await call(`/extension/jobs/${lateJob.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify(report)})
+    assert.equal(confirmed.status,'completed')
+    const duplicate=await call(`/extension/jobs/${lateJob.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify(report)})
+    assert.equal(duplicate.idempotent,true)
+  }
 
   // 3. Sem sinal de publish-check, a recuperação automática continua segura (volta para
   //    "pending"), mas passa a respeitar max_retries (via retry_count, não attempt_count) em
@@ -98,6 +162,8 @@ try{
   }
   const beforeAutoRetry=jobRow(publicationH.id)
   if(beforeAutoRetry.attemptCount<5||beforeAutoRetry.retryCount!==0||beforeAutoRetry.status!=='error')throw new Error('O cenário deveria simular várias falhas sem auto-retry, sem nenhum retry automático contabilizado ainda.')
+  // The organization, not the request body, enables automatic retries.
+  testDb.prepare('UPDATE organization_settings SET auto_retry=1').run()
   const preparedH=await call(`/extension/jobs/${publicationH.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_instance_h'})})
   const lateAutoRetryResult=await call(`/extension/jobs/${publicationH.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedH.leaseToken,error:'Agora com auto-retry ativo',autoRetry:true,extensionVersion:'0.16.0'})})
   if(lateAutoRetryResult.status!=='pending'||lateAutoRetryResult.autoRetry!==true)throw new Error('attempt_count alto por falhas anteriores não deveria esgotar o auto-retry, que ainda não tinha sido usado.')
@@ -116,7 +182,7 @@ try{
 
   // 5. auto_curate_groups=1 deve aplicar a curadoria sozinho (sem clique manual no painel)
   //    quando o worker periódico roda — mesmo resultado que POST /api/groups/auto-curate já produz.
-  await call('/settings',adminToken,{method:'PATCH',body:JSON.stringify({organizationName:'Safety Test',dailyLimit:10,stuckTimeoutMinutes:1,maxRetries:3,descriptionTemplate:'',autoAdvance:true,fillGroups:true,autoPublish:false,autoCurateGroups:true,groups:[{name:'Grupo Bom',url:'https://www.facebook.com/groups/111111',active:true,priority:1},{name:'Grupo Ruim',url:'https://www.facebook.com/groups/222222',active:true,priority:2}]})})
+  await call('/settings',adminToken,{method:'PATCH',body:JSON.stringify({organizationName:'Safety Test',dailyLimit:50,executionIntervalMinutes:0,stuckTimeoutMinutes:1,maxRetries:3,descriptionTemplate:'',autoAdvance:true,fillGroups:true,autoPublish:false,autoCurateGroups:true,groups:[{name:'Grupo Bom',url:'https://www.facebook.com/groups/111111',active:true,priority:1},{name:'Grupo Ruim',url:'https://www.facebook.com/groups/222222',active:true,priority:2}]})})
   const curationSettings=await call('/settings',adminToken)
   if(!curationSettings.settings.autoCurateGroups)throw new Error('O toggle de curadoria automática não foi persistido.')
   const goodGroup=curationSettings.settings.groups.find(item=>item.name==='Grupo Bom')
@@ -140,6 +206,8 @@ try{
   const smartScheduled=await call(`/publications/${publicationE.id}/smart-schedule`,adminToken,{method:'POST'})
   if(smartScheduled.confidence!=='historical')throw new Error('O agendamento deveria usar o histórico real quando há dados suficientes.')
 
+  testDb.prepare('UPDATE organization_settings SET auto_retry=1').run()
+
   // 7. A partir da 2ª falha consecutiva do mesmo job, o auto-retry deve rerotear para uma
   //    conta saudável com espaço disponível em vez de insistir sempre na mesma conta.
   const accountB=await call('/social-accounts',adminToken,{method:'POST',body:JSON.stringify({userId:(await call('/team',adminToken)).users[0].id,label:'Facebook Teste 2',browserProfile:'Brave Perfil Teste 2'})})
@@ -160,7 +228,7 @@ try{
 
   // 8. Sem conta alternativa elegível (todas no limite diário), o job continua na mesma conta.
   const accountBOrgId=testDb.prepare('SELECT organization_id organizationId FROM social_accounts WHERE id=?').get(accountB.id).organizationId
-  for(let i=0;i<9;i++){
+  for(let i=0;i<49;i++){
     testDb.prepare(`INSERT INTO publication_jobs (organization_id,vehicle_id,social_account_id,status) VALUES (?,?,?,'error')`).run(accountBOrgId,vehicleF.id,accountB.id)
   }
   const vehicleG=await createReadyVehicle(adminToken)

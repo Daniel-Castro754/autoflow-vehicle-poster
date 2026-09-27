@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "dev": "concurrently -k -n API,WEB -c green,cyan \"npm:dev:api\" \"npm:dev:web\"",
     "dev:web": "vite",
@@ -11,18 +14,22 @@
     "test:queue": "node tests/queue-flow.mjs",
     "test:stock": "node tests/stock-state.mjs",
     "test:autonomous": "node tests/autonomous-flow.mjs",
+    "test:extension-consumer": "node tests/extension-consumer.mjs",
     "test:publish-safety": "node tests/publish-safety.mjs",
-    "test": "npm run test:stock && npm run test:queue && npm run test:autonomous && npm run test:publish-safety",
+    "test:backup": "node tests/backup.mjs",
+    "backup": "node scripts/backup.mjs",
+    "test": "npm run test:stock && npm run test:queue && npm run test:autonomous && npm run test:extension-consumer && npm run test:backup && npm run test:publish-safety",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
     "@vitejs/plugin-react": "6.0.5",
-    "vite": "8.2.1",
-    "typescript": "6.0.3",
+    "lucide-react": "1.31.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "lucide-react": "1.31.0"
+    "sharp": "^0.35.4",
+    "typescript": "6.0.3",
+    "vite": "8.2.1"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

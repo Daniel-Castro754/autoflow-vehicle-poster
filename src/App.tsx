@@ -5,9 +5,10 @@ import VehiclesView, { type VehicleRecord } from './Vehicles'
 import { AiCenterView } from './AiCenterView'
 
 type Vehicle = VehicleRecord & {updated?:string}
-type TeamUser = { id:number; name:string; email:string; role:'admin'|'seller' }
+type TeamUser = { id:number; name:string; email:string; role:'admin'|'seller'; active:number }
 type CurrentUser = { id:number; name:string; email:string; role:'admin'|'seller' }
 type SocialAccount = { id:number; userId:number; label:string; platform:string; status:string; browserProfile:string; lastSeenAt?:string }
+type OperationalStats = {vehicles:{total:number;ready:number;attention:number;soldPendingRemoval:number;soldRemovalOverdue:number}}
 
 const seed: Vehicle[] = [
   { id:1, year:2022, make:'Toyota', model:'Corolla', trim:'XEi 2.0', price:119900, km:42500, seller:'Marina Costa', initials:'MC', status:'Pronto', color:'#dce8ef', updated:'há 12 min' },
@@ -42,6 +43,7 @@ export default function App() {
   const [loading, setLoading] = useState(Boolean(token))
   const [active, setActive] = useState('Veículos')
   const [vehicles, setVehicles] = useState<Vehicle[]>(token ? [] : seed)
+  const [operationalStats,setOperationalStats]=useState<OperationalStats|null>(null)
   const [toast, setToast] = useState('')
   const [organizationName, setOrganizationName] = useState('AutoPrime Veículos')
   const [theme, setTheme] = useState<'light'|'dark'>(() => localStorage.getItem('autoflow_theme') === 'dark' ? 'dark' : 'light')
@@ -68,7 +70,14 @@ export default function App() {
   },[token,clearSession])
 
   const loadVehicles=useCallback(async () => {
-    try{const data=await api<{vehicles:Vehicle[]}>('/vehicles');setVehicles(data.vehicles)}
+    try{
+      const [data,stats]=await Promise.all([
+        api<{vehicles:Vehicle[]}>('/vehicles/paged?page=1&limit=25'),
+        api<OperationalStats>('/stats/global'),
+      ])
+      setVehicles(data.vehicles)
+      setOperationalStats(stats)
+    }
     catch(error){if(token)setToast(error instanceof Error?error.message:'Não foi possível atualizar o estoque.')}
     finally{setLoading(false)}
   },[api,token])
@@ -86,13 +95,14 @@ export default function App() {
     if(!token)return
     let active=true
     void Promise.all([
-      request<{vehicles:Vehicle[]}>(token,'/vehicles'),
+      request<{vehicles:Vehicle[]}>(token,'/vehicles/paged?page=1&limit=25'),
+      request<OperationalStats>(token,'/stats/global'),
       request<{organization:{name:string}}>(token,'/settings'),
       request<{users:TeamUser[];accounts:SocialAccount[]}>(token,'/team'),
       request<{user:CurrentUser}>(token,'/me'),
-    ]).then(([stock,settings,teamData,me])=>{
+    ]).then(([stock,stats,settings,teamData,me])=>{
       if(!active)return
-      setVehicles(stock.vehicles);setOrganizationName(settings.organization.name);setTeam(teamData.users);setAccounts(teamData.accounts);setCurrentUser(me.user)
+      setVehicles(stock.vehicles);setOperationalStats(stats);setOrganizationName(settings.organization.name);setTeam(teamData.users);setAccounts(teamData.accounts);setCurrentUser(me.user)
     }).catch(error=>{
       if(!active)return
       if(error instanceof ApiError&&error.status===401)clearSession('Sua sessão expirou. Entre novamente.')
@@ -107,17 +117,17 @@ export default function App() {
 
   const notifications = useMemo(() => {
     const items:{id:string;title:string;detail:string;page:string;tone:string}[] = []
-    const attention = vehicles.filter(v=>v.status==='Atenção').length
-    const ready = vehicles.filter(v=>v.status==='Pronto').length
+    const attention = operationalStats?.vehicles.attention ?? vehicles.filter(v=>v.status==='Atenção').length
+    const ready = operationalStats?.vehicles.ready ?? vehicles.filter(v=>v.status==='Pronto').length
     const waiting = accounts.filter(a=>a.status!=='connected').length
-    const soldPendingRemoval = vehicles.filter(v=>v.status==='Vendido'&&Number(v.pendingRemovalCount)>0)
-    const overdue = soldPendingRemoval.filter(v=>v.soldAt&&Date.now()-new Date(v.soldAt+'Z').getTime()>24*60*60*1000)
+    const soldPendingRemoval = operationalStats?.vehicles.soldPendingRemoval ?? 0
+    const overdue = operationalStats?.vehicles.soldRemovalOverdue ?? 0
     if (attention) items.push({id:`attention-${attention}`,title:`${attention} veículo${attention>1?'s':''} precisa${attention>1?'m':''} de atenção`,detail:'Revise os dados antes de colocar na fila.',page:'Veículos',tone:'red'})
     if (ready) items.push({id:`ready-${ready}`,title:`${ready} veículo${ready>1?'s':''} pronto${ready>1?'s':''} para publicar`,detail:'Distribua o estoque entre os perfis disponíveis.',page:'Publicações',tone:'amber'})
-    if (soldPendingRemoval.length) items.push({id:`sold-removal-${soldPendingRemoval.length}-${overdue.length}`,title:`${soldPendingRemoval.length} veículo${soldPendingRemoval.length>1?'s':''} vendido${soldPendingRemoval.length>1?'s':''} aguardando remoção do anúncio`,detail:overdue.length?'Já passou de 24h: remova o anúncio no Facebook e confirme em Publicações.':'A Meta exige remover o anúncio em até 24h após a venda.',page:'Publicações',tone:overdue.length?'red':'amber'})
+    if (soldPendingRemoval) items.push({id:`sold-removal-${soldPendingRemoval}-${overdue}`,title:`${soldPendingRemoval} veículo${soldPendingRemoval>1?'s':''} vendido${soldPendingRemoval>1?'s':''} aguardando remoção do anúncio`,detail:overdue?'Já passou de 24h: remova o anúncio no Facebook e confirme em Publicações.':'A Meta exige remover o anúncio em até 24h após a venda.',page:'Publicações',tone:overdue?'red':'amber'})
     if (waiting) items.push({id:`profiles-${waiting}`,title:`${waiting} perfil${waiting>1?'s':''} aguardando extensão`,detail:'Abra a extensão no Brave para confirmar a conexão.',page:'Equipe e contas',tone:'blue'})
     return items
-  },[vehicles,accounts])
+  },[vehicles,accounts,operationalStats])
   const visibleNotifications = notifications.filter(item=>!dismissedNotificationIds.includes(item.id))
   const unreadCount = visibleNotifications.filter(item=>!readNotificationIds.includes(item.id)).length
   function saveRead(ids:string[]) { setReadNotificationIds(ids); localStorage.setItem('autoflow_notifications_read_ids',JSON.stringify(ids)) }
@@ -143,6 +153,16 @@ export default function App() {
     } catch (error) { setToast(error instanceof Error ? error.message : 'Erro ao associar perfil'); setTimeout(()=>setToast(''),3000);return false }
   }
 
+  async function toggleUser(user:TeamUser) {
+    const active=user.active!==1
+    if(!window.confirm(`${active?'Reativar':'Desativar'} o acesso de ${user.name}?${active?'':' As sessões abertas serão encerradas.'}`))return
+    try {
+      await api(`/team/users/${user.id}`,{method:'PATCH',body:JSON.stringify({active})})
+      await loadTeam()
+      setToast(active?'Acesso reativado':'Acesso desativado');setTimeout(()=>setToast(''),2500)
+    } catch(error) { setToast(error instanceof Error?error.message:'Não foi possível alterar o acesso.');setTimeout(()=>setToast(''),3000) }
+  }
+
   async function login(e:React.FormEvent<HTMLFormElement>) {
     e.preventDefault(); setAuthError(''); setLoading(true)
     const form = new FormData(e.currentTarget)
@@ -153,7 +173,12 @@ export default function App() {
     } catch (error) { setAuthError(error instanceof Error ? error.message : 'Falha no acesso.'); setLoading(false) }
   }
 
-  function logout() { clearSession() }
+  function logout() {
+    void api('/auth/logout',{method:'POST'}).then(()=>clearSession()).catch(error=>{
+      console.warn('AutoFlow: não foi possível revogar a sessão no servidor',error instanceof Error?error.message:String(error))
+      clearSession()
+    })
+  }
 
 
   if (!token) return <Login onSubmit={login} error={authError} loading={loading} theme={theme}/>
@@ -163,14 +188,14 @@ export default function App() {
     <aside className={`sidebar ${mobileMenuOpen?'mobile-open':''}`}>
       <div className="brand"><span className="brand-mark"><Car size={22}/></span><span>AutoFlow</span></div>
       <button className="workspace" onClick={()=>{setActive('Configurações');setMobileMenuOpen(false)}}><span className="workspace-logo">{organizationName.split(' ').map(n=>n[0]).slice(0,2).join('')}</span><div><small>Empresa</small><strong>{organizationName}</strong></div><ChevronDown size={16}/></button>
-      <nav>{nav.map(([label, Icon]) => <button key={label} className={active===label?'active':''} onClick={()=>{setActive(label);setMobileMenuOpen(false)}}><Icon size={19}/>{label}{label==='Publicações'&&vehicles.filter(v=>v.status==='Pronto').length>0&&<span className="count">{vehicles.filter(v=>v.status==='Pronto').length}</span>}</button>)}</nav>
+      <nav>{nav.map(([label, Icon]) => <button key={label} className={active===label?'active':''} onClick={()=>{setActive(label);setMobileMenuOpen(false)}}><Icon size={19}/>{label}{label==='Publicações'&&(operationalStats?.vehicles.ready||0)>0&&<span className="count">{operationalStats?.vehicles.ready}</span>}</button>)}</nav>
       <div className="sidebar-foot"><button className={active==='Configurações'?'active':''} onClick={()=>{setActive('Configurações');setMobileMenuOpen(false)}}><Settings size={19}/>Configurações</button><div className="profile"><span>{currentUser?currentUser.name.split(' ').map(n=>n[0]).slice(0,2).join(''):''}</span><div><strong>{currentUser?.name||'Carregando...'}</strong><small>{currentUser?.role==='admin'?'Administrador':currentUser?.role==='seller'?'Vendedor':''}</small></div><button className="logout" onClick={logout} title="Sair"><MoreHorizontal size={18}/></button></div></div>
     </aside>
     {mobileMenuOpen&&<button className="mobile-overlay" onClick={()=>setMobileMenuOpen(false)} aria-label="Fechar menu"/>}
 
     <main>
       <header><button className="mobile-menu" onClick={()=>setMobileMenuOpen(true)} aria-label="Abrir menu"><Menu/></button><div className="crumb"><span>AutoFlow</span><b>/</b><strong>{active}</strong></div><div className="header-actions"><button className="theme-quick" onClick={()=>changeTheme(theme==='light'?'dark':'light')} aria-label={theme==='light'?'Ativar tema escuro':'Ativar tema claro'} title={theme==='light'?'Tema escuro':'Tema claro'}>{theme==='light'?<Moon size={17}/>:<Sun size={17}/>}</button><div className="notification-wrap"><button className="icon-btn" onClick={()=>setNotificationsOpen(open=>!open)} aria-label="Abrir notificações" aria-expanded={notificationsOpen}><Bell size={19}/>{unreadCount>0&&<span className="notification-count">{unreadCount}</span>}</button>{notificationsOpen&&<NotificationCenter notifications={visibleNotifications} readIds={readNotificationIds} onClose={()=>setNotificationsOpen(false)} onReadAll={markAllNotificationsRead} onDismiss={dismissNotification} onDismissAll={dismissAllNotifications} onNavigate={(id,page)=>{markNotificationRead(id);setActive(page);setNotificationsOpen(false)}}/>}</div><span className="sync"><i/>Sincronizado agora</span></div></header>
-      {active === 'Visão geral' ? <OverviewView api={api} vehicles={vehicles} navigate={setActive}/> : active === 'Central de IA' ? <AiCenterView api={api} vehicles={vehicles} reloadVehicles={loadVehicles} navigate={setActive}/> : active === 'Publicações' ? <PublicationsView api={api} vehicles={vehicles} reload={loadVehicles}/> : active === 'Equipe e contas' ? <TeamView team={team} accounts={accounts} onAddUser={addUser} onAddAccount={addAccount}/> : active === 'Relatórios' ? <ReportsView api={api} vehicles={vehicles}/> : active === 'Configurações' ? <SettingsView api={api} onSaved={loadOrganizationName} theme={theme} onThemeChange={changeTheme}/> : <VehiclesView api={api} vehicles={vehicles} accounts={accounts} reload={loadVehicles} notify={message=>{setToast(message);setTimeout(()=>setToast(''),3000)}}/>}
+      {active === 'Visão geral' ? <OverviewView api={api} vehicles={vehicles} navigate={setActive}/> : active === 'Central de IA' ? <AiCenterView api={api} vehicles={vehicles} reloadVehicles={loadVehicles} navigate={setActive}/> : active === 'Publicações' ? <PublicationsView api={api} reload={loadVehicles}/> : active === 'Equipe e contas' ? <TeamView team={team} accounts={accounts} canManage={currentUser?.role==='admin'} onToggleUser={toggleUser} onAddUser={addUser} onAddAccount={addAccount}/> : active === 'Relatórios' ? <ReportsView api={api} vehicles={vehicles}/> : active === 'Configurações' ? <SettingsView api={api} onSaved={loadOrganizationName} theme={theme} onThemeChange={changeTheme}/> : <VehiclesView api={api} vehicles={vehicles} accounts={accounts} reload={loadVehicles} notify={message=>{setToast(message);setTimeout(()=>setToast(''),3000)}}/>}
     </main>
     {toast&&<div className="toast"><Check size={17}/>{toast}</div>}
   </div>
@@ -186,16 +211,16 @@ function NotificationCenter({notifications,readIds,onClose,onReadAll,onDismiss,o
   </div>
 }
 
-function TeamView({team,accounts,onAddUser,onAddAccount}:{team:TeamUser[];accounts:SocialAccount[];onAddUser:(e:React.FormEvent<HTMLFormElement>)=>Promise<boolean>;onAddAccount:(e:React.FormEvent<HTMLFormElement>)=>Promise<boolean>}) {
+function TeamView({team,accounts,canManage,onToggleUser,onAddUser,onAddAccount}:{team:TeamUser[];accounts:SocialAccount[];canManage:boolean;onToggleUser:(user:TeamUser)=>Promise<void>;onAddUser:(e:React.FormEvent<HTMLFormElement>)=>Promise<boolean>;onAddAccount:(e:React.FormEvent<HTMLFormElement>)=>Promise<boolean>}) {
   const [modal,setModal] = useState<'user'|'account'|null>(null)
   return <section className="content team-page">
-    <div className="title-row"><div><h1>Equipe e contas</h1><p>Defina quem publica e qual perfil local do Brave cada pessoa utiliza.</p></div><div className="title-actions"><button className="secondary" onClick={()=>setModal('account')}><Laptop size={17}/>Associar perfil</button><button className="primary" onClick={()=>setModal('user')}><UserPlus size={18}/>Adicionar vendedor</button></div></div>
+    <div className="title-row"><div><h1>Equipe e contas</h1><p>Defina quem publica e qual perfil local do Brave cada pessoa utiliza.</p></div>{canManage&&<div className="title-actions"><button className="secondary" onClick={()=>setModal('account')}><Laptop size={17}/>Associar perfil</button><button className="primary" onClick={()=>setModal('user')}><UserPlus size={18}/>Adicionar vendedor</button></div>}</div>
     <div className="security-note"><ShieldCheck/><div><strong>Sessões permanecem no computador do vendedor</strong><p>O AutoFlow armazena somente o nome do perfil do navegador. Senhas, cookies e tokens do Facebook não são enviados ao servidor.</p></div></div>
     <div className="team-grid">
-      <article className="team-panel"><div className="panel-heading"><div><h2>Pessoas</h2><span>{team.length} membros</span></div></div><div className="people-list">{team.map(user=><div className="person-row" key={user.id}><span className="person-avatar">{user.name.split(' ').map(n=>n[0]).slice(0,2).join('')}</span><div><strong>{user.name}</strong><small>{user.email}</small></div><span className={`role ${user.role}`}>{user.role==='admin'?'Administrador':'Vendedor'}</span></div>)}</div></article>
-      <article className="team-panel"><div className="panel-heading"><div><h2>Perfis de publicação</h2><span>{accounts.length} associados</span></div><button className="small-add" onClick={()=>setModal('account')}><Plus size={16}/></button></div>{accounts.length ? <div className="account-list">{accounts.map(account=>{const owner=team.find(u=>u.id===account.userId);return <div className="account-card" key={account.id}><span className="browser-icon"><Laptop/></span><div><strong>{account.label}</strong><small>{account.browserProfile} · {owner?.name||'Sem responsável'}</small></div><span className="connection"><i/>Aguardando extensão</span></div>})}</div>:<div className="account-empty"><Laptop/><h3>Nenhum perfil associado</h3><p>Cadastre o perfil do Brave usado por cada vendedor. A conexão será confirmada pela extensão.</p><button className="secondary" onClick={()=>setModal('account')}>Associar primeiro perfil</button></div>}</article>
+      <article className="team-panel"><div className="panel-heading"><div><h2>Pessoas</h2><span>{team.filter(user=>user.active===1).length} ativos · {team.length} membros</span></div></div><div className="people-list">{team.map(user=><div className={`person-row ${user.active===1?'':'inactive-person'}`} key={user.id}><span className="person-avatar">{user.name.split(' ').map(n=>n[0]).slice(0,2).join('')}</span><div><strong>{user.name}</strong><small>{user.email}</small></div><span className={`role ${user.role}`}>{user.role==='admin'?'Administrador':'Vendedor'}</span>{canManage&&<button className="team-user-toggle" onClick={()=>void onToggleUser(user)}>{user.active===1?'Desativar':'Reativar'}</button>}</div>)}</div></article>
+      <article className="team-panel"><div className="panel-heading"><div><h2>Perfis de publicação</h2><span>{accounts.length} associados</span></div>{canManage&&<button className="small-add" onClick={()=>setModal('account')}><Plus size={16}/></button>}</div>{accounts.length ? <div className="account-list">{accounts.map(account=>{const owner=team.find(u=>u.id===account.userId);return <div className="account-card" key={account.id}><span className="browser-icon"><Laptop/></span><div><strong>{account.label}</strong><small>{account.browserProfile} · {owner?.name||'Sem responsável'}</small></div><span className="connection"><i/>Aguardando extensão</span></div>})}</div>:<div className="account-empty"><Laptop/><h3>Nenhum perfil associado</h3><p>Cadastre o perfil do Brave usado por cada vendedor. A conexão será confirmada pela extensão.</p>{canManage&&<button className="secondary" onClick={()=>setModal('account')}>Associar primeiro perfil</button>}</div>}</article>
     </div>
-    {modal&&<div className="overlay" onMouseDown={()=>setModal(null)}><aside className="drawer" onMouseDown={e=>e.stopPropagation()}><button className="close" onClick={()=>setModal(null)}><X/></button>{modal==='user'?<><span className="eyebrow">NOVA PESSOA</span><h2>Adicionar vendedor</h2><p>Crie um acesso individual. A senha é temporária e deve ser enviada ao vendedor por um canal seguro.</p><form onSubmit={async e=>{if(await onAddUser(e))setModal(null)}}><label>Nome completo<input name="name" required/></label><label>E-mail<input name="email" type="email" required/></label><label>Senha temporária<input name="password" type="password" minLength={8} required/></label><label>Função<select name="role"><option value="seller">Vendedor</option><option value="admin">Administrador</option></select></label><button className="primary">Criar acesso</button></form></>:<><span className="eyebrow">PERFIL LOCAL</span><h2>Associar perfil do Brave</h2><p>Use um perfil separado para cada pessoa. Não informe e-mail, senha ou cookie do Facebook.</p><form onSubmit={async e=>{if(await onAddAccount(e))setModal(null)}}><label>Identificação<input name="label" placeholder="Ex.: Facebook — Marina" required/></label><label>Responsável<select name="userId" required><option value="">Selecione</option>{team.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></label><label>Nome do perfil no Brave<input name="browserProfile" placeholder="Ex.: Perfil 2" required/></label><button className="primary">Associar perfil</button></form></>}</aside></div>}
+    {modal&&<div className="overlay" onMouseDown={()=>setModal(null)}><aside className="drawer" onMouseDown={e=>e.stopPropagation()}><button className="close" onClick={()=>setModal(null)}><X/></button>{modal==='user'?<><span className="eyebrow">NOVA PESSOA</span><h2>Adicionar vendedor</h2><p>Crie um acesso individual. A senha é temporária e deve ser enviada ao vendedor por um canal seguro.</p><form onSubmit={async e=>{if(await onAddUser(e))setModal(null)}}><label>Nome completo<input name="name" required/></label><label>E-mail<input name="email" type="email" required/></label><label>Senha temporária<input name="password" type="password" minLength={8} required/></label><label>Função<select name="role"><option value="seller">Vendedor</option><option value="admin">Administrador</option></select></label><button className="primary">Criar acesso</button></form></>:<><span className="eyebrow">PERFIL LOCAL</span><h2>Associar perfil do Brave</h2><p>Use um perfil separado para cada pessoa. Não informe e-mail, senha ou cookie do Facebook.</p><form onSubmit={async e=>{if(await onAddAccount(e))setModal(null)}}><label>Identificação<input name="label" placeholder="Ex.: Facebook — Marina" required/></label><label>Responsável<select name="userId" required><option value="">Selecione</option>{team.filter(user=>user.active===1).map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></label><label>Nome do perfil no Brave<input name="browserProfile" placeholder="Ex.: Perfil 2" required/></label><button className="primary">Associar perfil</button></form></>}</aside></div>}
   </section>
 }
 

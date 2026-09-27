@@ -1,11 +1,7 @@
 const API_ORIGIN='http://127.0.0.1:3333'
 const API=`${API_ORIGIN}/api`
 const HEARTBEAT_ALARM='autoflow-heartbeat'
-
-function ensureHeartbeatAlarm(){
-  chrome.alarms.get(HEARTBEAT_ALARM,alarm=>{if(!alarm)chrome.alarms.create(HEARTBEAT_ALARM,{delayInMinutes:.5,periodInMinutes:1})})
-}
-
+let queueConsumerRunning=false
 // Backoff para o reenvio de um resultado pendente: evita bater no servidor a cada
 // batimento (~60s) indefinidamente se ele estiver fora do ar por muito tempo.
 function pendingResultRetryDelayMs(attempts){return Math.min(30000*Math.pow(2,Math.max(0,attempts)),300000)}
@@ -31,83 +27,277 @@ async function fetchWithRetry(url,options,{attempts=3,timeoutMs=8000}={}){
 }
 
 function sendFillResult(jobId,token,payload){
-  return fetch(`${API}/extension/jobs/${jobId}/fill-result`,{
+  return fetchWithRetry(`${API}/extension/jobs/${jobId}/fill-result`,{
     method:'PATCH',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(payload)
-  }).then(async response=>{
+  },{attempts:1,timeoutMs:8000}).then(async response=>{
     const data=await response.json().catch(()=>({}))
     if(!response.ok){const error=new Error(data.error||'Falha ao atualizar o trabalho');error.status=response.status;throw error}
     return data
   })
 }
 
-// Reenvia um resultado que não teve a entrega confirmada anteriormente (aba fechada,
-// falha de rede). Roda a cada batimento, independente de a aba original ainda existir.
-function flushPendingResult(){
-  chrome.storage.local.get(['pendingResult','token'],({pendingResult,token})=>{
-    if(!pendingResult?.jobId||!pendingResult?.leaseToken||!token)return
-    const lastAttemptAt=pendingResult.lastAttemptAt||pendingResult.queuedAt||0
-    if(Date.now()-lastAttemptAt<pendingResultRetryDelayMs(pendingResult.attempts||0))return
-    chrome.storage.local.set({pendingResult:{...pendingResult,attempts:(pendingResult.attempts||0)+1,lastAttemptAt:Date.now()}})
-    sendFillResult(pendingResult.jobId,token,pendingResult.payload)
-      .then(()=>chrome.storage.local.remove(['pendingResult','pendingJob','pendingPublish']))
-      .catch(error=>{
-        // Uma execução legitimamente diferente já assumiu o bloqueio: reenviar não ajuda mais.
-        if(error.status===409)chrome.storage.local.remove(['pendingResult','pendingJob','pendingPublish'])
-      })
+
+
+function pendingPublishes(data){
+  const entries={...(data.pendingPublishes||{})}
+  if(data.pendingPublish?.jobId&&!entries[data.pendingPublish.jobId])entries[data.pendingPublish.jobId]=data.pendingPublish
+  return entries
+}
+function senderMatchesExecution(sender,job,requireDocumentId=true){
+  if(sender.tab?.id!==job?.tabId||sender.frameId!==0)return false
+  try{
+    const url=new URL(sender.url||'')
+    const expectedPath=String(job.document||'').replace(/\/+$/,'')
+    return ['facebook.com','www.facebook.com'].includes(url.hostname)&&url.protocol==='https:'
+      &&url.pathname.replace(/\/+$/,'')===expectedPath
+      &&(!requireDocumentId||Boolean(job.documentId)&&sender.documentId===job.documentId)
+  }catch{return false}
+}
+function removePendingPublish(jobId,callback,leaseToken){
+  chrome.storage.local.get(['pendingPublishes','pendingPublish'],data=>{
+    const entries=pendingPublishes(data)
+    if(!leaseToken||entries[jobId]?.leaseToken===leaseToken)delete entries[jobId]
+    chrome.storage.local.set({pendingPublishes:entries},()=>chrome.storage.local.remove('pendingPublish',callback))
   })
 }
-
-function heartbeat(){
+function ensureHeartbeatAlarm(){
+  chrome.alarms.get(HEARTBEAT_ALARM,alarm=>{if(!alarm)chrome.alarms.create(HEARTBEAT_ALARM,{delayInMinutes:.5,periodInMinutes:1})})
+}
+function scheduleConsumer(nextAt){
+  const delay=Math.max(1,Math.min(30*60,Math.ceil((Date.parse(String(nextAt))-Date.now())/1000)))
+  chrome.alarms.create(HEARTBEAT_ALARM,{delayInMinutes:Math.min(1,delay/60),periodInMinutes:1})
+}
+async function consumeQueue(){
+  if(queueConsumerRunning)return
+  queueConsumerRunning=true
+  try{
+    const state=await chrome.storage.local.get(['autoRun','activeAccountId','token','instanceId','pendingJob','pendingPublishes','pendingPublish'])
+    if(!state.autoRun||!state.activeAccountId||!state.token||state.pendingJob)return
+    const response=await fetch(`${API}/extension/queue?accountId=${encodeURIComponent(state.activeAccountId)}`,{
+      headers:{'Authorization':'Bearer '+state.token},
+    })
+    if(response.status===401){await chrome.storage.local.set({autoRun:false});return}
+    if(!response.ok)throw new Error(`Falha ao consultar a fila: HTTP ${response.status}`)
+    const queue=await response.json()
+    if(queue.nextScheduledAt)scheduleConsumer(queue.nextScheduledAt)
+    const job=queue.jobs.find(item=>item.jobStatus==='pending'&&!item.locked&&!item.publishUncertain)
+    if(!job)return
+    const tab=await chrome.tabs.create({url:'https://www.facebook.com/marketplace/create/vehicle',active:true})
+    if(!tab.id)throw new Error('O navegador não retornou o identificador da aba do Marketplace.')
+    try{
+      const prepareResponse=await fetch(`${API}/extension/jobs/${job.jobId}/prepare`,{
+        method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+state.token},
+        body:JSON.stringify({accountId:state.activeAccountId,instanceId:state.instanceId,tabId:tab.id,document:'/marketplace/create/vehicle'}),
+      })
+      const prepared=await prepareResponse.json()
+      if(!prepareResponse.ok){
+        if(prepareResponse.status===409&&prepared.capacity?.retryAfterSeconds){
+          chrome.alarms.create(HEARTBEAT_ALARM,{delayInMinutes:Math.max(1,Math.ceil(prepared.capacity.retryAfterSeconds/60)),periodInMinutes:1})
+        }
+        throw new Error(prepared.error||`Falha ao reservar trabalho #${job.jobId}.`)
+      }
+      await chrome.storage.local.set({pendingJob:prepared})
+      const sendTask=()=>chrome.tabs.sendMessage(tab.id,{type:'FILL_VEHICLE',task:prepared},()=>{if(chrome.runtime.lastError)console.warn('AutoFlow: a aba ainda não aceitou o trabalho',chrome.runtime.lastError.message)})
+      chrome.tabs.get(tab.id,currentTab=>{
+        if(currentTab?.status==='complete'){sendTask();return}
+        const waitForDocument=(tabId,changeInfo)=>{
+          if(tabId!==tab.id||changeInfo.status!=='complete')return
+          chrome.tabs.onUpdated.removeListener(waitForDocument)
+          sendTask()
+        }
+        chrome.tabs.onUpdated.addListener(waitForDocument)
+      })
+    }catch(error){
+      await chrome.tabs.remove(tab.id).catch(()=>{})
+      throw error
+    }
+  }catch(error){console.warn('AutoFlow: consumidor da fila pausado até a próxima verificação',error instanceof Error?error.message:String(error))}
+  finally{queueConsumerRunning=false}
+}
+function validatePendingTab(){
   chrome.storage.local.get(['pendingJob','token'],data=>{
     const job=data.pendingJob
     if(!job?.jobId||!job?.leaseToken||!data.token)return
-    fetch(`${API}/extension/jobs/${job.jobId}/heartbeat`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+data.token},body:JSON.stringify({leaseToken:job.leaseToken})})
-      .then(response=>{if(response.status===409)chrome.storage.local.remove(['pendingJob','pendingPublish'])}).catch(()=>{})
+    chrome.tabs.get(job.tabId,tab=>{
+      if(chrome.runtime.lastError||!tab||tab.discarded||!/^https:\/\/(?:www\.)?facebook\.com\/marketplace\/(?:create\/vehicle|item\/)/.test(String(tab.url||''))){
+        chrome.storage.local.remove('pendingJob')
+      }
+    })
   })
-  flushPendingResult()
 }
 chrome.runtime.onInstalled.addListener(()=>{console.info('AutoFlow instalado no Brave');ensureHeartbeatAlarm()})
 chrome.runtime.onStartup.addListener(ensureHeartbeatAlarm)
-chrome.alarms.onAlarm.addListener(alarm=>{if(alarm.name===HEARTBEAT_ALARM)heartbeat()})
+chrome.alarms.onAlarm.addListener(alarm=>{if(alarm.name===HEARTBEAT_ALARM){validatePendingTab();void flushPendingResults()}})
+chrome.alarms.onAlarm.addListener(alarm=>{if(alarm.name===HEARTBEAT_ALARM)void consumeQueue()})
 ensureHeartbeatAlarm()
 
 chrome.tabs.onUpdated.addListener((tabId,changeInfo)=>{
   if(!changeInfo.url||!/^https:\/\/(?:www\.)?facebook\.com\/marketplace\/item\//.test(changeInfo.url))return
-  chrome.storage.local.get(['pendingPublish','token'],data=>{
-    const pending=data.pendingPublish
-    if(!pending||pending.tabId!==tabId||!data.token)return
-    const payload={...pending.report,leaseToken:pending.leaseToken,published:true,resultUrl:changeInfo.url,extensionVersion:chrome.runtime.getManifest().version}
-    // Mesma persistência durável do listener de mensagens: se a aba fechar logo em
-    // seguida à navegação, o batimento ainda consegue confirmar a publicação depois.
-    chrome.storage.local.set({pendingResult:{jobId:pending.jobId,leaseToken:pending.leaseToken,payload,queuedAt:Date.now(),attempts:0}},()=>{
-      sendFillResult(pending.jobId,data.token,payload)
-        .then(()=>chrome.storage.local.remove(['pendingResult','pendingPublish','pendingJob']))
-        .catch(error=>{if(error.status===409)chrome.storage.local.remove(['pendingResult','pendingPublish','pendingJob'])})
-    })
+  chrome.storage.local.get(['pendingPublishes','pendingPublish','token'],data=>{
+    const matches=Object.values(pendingPublishes(data)).filter(pending=>pending.tabId===tabId)
+    for(const pending of matches)reconcilePublishedTab(changeInfo.url,pending,data.token)
   })
 })
+function reconcilePublishedTab(resultUrl,pending,token){
+  if(!pending||!token)return
+  const payload={...pending.report,leaseToken:pending.leaseToken,tabId:pending.tabId,document:pending.document,documentId:pending.documentId,published:true,publishAttempted:true,resultUrl,extensionVersion:chrome.runtime.getManifest().version}
+  void queueFillResult(pending.jobId,token,payload).catch(()=>{})
+}
+
+// Retain results from different jobs/leases independently, including late navigation
+// confirmations. Serialize storage writes; an old acknowledgement cannot erase a newer result.
+let resultStoreOperation=Promise.resolve()
+let resultSequence=0
+let flushingResults=false
+function changePendingResults(change){
+  const operation=resultStoreOperation.then(async()=>{
+    const stored=await chrome.storage.local.get(['pendingResults','pendingResult'])
+    const entries={...(stored.pendingResults||{})}
+    if(stored.pendingResult?.jobId&&stored.pendingResult?.leaseToken){
+      const legacy=stored.pendingResult
+      const key=`${legacy.jobId}:${legacy.leaseToken}`
+      if(!entries[key])entries[key]={...legacy,version:legacy.version||'legacy'}
+    }
+    const result=change(entries)
+    await chrome.storage.local.set({pendingResults:entries})
+    await chrome.storage.local.remove('pendingResult')
+    return result
+  })
+  resultStoreOperation=operation.catch(()=>{})
+  return operation
+}
+async function acknowledgeResult(entry,rejected=false){
+  const key=`${entry.jobId}:${entry.leaseToken}`
+  await changePendingResults(entries=>{if(entries[key]?.version===entry.version)delete entries[key]})
+  const {pendingJob}=await chrome.storage.local.get('pendingJob')
+  if(pendingJob?.jobId===entry.jobId&&pendingJob.leaseToken===entry.leaseToken)await chrome.storage.local.remove('pendingJob')
+  if(entry.payload.published||rejected)removePendingPublish(entry.jobId,undefined,entry.leaseToken)
+  void consumeQueue()
+}
+async function deliverResult(entry,token){
+  try{
+    const data=await sendFillResult(entry.jobId,token,entry.payload)
+    await acknowledgeResult(entry)
+    return data
+  }catch(error){
+    if(error.status===409)await acknowledgeResult(entry,true)
+    throw error
+  }
+}
+async function queueFillResult(jobId,token,payload){
+  const entry=await changePendingResults(entries=>{
+    const key=`${jobId}:${payload.leaseToken}`
+    if(entries[key]?.payload.published&&!payload.published)return entries[key]
+    const next={jobId,leaseToken:payload.leaseToken,payload,queuedAt:Date.now(),lastAttemptAt:Date.now(),attempts:0,version:`${Date.now()}:${++resultSequence}`}
+    entries[key]=next
+    return next
+  })
+  return deliverResult(entry,token)
+}
+async function flushPendingResults(){
+  if(flushingResults)return
+  flushingResults=true
+  try{
+    const {token}=await chrome.storage.local.get('token')
+    if(!token)return
+    const due=await changePendingResults(entries=>Object.values(entries).filter(entry=>{
+      if(Date.now()-(entry.lastAttemptAt||entry.queuedAt||0)<pendingResultRetryDelayMs(entry.attempts||0))return false
+      entry.attempts=(entry.attempts||0)+1
+      entry.lastAttemptAt=Date.now()
+      return true
+    }))
+    for(const entry of due)await deliverResult(entry,token).catch(()=>{})
+  }finally{flushingResults=false}
+}
 
 chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
+  if(message.type==='AUTOFLOW_RUN_QUEUE'){
+    void consumeQueue().then(()=>sendResponse({ok:true}))
+    return true
+  }
+  if(message.type==='AUTOFLOW_EXECUTION_STARTED'){
+    const documentId=String(_sender.documentId||'')
+    if(!/^[a-zA-Z0-9_-]{8,200}$/.test(documentId)){sendResponse({ok:false,error:'Este navegador não forneceu a identidade do documento.'});return}
+    chrome.storage.local.get(['pendingJob','token'],data=>{
+      const job=data.pendingJob
+      if(!job||job.jobId!==message.jobId||!senderMatchesExecution(_sender,job,false)||message.document!==job.document||!data.token){
+        sendResponse({ok:false,error:'A execução não corresponde a esta aba.'});return
+      }
+      fetch(`${API}/extension/jobs/${job.jobId}/bind-document`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+data.token},
+        body:JSON.stringify({leaseToken:job.leaseToken,tabId:job.tabId,document:job.document,documentId})})
+        .then(async response=>{
+          const result=await response.json()
+          if(!response.ok)throw new Error(result.error||'Não foi possível vincular o documento.')
+          const boundJob={...job,documentId}
+          chrome.storage.local.set({pendingJob:boundJob},()=>sendResponse({ok:true,documentId}))
+        }).catch(error=>sendResponse({ok:false,error:error.message||String(error)}))
+    })
+    return true
+  }
+  if(message.type==='AUTOFLOW_EXECUTION_ACTIVITY'){
+    chrome.storage.local.get(['pendingJob','token'],({pendingJob,token})=>{
+      if(!token||!pendingJob?.leaseToken||pendingJob.jobId!==message.jobId
+        ||message.document!==pendingJob.document||message.documentId!==pendingJob.documentId
+        ||!senderMatchesExecution(_sender,pendingJob)){
+        sendResponse({ok:false,error:'A atividade não corresponde ao documento em execução.'});return
+      }
+      fetch(`${API}/extension/jobs/${pendingJob.jobId}/heartbeat`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+        body:JSON.stringify({leaseToken:pendingJob.leaseToken,tabId:pendingJob.tabId,document:pendingJob.document,documentId:pendingJob.documentId})})
+        .then(async response=>{
+          const result=await response.json()
+          if(!response.ok){if(response.status===409)chrome.storage.local.remove('pendingJob');sendResponse({ok:false,error:result.error||'O bloqueio desta execução expirou.'});return}
+          sendResponse({ok:true})
+        }).catch(error=>sendResponse({ok:false,error:error.message||String(error)}))
+    })
+    return true
+  }
   if(message.type==='AUTOFLOW_PUBLISH_ABORTED'){
-    chrome.storage.local.get('pendingPublish',({pendingPublish})=>{
-      if(!pendingPublish||pendingPublish.jobId===message.jobId)chrome.storage.local.remove('pendingPublish',()=>sendResponse({ok:true}))
-      else sendResponse({ok:true})
+    chrome.storage.local.get(['pendingJob','pendingPublishes','pendingPublish','token'],data=>{
+      const job=data.pendingJob
+      if(!job||job.jobId!==message.jobId||!senderMatchesExecution(_sender,job)||message.document!==job.document||message.documentId!==job.documentId||!data.token){
+        sendResponse({ok:false,error:'A execução não pode ser conciliada nesta aba.'});return
+      }
+      fetch(`${API}/extension/jobs/${job.jobId}/publish-not-clicked`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+data.token},
+        body:JSON.stringify({leaseToken:job.leaseToken,tabId:job.tabId,document:job.document,documentId:job.documentId})})
+        .then(async response=>{
+          const result=await response.json()
+          if(!response.ok)throw new Error(result.error||'Não foi possível registrar que o botão não foi clicado.')
+          removePendingPublish(job.jobId,()=>sendResponse({ok:true}))
+        }).catch(error=>sendResponse({ok:false,error:error.message||String(error)}))
     })
     return true
   }
   if(message.type==='AUTOFLOW_PUBLISH_CHECK'){
     chrome.storage.local.get(['pendingJob','token'],({pendingJob,token})=>{
+      if(!senderMatchesExecution(_sender,pendingJob)){sendResponse({ok:false,error:'A mensagem veio de outra aba ou documento.'});return}
       if(!token||pendingJob?.jobId!==message.jobId||!pendingJob?.leaseToken){sendResponse({ok:false,error:'A execução não está mais ativa.'});return}
-      fetchWithRetry(`${API}/extension/jobs/${pendingJob.jobId}/publish-check`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({leaseToken:pendingJob.leaseToken})},{attempts:3,timeoutMs:8000})
-        .then(async response=>{const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'A publicação não foi autorizada.');sendResponse({ok:true})})
-        .catch(error=>sendResponse({ok:false,error:error.name==='AbortError'?'Tempo esgotado ao confirmar a publicação com o servidor.':error.message}))
+      fetchWithRetry(`${API}/extension/jobs/${pendingJob.jobId}/publish-check`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({leaseToken:pendingJob.leaseToken,tabId:pendingJob.tabId,document:pendingJob.document,documentId:pendingJob.documentId})})
+        .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error||'A publicação não foi autorizada.');sendResponse({ok:true})})
+        .catch(error=>sendResponse({ok:false,error:error.message}))
     })
     return true
   }
   if(message.type==='AUTOFLOW_PUBLISH_STARTED'){
     const tabId=_sender.tab?.id
     if(!tabId){sendResponse({ok:false,error:'A guia do Facebook não foi identificada.'});return}
-    chrome.storage.local.get('pendingJob',({pendingJob})=>chrome.storage.local.set({pendingPublish:{tabId,jobId:message.jobId,leaseToken:pendingJob?.jobId===message.jobId?pendingJob.leaseToken:'',report:message.report}},()=>sendResponse({ok:true})))
+    chrome.storage.local.get(['pendingJob','token'],({pendingJob,token})=>{
+      if(!senderMatchesExecution(_sender,pendingJob)||message.document!==pendingJob?.document||message.documentId!==pendingJob?.documentId){sendResponse({ok:false,error:'A publicação foi iniciada em outra aba ou documento.'});return}
+      const leaseToken=pendingJob?.jobId===message.jobId?pendingJob.leaseToken:''
+      chrome.storage.local.get(['pendingPublishes','pendingPublish'],stored=>{
+        const entries=pendingPublishes(stored)
+        entries[message.jobId]={tabId,jobId:message.jobId,leaseToken,document:pendingJob.document,documentId:pendingJob.documentId,report:message.report}
+        chrome.storage.local.set({pendingPublishes:entries},()=>chrome.storage.local.remove('pendingPublish',()=>{
+        if(!token||!leaseToken){sendResponse({ok:false,error:'A execução não está mais ativa.'});return}
+        fetch(`${API}/extension/jobs/${message.jobId}/publish-started`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({leaseToken,tabId,document:pendingJob.document,documentId:pendingJob.documentId,report:message.report})})
+          .then(async response=>{
+            const result=await response.json()
+            if(!response.ok){removePendingPublish(message.jobId);sendResponse({ok:false,error:result.error||'A publicação não foi autorizada.'});return}
+            sendResponse({ok:true})
+          })
+          .catch(()=>sendResponse({ok:false}))
+        }))
+      })
+    })
     return true
   }
   if(message.type==='AUTOFLOW_FETCH_IMAGE'){
@@ -124,32 +314,21 @@ chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
         for(let offset=0;offset<bytes.length;offset+=32768)binary+=String.fromCharCode.apply(null,bytes.subarray(offset,offset+32768))
         sendResponse({ok:true,dataBase64:btoa(binary),mimeType:response.headers.get('content-type')||'image/jpeg'})
       })
-      .catch(error=>sendResponse({ok:false,error:error.name==='AbortError'?'Tempo esgotado ao baixar a foto.':(error.message||String(error))}))
+      .catch(error=>sendResponse({ok:false,error:error.message||String(error)}))
     return true
   }
   if(message.type!=='AUTOFLOW_FILL_RESULT'&&message.type!=='AUTOFLOW_FILL_ERROR')return
   chrome.storage.local.get(['token','pendingJob'],({token,pendingJob})=>{
     if(!token){sendResponse({ok:false,error:'Sessão da extensão expirada.'});return}
     if(!pendingJob||pendingJob.jobId!==message.jobId||!pendingJob.leaseToken){sendResponse({ok:false,error:'O bloqueio exclusivo deste trabalho não foi encontrado.'});return}
+    if(!senderMatchesExecution(_sender,pendingJob)||message.document!==pendingJob.document){sendResponse({ok:false,error:'O resultado veio de outra aba ou documento.'});return}
     const report=message.type==='AUTOFLOW_FILL_ERROR'
-      ?{error:String(message.error||'Falha no preenchimento')}
+      ?{error:String(message.error||'Falha no preenchimento'),failureCode:String(message.failureCode||'')}
       :message.report
-    const payload={...report,leaseToken:pendingJob.leaseToken,extensionVersion:chrome.runtime.getManifest().version}
-    // Persistimos antes de tentar: se a entrega falhar (rede, aba fechada logo em seguida),
-    // o batimento reenvia sozinho até confirmar, sem depender desta aba continuar aberta.
-    chrome.storage.local.set({pendingResult:{jobId:message.jobId,leaseToken:pendingJob.leaseToken,payload,queuedAt:Date.now(),attempts:0}},()=>{
-      sendFillResult(message.jobId,token,payload)
-        .then(data=>{
-          chrome.storage.local.remove('pendingResult')
-          chrome.storage.local.remove('pendingJob')
-          if(message.report?.published)chrome.storage.local.remove('pendingPublish')
-          sendResponse({ok:true,data})
-        })
-        .catch(error=>{
-          if(error.status===409){chrome.storage.local.remove(['pendingResult','pendingJob','pendingPublish']);sendResponse({ok:false,error:error.message});return}
-          sendResponse({ok:false,error:error.message,willRetry:true})
-        })
-    })
+    const payload={...report,leaseToken:pendingJob.leaseToken,tabId:pendingJob.tabId,document:pendingJob.document,documentId:pendingJob.documentId,extensionVersion:chrome.runtime.getManifest().version}
+    queueFillResult(message.jobId,token,payload)
+      .then(data=>sendResponse({ok:true,data}))
+      .catch(error=>sendResponse({ok:false,error:error.message}))
   })
   return true
 })

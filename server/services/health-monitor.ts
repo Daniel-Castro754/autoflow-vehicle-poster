@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { sendCriticalAlert } from './alerting.ts'
+import { publicationMayExist, ambiguousPublicationReport } from './publication-evidence.ts'
 import { logger } from '../lib/logger.ts'
 
 export interface HealthStatusReport {
@@ -24,9 +25,12 @@ export async function runHealthCheck(
   const stuckRows = db
     .prepare(`
       SELECT j.id, j.organization_id organizationId, j.social_account_id accountId, j.started_at startedAt,
-        j.publish_attempt_at publishAttemptAt, j.attempt_count attemptCount, j.retry_count retryCount,
+        j.publish_attempt_at publishAttemptAt, j.fill_report fillReport, j.attempt_count attemptCount, j.retry_count retryCount,
         COALESCE(j.max_retries, s.max_retries, 3) maxRetries,
         COALESCE(s.stuck_timeout_minutes, 15) timeoutMinutes,
+        COALESCE(s.alert_telegram_token, '') alertTelegramToken,
+        COALESCE(s.alert_telegram_chat_id, '') alertTelegramChatId,
+        COALESCE(s.alert_webhook_url, '') alertWebhookUrl,
         COALESCE(a.label, 'Sistema') accountLabel,
         v.year, v.make, v.model
       FROM publication_jobs j
@@ -44,6 +48,10 @@ export async function runHealthCheck(
       accountId: number
       startedAt: string
       publishAttemptAt: string | null
+      fillReport: string
+      alertTelegramToken: string
+      alertTelegramChatId: string
+      alertWebhookUrl: string
       attemptCount: number
       retryCount: number
       maxRetries: number
@@ -75,17 +83,17 @@ export async function runHealthCheck(
         // O checkpoint de publish-check foi registrado: o clique em "Publicar" pode já ter
         // acontecido antes de perdermos contato. Não é seguro assumir que nada foi publicado —
         // o job vai para confirmação manual em vez de voltar direto para a fila.
-        if (job.publishAttemptAt) {
+        if (publicationMayExist(job)) {
           db.exec('BEGIN')
           try {
             db.prepare(`
               UPDATE publication_jobs
               SET status = 'awaiting_confirmation', paused = 1, extension_visible = 0, error_code = NULL,
-                fill_report = ?, last_lease_token = NULL, publish_attempt_at = NULL,
+                fill_report = ?, last_lease_token = COALESCE(lease_token,last_lease_token),
                 lease_token = NULL, lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
               WHERE id = ? AND organization_id = ?
             `).run(
-              JSON.stringify({ publishAttempted: true, published: false, staleRecovery: true, reason: 'lease_lost_after_publish_attempt' }),
+              JSON.stringify(ambiguousPublicationReport(job.fillReport)),
               job.id,
               job.organizationId
             )
@@ -112,7 +120,7 @@ export async function runHealthCheck(
             type: 'job_stalled_publish_ambiguous',
             message: `Trabalho travado há ${elapsedMinutes} min (${job.year} ${job.make} ${job.model}) pode já ter sido publicado no Facebook antes da falha. Verifique "Seus classificados" antes de liberar uma nova tentativa.`,
             attemptCount: job.attemptCount,
-          })
+          }, {telegramBotToken:job.alertTelegramToken,telegramChatId:job.alertTelegramChatId,webhookUrl:job.alertWebhookUrl})
           continue
         }
 
@@ -176,7 +184,7 @@ export async function runHealthCheck(
               ? `Trabalho travado (${job.year} ${job.make} ${job.model}) esgotou as tentativas de retry (${job.retryCount}/${job.maxRetries}) e foi marcado como erro pelo Health Monitor.`
               : `Trabalho travado há ${elapsedMinutes} min (${job.year} ${job.make} ${job.model}) foi recuperado automaticamente pelo Health Monitor.`,
             attemptCount: job.attemptCount,
-          })
+          }, {telegramBotToken:job.alertTelegramToken,telegramChatId:job.alertTelegramChatId,webhookUrl:job.alertWebhookUrl})
         }
       } catch (err) {
         logger.warn('HealthMonitor', `Erro no processamento de job travado #${job.id}`, { error: err })
