@@ -221,6 +221,18 @@
       resolve(response)
     }))
   }
+  function startExecutionActivity(task){
+    if(!task?.jobId||!task.documentId)return()=>{}
+    const ping=()=>chrome.runtime.sendMessage({
+      type:'AUTOFLOW_EXECUTION_ACTIVITY',
+      jobId:task.jobId,
+      document:location.pathname,
+      documentId:task.documentId,
+    },()=>{void chrome.runtime.lastError})
+    ping()
+    const timer=setInterval(ping,30_000)
+    return()=>clearInterval(timer)
+  }
 
   function photoCount(){
     const match=(document.body.innerText||'').match(/Fotos?\s*(?:[\u00b7:-]\s*)?(\d+)\s*\/\s*20/i)
@@ -436,24 +448,34 @@
     return {selected,missing}
   }
 
-  async function publishListing(beforeClick,checkPermission){
-    if(hasHumanChallenge())return false
-    if(marketplaceStage()!=='groups')return false
+  async function publishListing(beforeClick,checkPermission,jobId,documentId){
+    if(hasHumanChallenge())return {clicked:false,confirmed:false}
+    if(marketplaceStage()!=='groups')return {clicked:false,confirmed:false}
     const button=await waitForDom(()=>actionButton(['Publicar','Publish']),18000)
-    if(!button||marketplaceStage()!=='groups')return false
+    if(!button||marketplaceStage()!=='groups')return {clicked:false,confirmed:false}
     const initialUrl=location.href
     button.scrollIntoView({block:'center',inline:'center',behavior:'auto'})
     await sleep(400)
-    if(beforeClick)await beforeClick()
-    if(hasHumanChallenge())return false
+    if(hasHumanChallenge())return {clicked:false,confirmed:false}
     const current=actionButton(['Publicar','Publish'])||button
-    if(!controlEnabled(current))return false
-    if(checkPermission)await checkPermission()
-    firePointerClick(current)
-    return Boolean(await waitForDom(()=>{
+    if(!controlEnabled(current))return {clicked:false,confirmed:false}
+    try{
+      if(checkPermission)await checkPermission()
+      if(!controlEnabled(current)||hasHumanChallenge())return {clicked:false,confirmed:false}
+      if(beforeClick)await beforeClick()
+    }catch(error){
+      await runtimeMessage({type:'AUTOFLOW_PUBLISH_ABORTED',jobId,document:location.pathname,documentId}).catch(()=>{})
+      return {clicked:false,confirmed:false,error:error.message||String(error)}
+    }
+    let confirmed=false
+    try{
+      firePointerClick(current)
+      confirmed=Boolean(await waitForDom(()=>{
       if(hasHumanChallenge())return false
       return location.href!==initialUrl&&/\/marketplace\/item\//.test(location.pathname)||marketplaceStage()==='published'
-    },45000))
+      },45000))
+    }catch(error){console.warn('AutoFlow: a confirmação do clique não chegou',error)}
+    return {clicked:true,confirmed}
   }
 
   async function step(label,run){
@@ -484,10 +506,11 @@
       {label:'Cor interna',run:()=>selectCustom(['cor interna','interior color'],vehicle.interiorColor),critical:false},
       {label:'Descrição',run:()=>fillText(['descricao','description'],vehicle.description),critical:true},
     ]
+    const expectedImageCount=Array.isArray(vehicle.images)?Math.min(vehicle.images.length,20):0
     const resultMap=new Map()
     for(const field of fieldSteps)resultMap.set(field.label,await step(field.label,field.run))
     let imageCount=await uploadImages(vehicle.images)
-    resultMap.set('Fotos',['Fotos',imageCount>0])
+    resultMap.set('Fotos',['Fotos',expectedImageCount>0&&imageCount===expectedImageCount])
     const repairFields=async attempt=>{
       const failed=fieldSteps.filter(field=>!resultMap.get(field.label)?.[1])
       const candidates=failed.length?failed:fieldSteps.filter(field=>field.critical)
@@ -497,7 +520,7 @@
       }
       if(imageCount===0&&attempt===0){
         imageCount=await uploadImages(vehicle.images)
-        if(imageCount>0)resultMap.set('Fotos',['Fotos',true])
+        resultMap.set('Fotos',['Fotos',expectedImageCount>0&&imageCount===expectedImageCount])
       }
     }
     let advanced=false,selectedGroups=[],missingGroups=[],published=false,publishAttempted=false
@@ -516,24 +539,33 @@
         }
       }
       const groupsReady=!automation.fillGroups||(selectedGroups.length>0&&missingGroups.length===0)
-      if(advanced&&automation.autoPublish&&groupsReady&&jobId){
-        publishAttempted=true
+      const fieldsReady=[...resultMap.values()].every(item=>item[1])&&expectedImageCount>0&&imageCount===expectedImageCount
+      if(advanced&&automation.autoPublish&&groupsReady&&fieldsReady&&jobId){
         const currentResults=[...resultMap.values()]
         const reportBeforePublish={filledCount:currentResults.filter(item=>item[1]).length,totalCount:currentResults.length,imageCount,missing:currentResults.filter(item=>!item[1]).map(item=>item[0]),fields:currentResults.map(item=>({name:item[0],ok:Boolean(item[1])})),advanced,selectedGroups,missingGroups:[],flowIssues:[],publishAttempted:true}
-        published=await publishListing(()=>runtimeMessage({type:'AUTOFLOW_PUBLISH_STARTED',jobId,report:reportBeforePublish}),()=>runtimeMessage({type:'AUTOFLOW_PUBLISH_CHECK',jobId}))
-        if(!published){
-          flowIssues.push('O clique em Publicar foi feito, mas o Facebook não confirmou o resultado. Verifique Seus classificados antes de liberar uma nova tentativa.')
-          chrome.runtime.sendMessage({type:'AUTOFLOW_PUBLISH_ABORTED',jobId})
+        const publication=await publishListing(
+          ()=>runtimeMessage({type:'AUTOFLOW_PUBLISH_STARTED',jobId,document:location.pathname,documentId:task.documentId,report:reportBeforePublish}),
+          ()=>runtimeMessage({type:'AUTOFLOW_PUBLISH_CHECK',jobId,documentId:task.documentId}),
+          jobId,
+          task.documentId,
+        )
+        publishAttempted=publication.clicked
+        published=publication.confirmed
+        if(publication.clicked&&!published){
+          flowIssues.push('O clique em Publicar foi enviado, mas o Facebook não confirmou o resultado. A tentativa foi preservada para reconciliação; não será repetida automaticamente.')
+        }else if(!publication.clicked){
+          flowIssues.push(publication.error?'A publicação automática foi interrompida antes do clique.': 'O botão Publicar não estava disponível; nenhum clique foi enviado.')
         }
       }else if(automation.autoPublish&&!advanced)flowIssues.push('Publicação bloqueada porque a etapa de grupos não foi aberta.')
       else if(automation.autoPublish&&!groupsReady)flowIssues.push('Publicação bloqueada porque os grupos não foram confirmados.')
+      else if(automation.autoPublish&&!fieldsReady)flowIssues.push('Publicação bloqueada porque todos os campos e fotos não foram confirmados.')
     }
     const results=[...resultMap.values()]
     const missing=results.filter(item=>!item[1]).map(item=>item[0])
     if(advanced&&missing.length)flowIssues.push(`O Facebook aceitou o avanço, mas o diagnóstico interno não confirmou: ${missing.join(', ')}.`)
     showNotice(results,vehicle,{automation,advanced,selectedGroups,missingGroups,published,flowIssues})
     if(jobId){
-      chrome.runtime.sendMessage({type:'AUTOFLOW_FILL_RESULT',jobId,report:{filledCount:results.length-missing.length,totalCount:results.length,imageCount,missing,fields:results.map(item=>({name:item[0],ok:Boolean(item[1])})),advanced,selectedGroups,missingGroups,published,publishAttempted,flowIssues,resultUrl:published?location.href:''}})
+      chrome.runtime.sendMessage({type:'AUTOFLOW_FILL_RESULT',jobId,document:location.pathname,documentId:task.documentId,report:{filledCount:results.length-missing.length,totalCount:results.length,imageCount,missing,fields:results.map(item=>({name:item[0],ok:Boolean(item[1])})),advanced,selectedGroups,missingGroups,published,publishAttempted,flowIssues,resultUrl:published?location.href:''}})
     }
   }
 
@@ -566,7 +598,35 @@
     document.body.appendChild(box)
   }
 
-  function run(task){return fill(task).catch(error=>{console.error('AutoFlow: falha no preenchimento',error);if(task?.jobId)chrome.runtime.sendMessage({type:'AUTOFLOW_FILL_ERROR',jobId:task.jobId,error:error.message||String(error)})})}
+  const runningJobs=new Set()
+  async function run(task){
+    if(task?.jobId&&runningJobs.has(task.jobId))return
+    if(task?.jobId)runningJobs.add(task.jobId)
+    let boundTask=task
+    let stopActivity=()=>{}
+    try{
+      if(task?.jobId){
+        const execution=await runtimeMessage({type:'AUTOFLOW_EXECUTION_STARTED',jobId:task.jobId,document:location.pathname})
+        boundTask={...task,documentId:execution.documentId}
+      }
+      if(task?.startupError)throw new Error(task.startupError)
+      stopActivity=startExecutionActivity(boundTask)
+      await fill(boundTask)
+    }catch(error){
+      console.error('AutoFlow: falha no preenchimento',error)
+      if(boundTask?.jobId&&boundTask.documentId)chrome.runtime.sendMessage({
+        type:'AUTOFLOW_FILL_ERROR',
+        jobId:boundTask.jobId,
+        document:location.pathname,
+        documentId:boundTask.documentId,
+        error:error.message||String(error),
+        failureCode:task?.startupError==='O formulário do Marketplace não ficou disponível.'?'marketplace_form_timeout':'',
+      })
+      if(task?.jobId&&!boundTask?.documentId)runningJobs.delete(task.jobId)
+    }finally{
+      stopActivity()
+    }
+  }
   chrome.storage.local.get(['pendingJob','pendingVehicle'],data=>{
     const task=data.pendingJob||data.pendingVehicle
     if(!task)return
@@ -575,10 +635,10 @@
       attempts++
       if(document.querySelector('input,textarea,[role="combobox"],[contenteditable="true"]')){
         clearInterval(timer)
-        run(task).finally(()=>chrome.storage.local.remove(['pendingJob','pendingVehicle']))
+        run(task).finally(()=>chrome.storage.local.remove('pendingVehicle'))
       }else if(attempts>40){
         clearInterval(timer)
-        if(task?.jobId)chrome.runtime.sendMessage({type:'AUTOFLOW_FILL_ERROR',jobId:task.jobId,error:'O formulário do Marketplace não ficou disponível.'})
+        run({...task,startupError:'O formulário do Marketplace não ficou disponível.'})
       }
     },500)
   })

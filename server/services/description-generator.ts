@@ -20,6 +20,32 @@ export interface VehicleInput {
 }
 
 export type CopyTone = 'vendedor' | 'profissional' | 'amigável' | 'direto'
+export type AIProviderChoice = 'gemini' | 'openai' | 'auto' | 'procedural'
+
+export interface AIProviderSettings {
+  aiProvider?: string
+  geminiApiKey?: string
+  openaiApiKey?: string
+}
+
+export function resolveAIProviderSettings(settings?: AIProviderSettings) {
+  const requestedProvider = settings?.aiProvider
+  const configuredProvider: AIProviderChoice = requestedProvider === 'gemini' || requestedProvider === 'openai' || requestedProvider === 'procedural'
+    ? requestedProvider
+    : 'auto'
+  const geminiApiKey = settings?.geminiApiKey?.trim() || process.env.GEMINI_API_KEY || ''
+  const openaiApiKey = settings?.openaiApiKey?.trim() || process.env.OPENAI_API_KEY || ''
+  return {
+    provider: configuredProvider,
+    apiKeys: configuredProvider === 'gemini'
+      ? { gemini: geminiApiKey }
+      : configuredProvider === 'openai'
+        ? { openai: openaiApiKey }
+        : configuredProvider === 'auto'
+          ? { gemini: geminiApiKey, openai: openaiApiKey }
+          : {},
+  }
+}
 
 export interface GenerationResult {
   description: string
@@ -33,58 +59,34 @@ const moneyFormatter = new Intl.NumberFormat('pt-BR', {
 })
 
 export function generateProceduralDescription(vehicle: VehicleInput, tone: CopyTone = 'vendedor'): string {
-  const kmFormatted = new Intl.NumberFormat('pt-BR').format(vehicle.km)
   const fullTitle = `${vehicle.year} ${vehicle.make} ${vehicle.model}${vehicle.trim ? ` ${vehicle.trim}` : ''}`
-  const transmission = vehicle.transmission || 'Automático'
-  const fuel = vehicle.fuelType || 'Flex'
-  const condition = vehicle.condition || 'Muito bom'
-  const color = vehicle.exteriorColor || 'Preto'
-  const location = vehicle.location || 'Brasil'
-
-  if (tone === 'profissional') {
-    return [
-      `🚗 ${fullTitle} em excelente estado de conservação.`,
-      `• Quilometragem: ${kmFormatted} km`,
-      `• Câmbio: ${transmission} | Combustível: ${fuel}`,
-      `• Cor: ${color} | Condição: ${condition}`,
-      `📍 Localização: ${location}`,
-      'Veículo inspecionado, com procedência garantida e documentação pronta para transferência. Entre em contato para agendar uma visita e conferir as condições.'
-    ].join('\n')
-  }
-
-  if (tone === 'amigável') {
-    return [
-      `✨ Procurando o carro ideal? Conheça este ${fullTitle}!`,
-      `Com apenas ${kmFormatted} km rodados, câmbio ${transmission.toLowerCase()} e motor ${fuel.toLowerCase()}, ele une conforto, economia e estilo no dia a dia.`,
-      `Pintura ${color.toLowerCase()} impecável, estado ${condition.toLowerCase()}.`,
-      `📍 Disponível em ${location}.`,
-      'Venha dar uma volta sem compromisso! Me chame no chat para mais fotos e detalhes.'
-    ].join('\n')
-  }
-
-  if (tone === 'direto') {
-    return [
-      `${fullTitle} - ${kmFormatted} km`,
-      `Câmbio: ${transmission} | Motor: ${fuel}`,
-      `Cor: ${color} | Condição: ${condition}`,
-      `Local: ${location}`,
-      vehicle.price ? `Valor: ${moneyFormatter.format(vehicle.price)}` : '',
-      'Pronto para rodar. Documentos em dia. Chame no direct para proposta.'
-    ].filter(Boolean).join('\n')
-  }
-
-  // Padrão: Vendedor (alta conversão)
+  const details = [
+    vehicle.km > 0 ? `Quilometragem: ${new Intl.NumberFormat('pt-BR').format(vehicle.km)} km` : '',
+    vehicle.transmission ? `Câmbio: ${vehicle.transmission}` : '',
+    vehicle.fuelType ? `Combustível: ${vehicle.fuelType}` : '',
+    vehicle.exteriorColor ? `Cor externa: ${vehicle.exteriorColor}` : '',
+    vehicle.interiorColor ? `Cor interna: ${vehicle.interiorColor}` : '',
+    vehicle.condition ? `Condição informada: ${vehicle.condition}` : '',
+    vehicle.price ? `Preço: ${moneyFormatter.format(vehicle.price)}` : '',
+    vehicle.location ? `Localização: ${vehicle.location}` : '',
+  ].filter(Boolean)
   const fipeCallout = (vehicle.fipeDiff && vehicle.fipeDiff > 500)
-    ? `💰 R$ ${Math.round(vehicle.fipeDiff).toLocaleString('pt-BR')} ABAIXO DA TABELA FIPE (${vehicle.fipeDiffPercent}% de economia)!`
+    ? `Diferença informada em relação à FIPE: R$ ${Math.round(vehicle.fipeDiff).toLocaleString('pt-BR')}${vehicle.fipeDiffPercent ? ` (${vehicle.fipeDiffPercent}%)` : ''}.`
     : ''
-
+  const introduction = tone === 'amigável'
+    ? `Conheça: ${fullTitle}.`
+    : tone === 'direto'
+      ? fullTitle
+      : tone === 'profissional'
+        ? `Anúncio: ${fullTitle}.`
+        : `À venda: ${fullTitle}.`
   return [
-    `🔥 OPORTUNIDADE: ${fullTitle}!`,
+    introduction,
+    ...details,
     fipeCallout,
-    `Apenas ${kmFormatted} km rodados! Veículo com câmbio ${transmission.toLowerCase()}, econômico (${fuel.toLowerCase()}) e na cor ${color.toLowerCase()}.`,
-    `Condição impecável (${condition.toLowerCase()}), revisado e pronto para a estrada.`,
-    `📍 ${location}`,
-    '👉 Não perca essa chance! Chame agora no chat para simular financiamento, avaliar seu usado ou agendar um test drive.'
+    tone === 'direto'
+      ? 'Entre em contato para mais informações.'
+      : 'Fale conosco para tirar dúvidas e combinar uma visita.',
   ].filter(Boolean).join('\n')
 }
 
@@ -92,43 +94,47 @@ export async function generateVehicleDescription(
   vehicle: VehicleInput,
   options?: {
     tone?: CopyTone
-    provider?: 'gemini' | 'openai' | 'auto'
+    provider?: AIProviderChoice
     apiKey?: string
+    apiKeys?: Partial<Record<'gemini' | 'openai', string>>
   }
 ): Promise<GenerationResult> {
   const tone: CopyTone = options?.tone || 'vendedor'
   const provider = options?.provider || 'auto'
 
-  const geminiKey = (provider === 'gemini' ? options?.apiKey : undefined) || process.env.GEMINI_API_KEY || ''
-  const openaiKey = (provider === 'openai' ? options?.apiKey : undefined) || process.env.OPENAI_API_KEY || ''
+  const geminiKey = (provider === 'gemini' ? options?.apiKey : undefined) || options?.apiKeys?.gemini || process.env.GEMINI_API_KEY || ''
+  const openaiKey = (provider === 'openai' ? options?.apiKey : undefined) || options?.apiKeys?.openai || process.env.OPENAI_API_KEY || ''
 
-  const kmFormatted = new Intl.NumberFormat('pt-BR').format(vehicle.km)
   const fipeInfo = (vehicle.fipeDiff && vehicle.fipeDiff > 500 && vehicle.fipePrice)
-    ? `- Cotação Tabela FIPE: R$ ${moneyFormatter.format(vehicle.fipePrice)} (ANUNCIADO R$ ${Math.round(vehicle.fipeDiff).toLocaleString('pt-BR')} ABAIXO DA FIPE / ${vehicle.fipeDiffPercent}% DE ECONOMIA REAL)`
+    ? `- Cotação Tabela FIPE informada: ${moneyFormatter.format(vehicle.fipePrice)}; diferença informada: R$ ${Math.round(vehicle.fipeDiff).toLocaleString('pt-BR')}${vehicle.fipeDiffPercent ? ` (${vehicle.fipeDiffPercent}%)` : ''}`
     : ''
 
+  const providedFacts = [
+    vehicle.year && vehicle.make && vehicle.model ? `- Ano/Marca/Modelo: ${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim || ''}` : '',
+    vehicle.km > 0 ? `- Quilometragem: ${new Intl.NumberFormat('pt-BR').format(vehicle.km)} km` : '',
+    vehicle.transmission ? `- Câmbio: ${vehicle.transmission}` : '',
+    vehicle.fuelType ? `- Combustível: ${vehicle.fuelType}` : '',
+    vehicle.exteriorColor ? `- Cor externa: ${vehicle.exteriorColor}` : '',
+    vehicle.interiorColor ? `- Cor interna: ${vehicle.interiorColor}` : '',
+    vehicle.bodyType ? `- Carroceria: ${vehicle.bodyType}` : '',
+    vehicle.condition ? `- Condição informada: ${vehicle.condition}` : '',
+    vehicle.location ? `- Localização: ${vehicle.location}` : '',
+    vehicle.price ? `- Preço anunciado: ${moneyFormatter.format(vehicle.price)}` : '',
+  ].filter(Boolean)
   const prompt = `
 Você é um especialista em marketing automotivo para Facebook Marketplace no Brasil.
-Gere uma descrição atraente no tom "${tone}" para o seguinte veículo:
-- Ano/Marca/Modelo: ${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim || ''}
-- Quilometragem: ${kmFormatted} km
-- Câmbio: ${vehicle.transmission || 'Automático'}
-- Combustível: ${vehicle.fuelType || 'Flex'}
-- Cor externa: ${vehicle.exteriorColor || 'Não especificada'}
-- Cor interna: ${vehicle.interiorColor || 'Não especificada'}
-- Carroceria: ${vehicle.bodyType || 'Sedã'}
-- Condição: ${vehicle.condition || 'Muito bom'}
-- Localização: ${vehicle.location || 'Brasil'}
-${vehicle.price ? `- Preço anunciado: ${moneyFormatter.format(vehicle.price)}` : ''}
+Gere uma descrição atraente no tom "${tone}" usando somente os dados abaixo:
+${providedFacts.length ? providedFacts.join('\n') : '- Nenhum dado adicional informado'}
 ${fipeInfo}
 
 REGRAS:
 1. Escreva em português do Brasil.
 2. Máximo de 500 caracteres.
-3. Destaque os pontos fortes do veículo de forma atrativa para o Marketplace.${fipeInfo ? ' Dê grande destaque ao desconto real abaixo da FIPE logo no início!' : ''}
-4. Inclua uma chamada clara para ação (CTA) no final.
-5. NÃO invente opcionais ou itens não informados.
-6. Retorne APENAS o texto do anúncio, sem explicações adicionais ou aspas.
+3. Não preencha lacunas nem deduza dados. Use apenas os fatos informados acima.
+4. Não afirme estado de conservação, manutenção, histórico, procedência, documentação, opcionais, garantia, disponibilidade, economia ou desempenho se isso não estiver explicitamente informado.
+5. Não diga que o veículo está revisado, impecável, pronto para rodar ou abaixo da FIPE a menos que esses fatos estejam explicitamente informados.
+6. Inclua uma chamada neutra para contato, sem prometer condições ou serviços.
+7. Retorne APENAS o texto do anúncio, sem explicações adicionais ou aspas.
 `.trim()
 
   // 1. Tentar Gemini se disponível

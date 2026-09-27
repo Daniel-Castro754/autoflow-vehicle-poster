@@ -5,6 +5,9 @@ import {
   Copy, Plus, Car
 } from 'lucide-react'
 import type { VehicleRecord } from './Vehicles'
+import {
+  BODY_TYPES, FUEL_TYPES, TRANSMISSIONS, VEHICLE_COLORS, VEHICLE_CONDITIONS, VEHICLE_MAKES, VEHICLE_TYPES,
+} from './vehicleOptions'
 
 type ApiFn = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
 
@@ -40,6 +43,10 @@ interface ParsedVehicle {
   location: string
   description: string
   confidence: number
+  vehicleType: string
+  bodyType: string
+  condition: string
+  interiorColor: string
 }
 
 interface AutopilotResult {
@@ -192,12 +199,19 @@ export function AiCenterView({
     setParsedVehicle(null)
 
     try {
-      const res = await api<{ ok: boolean; vehicle: ParsedVehicle }>('/ai/parse-text', {
+      const res = await api<{ ok: boolean; vehicle: Omit<ParsedVehicle, 'vehicleType' | 'bodyType' | 'condition' | 'interiorColor'> }>('/ai/parse-text', {
         method: 'POST',
         body: JSON.stringify({ text: rawText }),
       })
       if (res.ok) {
-        setParsedVehicle(res.vehicle)
+        setParsedVehicle({
+          ...res.vehicle,
+          exteriorColor: VEHICLE_COLORS.includes(res.vehicle.exteriorColor as typeof VEHICLE_COLORS[number]) ? res.vehicle.exteriorColor : '',
+          vehicleType: '',
+          bodyType: '',
+          condition: '',
+          interiorColor: '',
+        })
         setParseMessage(`Veículo extraído com ${Math.round(res.vehicle.confidence * 100)}% de confiança.`)
       }
     } catch (err) {
@@ -207,8 +221,24 @@ export function AiCenterView({
     }
   }
 
+  const canSaveParsedVehicle = Boolean(parsedVehicle
+    && parsedVehicle.year >= 1900
+    && parsedVehicle.year <= new Date().getFullYear() + 1
+    && VEHICLE_MAKES.includes(parsedVehicle.make as typeof VEHICLE_MAKES[number])
+    && parsedVehicle.model.trim()
+    && parsedVehicle.price > 0
+    && parsedVehicle.location.trim()
+    && parsedVehicle.description.trim()
+    && parsedVehicle.vehicleType
+    && parsedVehicle.bodyType
+    && parsedVehicle.condition
+    && parsedVehicle.transmission
+    && parsedVehicle.fuelType
+    && parsedVehicle.exteriorColor
+    && parsedVehicle.interiorColor)
+
   async function handleSaveParsedToStock() {
-    if (!parsedVehicle) return
+    if (!parsedVehicle || !canSaveParsedVehicle) return
     setSavingParsed(true)
     try {
       await api('/vehicles', {
@@ -222,11 +252,15 @@ export function AiCenterView({
           price: parsedVehicle.price,
           status: 'Rascunho',
           color: '#dce8ef',
+          vehicleType: parsedVehicle.vehicleType,
+          bodyType: parsedVehicle.bodyType,
+          condition: parsedVehicle.condition,
           location: parsedVehicle.location,
           description: parsedVehicle.description,
           transmission: parsedVehicle.transmission,
           fuelType: parsedVehicle.fuelType,
           exteriorColor: parsedVehicle.exteriorColor,
+          interiorColor: parsedVehicle.interiorColor,
         }),
       })
       setParseMessage('✓ Veículo cadastrado com sucesso no estoque!')
@@ -239,6 +273,7 @@ export function AiCenterView({
     } finally {
       setSavingParsed(false)
     }
+
   }
 
   async function handleBatchOptimize() {
@@ -584,7 +619,7 @@ export function AiCenterView({
                 type="button"
                 className="primary"
                 onClick={handleSaveParsedToStock}
-                disabled={savingParsed}
+                disabled={savingParsed || !canSaveParsedVehicle}
               >
                 <Plus size={16} />
                 {savingParsed ? 'Cadastrando...' : 'Salvar no Estoque Agora'}
@@ -592,17 +627,25 @@ export function AiCenterView({
             </div>
 
             <div className="ai-parsed-details-grid">
-              <div><span>Ano:</span> <b>{parsedVehicle.year}</b></div>
-              <div><span>Marca:</span> <b>{parsedVehicle.make}</b></div>
-              <div><span>Modelo:</span> <b>{parsedVehicle.model}</b></div>
-              <div><span>Versão:</span> <b>{parsedVehicle.trim || '—'}</b></div>
-              <div><span>KM:</span> <b>{parsedVehicle.km.toLocaleString('pt-BR')} km</b></div>
-              <div><span>Preço:</span> <b>{money.format(parsedVehicle.price)}</b></div>
-              <div><span>Câmbio:</span> <b>{parsedVehicle.transmission}</b></div>
-              <div><span>Combustível:</span> <b>{parsedVehicle.fuelType}</b></div>
-              <div><span>Cor:</span> <b>{parsedVehicle.exteriorColor}</b></div>
-              <div><span>Local:</span> <b>{parsedVehicle.location}</b></div>
+              <label><span>Ano</span><input type="number" min="1900" max={new Date().getFullYear()+1} value={parsedVehicle.year || ''} onChange={e=>setParsedVehicle({...parsedVehicle,year:Number(e.target.value)})}/></label>
+              <label><span>Marca</span><select value={parsedVehicle.make} onChange={e=>setParsedVehicle({...parsedVehicle,make:e.target.value})}><option value="">Selecione...</option>{VEHICLE_MAKES.map(value=><option key={value}>{value}</option>)}</select></label>
+              <label><span>Modelo</span><input value={parsedVehicle.model} onChange={e=>setParsedVehicle({...parsedVehicle,model:e.target.value})}/></label>
+              <label><span>Versão</span><input value={parsedVehicle.trim} onChange={e=>setParsedVehicle({...parsedVehicle,trim:e.target.value})}/></label>
+              <label><span>Quilometragem</span><input type="number" min="0" value={parsedVehicle.km} onChange={e=>setParsedVehicle({...parsedVehicle,km:Number(e.target.value)})}/></label>
+              <label><span>Preço</span><input type="number" min="1" value={parsedVehicle.price || ''} onChange={e=>setParsedVehicle({...parsedVehicle,price:Number(e.target.value)})}/></label>
             </div>
+            <div className="ai-parsed-details-grid">
+              <label><span>Tipo de veículo</span><select value={parsedVehicle.vehicleType} onChange={e=>setParsedVehicle({...parsedVehicle,vehicleType:e.target.value})}><option value="">Selecione...</option>{VEHICLE_TYPES.map(value=><option key={value}>{value}</option>)}</select></label>
+              <label><span>Carroceria</span><select value={parsedVehicle.bodyType} onChange={e=>setParsedVehicle({...parsedVehicle,bodyType:e.target.value})}><option value="">Selecione...</option>{BODY_TYPES.map(value=><option key={value}>{value}</option>)}</select></label>
+              <label><span>Condição</span><select value={parsedVehicle.condition} onChange={e=>setParsedVehicle({...parsedVehicle,condition:e.target.value})}><option value="">Selecione...</option>{VEHICLE_CONDITIONS.map(value=><option key={value}>{value}</option>)}</select></label>
+              <label><span>Câmbio</span><select value={parsedVehicle.transmission} onChange={e=>setParsedVehicle({...parsedVehicle,transmission:e.target.value})}><option value="">Selecione...</option>{TRANSMISSIONS.map(value=><option key={value}>{value}</option>)}</select></label>
+              <label><span>Combustível</span><select value={parsedVehicle.fuelType} onChange={e=>setParsedVehicle({...parsedVehicle,fuelType:e.target.value})}><option value="">Selecione...</option>{FUEL_TYPES.map(value=><option key={value}>{value}</option>)}</select></label>
+              <label><span>Cor externa</span><select value={parsedVehicle.exteriorColor} onChange={e=>setParsedVehicle({...parsedVehicle,exteriorColor:e.target.value})}><option value="">Selecione...</option>{VEHICLE_COLORS.map(value=><option key={value}>{value}</option>)}</select></label>
+              <label><span>Cor interna</span><select value={parsedVehicle.interiorColor} onChange={e=>setParsedVehicle({...parsedVehicle,interiorColor:e.target.value})}><option value="">Selecione...</option>{VEHICLE_COLORS.map(value=><option key={value}>{value}</option>)}</select></label>
+              <label><span>Localização</span><input value={parsedVehicle.location} onChange={e=>setParsedVehicle({...parsedVehicle,location:e.target.value})} /></label>
+            </div>
+            <label className="ai-parsed-description"><span>Descrição para o cadastro</span><textarea rows={3} value={parsedVehicle.description} onChange={e=>setParsedVehicle({...parsedVehicle,description:e.target.value})}/></label>
+            {!canSaveParsedVehicle && <small>Confira o texto extraído e preencha os campos obrigatórios antes de salvar. As informações não identificadas não são preenchidas automaticamente.</small>}
           </div>
         )}
       </article>

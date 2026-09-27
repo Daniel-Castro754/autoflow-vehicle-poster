@@ -4,6 +4,8 @@ Painel inicial para estoque, atribuição de vendedores e acompanhamento da fila
 
 ## Rodar localmente
 
+Requer Node.js 22.13.0 ou superior.
+
 ```powershell
 npm install
 $env:AUTH_SECRET = "substitua-por-um-segredo-aleatorio-com-32-caracteres"
@@ -40,17 +42,35 @@ O comando `npm run dev` inicia o painel em `http://localhost:5173` e a API em `h
 - Cadastro e edição completa dos dados do Marketplace
 - Galeria de até 20 fotos por veículo, com reordenação e capa definida pela primeira foto
 - Validação obrigatória antes de entrar na fila (preço, quilometragem, localização, descrição e fotos)
+- Upload de imagens JPG, PNG e WebP com decodificação completa e limite de 40 milhões de pixels
+- Localização padrão e modelo de descrição configurados pela organização aplicados quando o cadastro deixa esses campos em branco
 - Seleção individual e em massa com exclusão confirmada
 - Menus de ações por veículo
 - Extensão com preenchimento sequencial e upload de fotos, com ritmo variável entre campos
 - Estrutura visual para múltiplos vendedores e contas
 - Ajuda contextual acessível com indicadores `?` e avisos `!`
 - Fila isolada por trabalho e perfil ativo do Brave
+- Lease renovado somente por mensagens do content script da mesma aba e documento; uma aba aberta e o alarme do worker não mantêm uma execução viva
 - Retorno de preenchimento com campos encontrados, pendências, fotos e versão da extensão
 - Estados operacionais `Pendente`, `Preenchendo`, `Aguardando confirmação`, `Concluída` e `Erro`
+- O piloto automático aplica os mesmos requisitos de publicação da fila normal, incluindo campos completos, fotos válidas e proteção contra anúncios duplicados
+- Retentativas automáticas são limitadas a falhas transitórias reconhecidas, respeitam o máximo configurado e nunca repetem um clique de publicação sem confirmação
 
 As lacunas encontradas na comparação com ferramentas similares e o roadmap recomendado estão em [COMPETITIVE_ANALYSIS.md](./COMPETITIVE_ANALYSIS.md).
 
-O banco de desenvolvimento fica em `data/autoflow.db` e não deve ser versionado. Antes de produção, migre o banco para PostgreSQL. Nenhuma credencial ou sessão do Facebook é armazenada.
+O banco de desenvolvimento fica em `data/autoflow.db` e não deve ser versionado. SQLite é o armazenamento suportado atualmente; PostgreSQL não é pré-requisito para produção sem uma necessidade operacional medida. Nenhuma credencial ou sessão do Facebook é armazenada.
+
+## Backup e restauração
+
+O backup inclui um snapshot consistente do SQLite, todos os uploads e um manifesto SHA-256. Pare a API antes de criá-lo para manter banco e arquivos sincronizados:
+
+```powershell
+$env:DATA_DIR = ".\data"
+npm run backup -- create ".\backups"
+npm run backup -- verify ".\backups\autoflow-backup-<timestamp>"
+npm run backup -- restore ".\backups\autoflow-backup-<timestamp>" ".\restore-test"
+```
+
+A restauração só aceita um destino inexistente ou vazio. Faça ensaios periódicos em uma pasta separada e mantenha as cópias em outro dispositivo; o manifesto detecta corrupção, mas não substitui armazenamento redundante.
 
 Para testes isolados, `DATA_DIR` permite escolher outra pasta de banco e uploads, e `PORT` altera a porta da API e as URLs de imagens retornadas pelo servidor. A extensão permanece configurada para a porta padrão `3333`.

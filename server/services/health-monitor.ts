@@ -24,6 +24,9 @@ export async function runHealthCheck(
     .prepare(`
       SELECT j.id, j.organization_id organizationId, j.social_account_id accountId, j.started_at startedAt,
         COALESCE(s.stuck_timeout_minutes, 15) timeoutMinutes,
+        COALESCE(s.alert_telegram_token, '') alertTelegramToken,
+        COALESCE(s.alert_telegram_chat_id, '') alertTelegramChatId,
+        COALESCE(s.alert_webhook_url, '') alertWebhookUrl,
         COALESCE(a.label, 'Sistema') accountLabel,
         v.year, v.make, v.model
       FROM publication_jobs j
@@ -41,6 +44,9 @@ export async function runHealthCheck(
       accountId: number
       startedAt: string
       timeoutMinutes: number
+      alertTelegramToken: string
+      alertTelegramChatId: string
+      alertWebhookUrl: string
       accountLabel: string
       year: number
       make: string
@@ -70,7 +76,7 @@ export async function runHealthCheck(
           db.prepare(`
             UPDATE publication_jobs
             SET status = 'pending', paused = 0, extension_visible = 1, error_code = NULL,
-              fill_report = '', started_at = NULL, filled_at = NULL, lease_token = NULL,
+              started_at = NULL, filled_at = NULL, lease_token = NULL,
               lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
             WHERE id = ? AND organization_id = ?
           `).run(job.id, job.organizationId)
@@ -81,7 +87,7 @@ export async function runHealthCheck(
           `).run(
             job.organizationId,
             job.id,
-            JSON.stringify({ elapsedMinutes, recoveredBy: 'health_monitor' })
+            JSON.stringify({ elapsedMinutes, recoveredBy: 'health_monitor', fromStatus: 'filling', toStatus: 'pending', leaseExpired: true })
           )
 
           db.exec('COMMIT')
@@ -99,6 +105,10 @@ export async function runHealthCheck(
             type: 'job_stalled_auto_recovered',
             message: `Trabalho travado há ${elapsedMinutes} min (${job.year} ${job.make} ${job.model}) foi recuperado automaticamente pelo Health Monitor.`,
             attemptCount: 1,
+          }, {
+            telegramBotToken: job.alertTelegramToken,
+            telegramChatId: job.alertTelegramChatId,
+            webhookUrl: job.alertWebhookUrl,
           })
         }
       } catch (err) {

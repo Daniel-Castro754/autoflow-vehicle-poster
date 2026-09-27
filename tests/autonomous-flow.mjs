@@ -6,15 +6,54 @@ import assert from 'node:assert/strict'
 
 // 1. Testes unitários dos algoritmos autônomos
 import { calculateBackoff, withRetry } from '../server/lib/retry.ts'
-import { generateVehicleDescription } from '../server/services/description-generator.ts'
+import { generateProceduralDescription, generateVehicleDescription, resolveAIProviderSettings } from '../server/services/description-generator.ts'
 import { generateVehicleHashtags } from '../server/services/trending-hashtags.ts'
 import { calculateOptimalSchedule } from '../server/services/smart-scheduler.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { curateMarketplaceGroups, evaluateGroupScore } from '../server/services/group-curator.ts'
 import { findBestAccountForVehicle } from '../server/services/session-manager.ts'
+import { runHealthCheck } from '../server/services/health-monitor.ts'
 import { parseVehicleRawText } from '../server/services/ai-agent.ts'
+import { isRetryableExtensionFailureCode } from '../server/services/publication-policy.ts'
+import { jpegBase64 } from './helpers/images.mjs'
 
 console.log('--- Iniciando Testes Unitários de Algoritmos Autônomos ---')
+assert.equal(isRetryableExtensionFailureCode('marketplace_form_timeout'), true)
+assert.equal(isRetryableExtensionFailureCode('unknown'), false)
+console.log('✓ Somente falhas explicitamente transitórias entram na política de retry.')
+
+// Health-monitor alerts use the configuration of the affected organization.
+{
+  const db = new DatabaseSync(':memory:')
+  db.exec(`
+    CREATE TABLE organization_settings (organization_id INTEGER, stuck_timeout_minutes INTEGER, alert_telegram_token TEXT, alert_telegram_chat_id TEXT, alert_webhook_url TEXT);
+    CREATE TABLE publication_jobs (id INTEGER, organization_id INTEGER, vehicle_id INTEGER, social_account_id INTEGER, status TEXT, started_at TEXT, lease_expires_at TEXT, paused INTEGER, extension_visible INTEGER, error_code TEXT, filled_at TEXT, lease_token TEXT, lease_owner TEXT, updated_at TEXT);
+    CREATE TABLE vehicles (id INTEGER, year INTEGER, make TEXT, model TEXT);
+    CREATE TABLE social_accounts (id INTEGER, label TEXT);
+    CREATE TABLE publication_job_events (organization_id INTEGER, publication_job_id INTEGER, event_type TEXT, created_by INTEGER, details TEXT);
+    INSERT INTO organization_settings VALUES (1, 15, 'org-bot-token', 'org-chat', 'https://org.example/hook');
+    INSERT INTO publication_jobs VALUES (1, 1, 1, 1, 'filling', datetime('now','-40 minutes'), datetime('now','-35 minutes'), 0, 1, NULL, NULL, 'lease', 'worker', datetime('now','-40 minutes'));
+    INSERT INTO vehicles VALUES (1, 2022, 'Toyota', 'Corolla');
+    INSERT INTO social_accounts VALUES (1, 'Perfil da organização');
+  `)
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async input => {
+    calls.push(String(input))
+    return new Response('{}', { status: 200 })
+  }
+  try {
+    const report = await runHealthCheck(db)
+    assert.equal(report.recoveredCount, 1)
+    await new Promise(resolve => setImmediate(resolve))
+    assert(calls.includes('https://api.telegram.org/botorg-bot-token/sendMessage'))
+    assert(calls.includes('https://org.example/hook'))
+  } finally {
+    globalThis.fetch = originalFetch
+    db.close()
+  }
+  console.log('✓ Alertas de recuperação usam credenciais da organização.')
+}
 
 // 1.1 Retry & Backoff com Jitter
 {
@@ -59,9 +98,28 @@ console.log('--- Iniciando Testes Unitários de Algoritmos Autônomos ---')
 
   assert(descResult.description.includes('Toyota Corolla'), 'Descrição deve conter marca e modelo')
   assert(descResult.description.includes('45.000 km'), 'Descrição deve conter quilometragem formatada')
+  assert(!/revisado|documentos em dia|impecável|excelente estado/i.test(descResult.description), 'Fallback não deve inventar estado, manutenção ou documentação')
   assert(hashtags.length > 0, 'Deve gerar hashtags')
   assert(hashtags.some(t => t.toLowerCase() === '#toyota'), 'Deve conter tag da marca')
   assert(hashtags.some(t => t.toLowerCase() === '#corolla'), 'Deve conter tag do modelo')
+  const autoSettings = resolveAIProviderSettings({ aiProvider: 'auto', geminiApiKey: 'org-gemini', openaiApiKey: 'org-openai' })
+  assert.deepEqual(autoSettings, { provider: 'auto', apiKeys: { gemini: 'org-gemini', openai: 'org-openai' } })
+  const originalFetch = globalThis.fetch
+  const providerCalls = []
+  globalThis.fetch = async (input, init) => {
+    providerCalls.push({ url: String(input), authorization: new Headers(init?.headers).get('Authorization') })
+    return String(input).includes('generativelanguage.googleapis.com')
+      ? new Response('{}', { status: 503 })
+      : new Response(JSON.stringify({ choices: [{ message: { content: 'Toyota Corolla para conhecer.' } }] }), { status: 200 })
+  }
+  try {
+    const fallbackResult = await generateVehicleDescription(vehicleData, { ...autoSettings })
+    assert.equal(fallbackResult.provider, 'openai')
+    assert.equal(providerCalls.length, 2)
+    assert.equal(providerCalls[1].authorization, 'Bearer org-openai')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
   console.log('✓ Gerador de Descrições com fallback inteligente e hashtags validado.')
 }
 
@@ -135,11 +193,11 @@ console.log('--- Iniciando Testes Unitários de Algoritmos Autônomos ---')
     INSERT INTO social_accounts VALUES (1, 1, 'Perfil 1', 'Profile 1', 'active', datetime('now'));
     INSERT INTO social_accounts VALUES (2, 1, 'Perfil 2', 'Profile 2', 'active', datetime('now'));
     -- Perfil 1 com 5 jobs hoje
-    INSERT INTO publication_jobs VALUES (101, 1, 1, 991, 'completed', datetime('now', 'localtime'));
-    INSERT INTO publication_jobs VALUES (102, 1, 1, 992, 'completed', datetime('now', 'localtime'));
-    INSERT INTO publication_jobs VALUES (103, 1, 1, 993, 'completed', datetime('now', 'localtime'));
-    INSERT INTO publication_jobs VALUES (104, 1, 1, 994, 'completed', datetime('now', 'localtime'));
-    INSERT INTO publication_jobs VALUES (105, 1, 1, 995, 'completed', datetime('now', 'localtime'));
+    INSERT INTO publication_jobs VALUES (101, 1, 1, 991, 'completed', datetime('now'));
+    INSERT INTO publication_jobs VALUES (102, 1, 1, 992, 'completed', datetime('now'));
+    INSERT INTO publication_jobs VALUES (103, 1, 1, 993, 'completed', datetime('now'));
+    INSERT INTO publication_jobs VALUES (104, 1, 1, 994, 'completed', datetime('now'));
+    INSERT INTO publication_jobs VALUES (105, 1, 1, 995, 'completed', datetime('now'));
   `)
 
   const bestAccount = findBestAccountForVehicle(memDb, 1, 50)
@@ -156,9 +214,22 @@ console.log('--- Iniciando Testes Unitários de Algoritmos Autônomos ---')
   assert.equal(parsed.trim, 'XEi')
   assert.equal(parsed.km, 42500)
   assert.equal(parsed.price, 119900)
-  assert.equal(parsed.exteriorColor, 'Prata')
+  assert.equal(parsed.exteriorColor, 'Prateado')
   assert.equal(parsed.transmission, 'Automático')
   assert.equal(parsed.fuelType, 'Flex')
+  const incomplete = parseVehicleRawText('vendo um veículo')
+  assert.equal(incomplete.year, 0)
+  assert.equal(incomplete.make, '')
+  assert.equal(incomplete.model, '')
+  assert.equal(incomplete.km, 0)
+  assert.equal(incomplete.price, 0)
+  assert.equal(incomplete.transmission, '')
+  assert.equal(incomplete.fuelType, '')
+  assert.equal(incomplete.exteriorColor, '')
+  assert.equal(incomplete.location, '')
+  assert.equal(incomplete.confidence, 0)
+  const conservativeDescription = generateProceduralDescription({ year: 2022, make: 'Toyota', model: 'Corolla', km: 0 })
+  assert(!/automático|flex|preto|brasil|revisado|impecável|documentos em dia/i.test(conservativeDescription), 'Fallback deve omitir atributos não informados')
   console.log('✓ Parser inteligente de texto cru de veículos validado.')
 }
 
@@ -169,7 +240,6 @@ const base = `http://127.0.0.1:${port}/api`
 const dataDir = await mkdtemp(join(tmpdir(), 'autoflow-autonomous-test-'))
 const adminEmail = 'admin-auto@autoflow.local'
 const adminPassword = 'admin-auto-password-strong'
-const jpegBase64 = value => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from(value)]).toString('base64')
 
 const server = spawn(process.execPath, ['server/server.ts'], {
   cwd: process.cwd(),
@@ -269,6 +339,7 @@ try {
       organizationName: 'AutoFlow Autônomo Multimarcas',
       defaultLocation: 'Curitiba - PR',
       dailyLimit: 20,
+      executionIntervalMinutes: 0,
       stuckTimeoutMinutes: 10,
       autoAdvance: true,
       fillGroups: true,
@@ -395,16 +466,27 @@ try {
     body: JSON.stringify({
       accountId,
       instanceId: 'auto_test_ext_instance',
+      tabId: 301,
+      document: '/marketplace/create/vehicle',
     }),
   })
   assert(prepared.leaseToken, 'Deve gerar leaseToken exclusivo para a execução')
+  await call(`/extension/jobs/${jobId}/bind-document`, token, {
+    method:'POST',
+    body:JSON.stringify({leaseToken:prepared.leaseToken,tabId:prepared.tabId,document:prepared.document,documentId:'autonomous_test_document'}),
+  })
+  prepared.documentId='autonomous_test_document'
 
   // Reportar erro transitório acionando auto-retry
   const fillFailRes = await call(`/extension/jobs/${jobId}/fill-result`, token, {
     method: 'PATCH',
     body: JSON.stringify({
       leaseToken: prepared.leaseToken,
-      error: 'Elemento do Facebook não respondeu a tempo (timeout simulado).',
+      tabId: prepared.tabId,
+      document: prepared.document,
+      documentId: prepared.documentId,
+      error: 'O formulário do Marketplace não ficou disponível.',
+      failureCode: 'marketplace_form_timeout',
       autoRetry: true,
       extensionVersion: '2.5.0',
     }),
@@ -427,12 +509,24 @@ try {
   // 1. Parser de Texto Cru via API
   const parseRes = await call('/ai/parse-text', token, {
     method: 'POST',
-    body: JSON.stringify({ text: 'Jeep Compass Longitude 2021 preto flex automatico 51800 km R$ 134.500 SP' }),
+    body: JSON.stringify({ text: 'Jeep Compass Longitude 2021 preto flex automatico 51800 km R$ 134.500 São Paulo - SP' }),
   })
   assert.equal(parseRes.ok, true)
   assert.equal(parseRes.vehicle.make, 'Jeep')
   assert.equal(parseRes.vehicle.model, 'Compass')
   assert.equal(parseRes.vehicle.year, 2021)
+  const importedVehicle = await call('/vehicles', token, {
+    method: 'POST',
+    body: JSON.stringify({
+      ...parseRes.vehicle,
+      status: 'Rascunho',
+      vehicleType: 'Carro/picape',
+      bodyType: 'SUV',
+      condition: 'Bom',
+      interiorColor: 'Preto',
+    }),
+  })
+  assert(importedVehicle.id > 0, 'O cadastro estruturado pela Central de IA deve ser aceito pelo estoque')
   console.log('✓ Endpoint POST /api/ai/parse-text validado.')
 
   // 2. Auditoria do Estoque
@@ -460,6 +554,30 @@ try {
   assert.equal(cmdAuditRes.intent, 'audit')
   assert(cmdAuditRes.reply.length > 0)
 
+  const jobsBeforeQuestion = (await call('/publications', token)).jobs
+    .map(job => ({ id: job.id, status: job.status, scheduledAt: job.scheduledAt }))
+    .sort((a, b) => a.id - b.id)
+  const cmdQuestionRes = await call('/ai/command', token, {
+    method: 'POST',
+    body: JSON.stringify({ prompt: 'Como posso agendar os veículos no piloto automático?' }),
+  })
+  assert.equal(cmdQuestionRes.ok, true)
+  assert.equal(cmdQuestionRes.intent, 'general_assistance')
+  assert.equal(cmdQuestionRes.actionTaken, 'help')
+  const jobsAfterQuestion = (await call('/publications', token)).jobs
+    .map(job => ({ id: job.id, status: job.status, scheduledAt: job.scheduledAt }))
+    .sort((a, b) => a.id - b.id)
+  assert.deepEqual(jobsAfterQuestion, jobsBeforeQuestion, 'Uma pergunta sobre publicação não pode modificar trabalhos nem agendamentos')
+  const noPunctuationQuestion = await call('/ai/command', token, {
+    method: 'POST',
+    body: JSON.stringify({ prompt: 'Me diga como executar o piloto automático no estoque pronto' }),
+  })
+  assert(['general_assistance', 'audit'].includes(noPunctuationQuestion.intent), 'Uma pergunta sem pontuação pode ser ajuda ou auditoria, mas não uma ação de publicação')
+  assert.notEqual(noPunctuationQuestion.actionTaken, 'run_autopilot')
+  assert.deepEqual((await call('/publications', token)).jobs
+    .map(job => ({ id: job.id, status: job.status, scheduledAt: job.scheduledAt }))
+    .sort((a, b) => a.id - b.id), jobsBeforeQuestion, 'Perguntas sem ponto de interrogação também devem ser somente leitura')
+
   const cmdOptRes = await call('/ai/command', token, {
     method: 'POST',
     body: JSON.stringify({ prompt: 'otimizar textos dos carros em tom vendedor' }),
@@ -468,11 +586,106 @@ try {
   assert.equal(cmdOptRes.intent, 'optimize_descriptions')
   console.log('✓ Endpoint POST /api/ai/command com despachante NLP validado.')
 
-  // 5. Piloto Automático (Autopilot)
+  // 5. Piloto Automático obedece aos mesmos requisitos da fila manual
+  const autopilotVehicle = await call('/vehicles', token, {
+    method: 'POST',
+    body: JSON.stringify({
+      make: 'Toyota',
+      model: 'Yaris',
+      trim: 'XS',
+      year: 2022,
+      price: 87900,
+      km: 31000,
+      vehicleType: 'Carro/picape',
+      bodyType: 'Hatch',
+      condition: 'Excelente',
+      transmission: 'Automático',
+      fuelType: 'Flex',
+      exteriorColor: 'Prateado',
+      interiorColor: 'Preto',
+      status: 'Pronto',
+      description: '',
+      location: 'São Paulo, SP',
+    }),
+  })
+  await call(`/vehicles/${autopilotVehicle.id}/images`, token, {
+    method: 'POST',
+    body: JSON.stringify({
+      name: 'yaris-autopilot.jpg',
+      mimeType: 'image/jpeg',
+      dataBase64: jpegBase64('yaris-autopilot-photo'),
+    }),
+  })
+  const incompleteAutopilotVehicle = await call('/vehicles', token, {
+    method: 'POST',
+    body: JSON.stringify({
+      make: 'Honda',
+      model: 'Fit',
+      trim: 'EX',
+      year: 2021,
+      price: 89900,
+      km: 42000,
+      vehicleType: 'Carro/picape',
+      bodyType: 'Hatch',
+      condition: 'Excelente',
+      transmission: 'Automático',
+      fuelType: 'Flex',
+      exteriorColor: 'Prateado',
+      interiorColor: 'Preto',
+      status: 'Pronto',
+      description: 'Cadastro legado com tipo inválido.',
+      location: 'São Paulo, SP',
+    }),
+  })
+  await call(`/vehicles/${incompleteAutopilotVehicle.id}/images`, token, {
+    method: 'POST',
+    body: JSON.stringify({
+      name: 'fit-autopilot.jpg',
+      mimeType: 'image/jpeg',
+      dataBase64: jpegBase64('fit-autopilot-photo'),
+    }),
+  })
+  const duplicatePhotoVehicle = await call('/vehicles', token, {
+    method: 'POST',
+    body: JSON.stringify({
+      make: 'Mazda',
+      model: '3',
+      trim: 'Touring',
+      year: 2020,
+      price: 109900,
+      km: 51000,
+      vehicleType: 'Carro/picape',
+      bodyType: 'Sedã',
+      condition: 'Excelente',
+      transmission: 'Automático',
+      fuelType: 'Gasolina',
+      exteriorColor: 'Cinza',
+      interiorColor: 'Preto',
+      status: 'Pronto',
+      description: 'Cadastro que reutiliza uma foto já associada a uma publicação.',
+      location: 'São Paulo, SP',
+    }),
+  })
+  await call(`/vehicles/${duplicatePhotoVehicle.id}/images`, token, {
+    method: 'POST',
+    body: JSON.stringify({
+      name: 'golf-photo-reused.jpg',
+      mimeType: 'image/jpeg',
+      dataBase64: jpegBase64('golf-foto-1'),
+    }),
+  })
+  const testDb = new DatabaseSync(join(dataDir, 'autoflow.db'))
+  testDb.prepare("UPDATE vehicles SET vehicle_type='' WHERE id=?").run(incompleteAutopilotVehicle.id)
+
   const autopilotRes = await call('/ai/autopilot/run', token, { method: 'POST' })
   assert.equal(autopilotRes.ok, true)
-  assert(typeof autopilotRes.jobsCreated === 'number')
-  console.log('✓ Endpoint POST /api/ai/autopilot/run (Pipeline 100% Autônomo) validado.')
+  assert.equal(autopilotRes.jobsCreated, 1, 'O piloto deve agendar somente o veículo elegível sem risco de duplicidade')
+  assert.equal(autopilotRes.assignments[0].vehicleId, autopilotVehicle.id)
+  assert.equal(testDb.prepare('SELECT COUNT(*) count FROM publication_jobs WHERE vehicle_id=?').get(incompleteAutopilotVehicle.id).count, 0)
+  assert.equal(testDb.prepare('SELECT COUNT(*) count FROM publication_jobs WHERE vehicle_id=?').get(duplicatePhotoVehicle.id).count, 0)
+  assert(testDb.prepare('SELECT description FROM vehicles WHERE id=?').get(autopilotVehicle.id).description.trim().length > 0)
+  testDb.close()
+  console.log('✓ Piloto automático aplica os mesmos campos obrigatórios, fotos e proteção contra duplicidade da fila manual.')
 
   console.log('\n======================================================')
   console.log(' TODOS OS TESTES DA ARQUITETURA AUTÔNOMA PASSARAM! (100%)')

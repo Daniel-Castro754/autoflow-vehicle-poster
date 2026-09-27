@@ -14,6 +14,7 @@ type ApiFn = <T=Record<string,unknown>>(path:string, options?:RequestInit) => Pr
 type AccountOption = { id:number; label:string; browserProfile?:string }
 type MenuState = { vehicleId:number; top:number; left:number }
 type VehiclePage = { vehicles:VehicleRecord[]; pagination:{totalItems:number;totalPages:number;currentPage:number;pageSize:number} }
+type VehicleSummary={total:number;published:number;readyStatus:number;attention:number}
 
 export type VehicleRecord = {
   id:number
@@ -82,12 +83,13 @@ export default function VehiclesView({api,vehicles,accounts,reload,notify}:{api:
   const [page,setPage]=useState(1)
   const [pageLoading,setPageLoading]=useState(true)
   const [pagination,setPagination]=useState({totalItems:vehicles.length,totalPages:Math.max(1,Math.ceil(vehicles.length/25)),currentPage:1,pageSize:25})
+  const [summary,setSummary]=useState<VehicleSummary|null>(null)
   const deferredQuery=useDeferredValue(query)
 
   useEffect(()=>{
     let active=true
     const params=new URLSearchParams({page:String(page),limit:'25',query:deferredQuery,status})
-    void api<VehiclePage>(`/vehicles/paged?${params}`).then(result=>{if(!active)return;setPageVehicles(result.vehicles);setPagination(result.pagination);if(result.pagination.currentPage!==page)setPage(result.pagination.currentPage)}).catch(error=>{if(active)notify(error instanceof Error?error.message:'Erro ao carregar veículos')}).finally(()=>{if(active)setPageLoading(false)})
+    void Promise.all([api<VehiclePage>(`/vehicles/paged?${params}`),api<VehicleSummary>('/vehicles/summary')]).then(([result,counts])=>{if(!active)return;setPageVehicles(result.vehicles);setPagination(result.pagination);setSummary(counts);if(result.pagination.currentPage!==page)setPage(result.pagination.currentPage)}).catch(error=>{if(active)notify(error instanceof Error?error.message:'Erro ao carregar veículos')}).finally(()=>{if(active)setPageLoading(false)})
     return()=>{active=false}
   },[api,deferredQuery,status,page,vehicles,notify])
 
@@ -154,10 +156,10 @@ export default function VehiclesView({api,vehicles,accounts,reload,notify}:{api:
       <div className="action-with-help"><button className="primary" onClick={()=>setEditor(null)}><Plus size={18}/>Adicionar veículo</button><HelpTip text="Cadastre todos os dados e as fotos antes de colocar o veículo na fila de publicação." placement="bottom"/></div>
     </div>
     <div className="stats">
-      <article><span className="stat-icon blue"><Car/></span><div><small>Total no estoque</small><strong>{vehicles.length}</strong><em>veículos ativos</em></div></article>
-      <article><span className="stat-icon green"><Check/></span><div><small>Publicados</small><strong>{vehicles.filter(v=>v.status==='Publicado').length}</strong><em>anúncios ativos</em></div></article>
-      <article><span className="stat-icon amber"><Clock3/></span><div><small>Na fila</small><strong>{vehicles.filter(v=>v.status==='Pronto').length}</strong><em>aguardando vendedor</em></div></article>
-      <article><span className="stat-icon red"><CircleAlert/></span><div><small>Precisam de atenção</small><strong>{vehicles.filter(v=>v.status==='Atenção').length}</strong><em>revisar dados</em></div></article>
+      <article><span className="stat-icon blue"><Car/></span><div><small>Total no estoque</small><strong>{summary?.total??pagination.totalItems}</strong><em>veículos ativos</em></div></article>
+      <article><span className="stat-icon green"><Check/></span><div><small>Publicados</small><strong>{summary?.published??vehicles.filter(v=>v.status==='Publicado').length}</strong><em>anúncios ativos</em></div></article>
+      <article><span className="stat-icon amber"><Clock3/></span><div><small>Na fila</small><strong>{summary?.readyStatus??vehicles.filter(v=>v.status==='Pronto').length}</strong><em>aguardando vendedor</em></div></article>
+      <article><span className="stat-icon red"><CircleAlert/></span><div><small>Precisam de atenção</small><strong>{summary?.attention??vehicles.filter(v=>v.status==='Atenção').length}</strong><em>revisar dados</em></div></article>
     </div>
     <div className="panel">
       <div className="toolbar"><div className="search"><Search size={18}/><input value={query} onChange={event=>{setQuery(event.target.value);setPage(1);setPageLoading(true);setSelected(new Set())}} placeholder="Buscar veículo ou vendedor..."/></div><select value={status} onChange={event=>{setStatus(event.target.value);setPage(1);setPageLoading(true);setSelected(new Set())}}><option>Todos</option>{VEHICLE_STATUSES.map(item=><option key={item}>{item}</option>)}</select><button className="secondary">Todas as lojas<ChevronDown size={15}/></button></div>
@@ -215,6 +217,7 @@ function VehicleDrawer({api,vehicle,onClose,onSaved}:{api:ApiFn;vehicle:VehicleR
   const [files,setFiles] = useState<File[]>([])
   const [saving,setSaving] = useState(false)
   const [error,setError] = useState('')
+  const [persistedVehicleId,setPersistedVehicleId] = useState<number|undefined>(vehicle?.id)
   const [description, setDescription] = useState(vehicle?.description || '')
   const [aiLoading, setAiLoading] = useState(false)
   const [aiTone, setAiTone] = useState<'vendedor' | 'profissional' | 'amigável' | 'direto'>('vendedor')
@@ -222,7 +225,11 @@ function VehicleDrawer({api,vehicle,onClose,onSaved}:{api:ApiFn;vehicle:VehicleR
   useEffect(() => { if(vehicle) api<{images:ImageRecord[]}>(`/vehicles/${vehicle.id}/images`).then(data=>setImages(data.images)).catch(()=>setImages([])) }, [api,vehicle])
 
   async function upload(vehicleId:number) {
-    for (const file of files.slice(0,20-images.length)) await api(`/vehicles/${vehicleId}/images`,{method:'POST',body:JSON.stringify(await filePayload(file))})
+    for (const file of files.slice(0,20-images.length)) {
+      const image=await api<{id:number;url:string}>(`/vehicles/${vehicleId}/images`,{method:'POST',body:JSON.stringify(await filePayload(file))})
+      setImages(current=>[...current,{id:image.id,originalName:file.name,url:image.url,mimeType:file.type}])
+      setFiles(current=>current.filter(item=>item!==file))
+    }
   }
 
   async function generateAiDescription(formElement: HTMLFormElement) {
@@ -271,12 +278,15 @@ function VehicleDrawer({api,vehicle,onClose,onSaved}:{api:ApiFn;vehicle:VehicleR
       description:form.get('description'), status:form.get('status'),
     }
     try {
-      let id=vehicle?.id
+      let id=persistedVehicleId
       if (id) await api(`/vehicles/${id}`,{method:'PATCH',body:JSON.stringify(payload)})
-      else id=(await api<{id:number}>('/vehicles',{method:'POST',body:JSON.stringify(payload)})).id
+      else {
+        id=(await api<{id:number}>('/vehicles',{method:'POST',body:JSON.stringify(payload)})).id
+        setPersistedVehicleId(id)
+      }
       await upload(id!)
-      await onSaved(vehicle?'Veículo atualizado com sucesso.':'Veículo adicionado ao estoque.')
-    } catch (caught) { setError(caught instanceof Error?caught.message:'Erro ao salvar veículo'); setSaving(false) }
+      await onSaved(vehicle||persistedVehicleId?'Veículo atualizado com sucesso.':'Veículo adicionado ao estoque.')
+    } catch (caught) { setError(caught instanceof Error?caught.message:'Erro ao salvar veículo. O cadastro foi preservado para retomada.'); setSaving(false) }
   }
 
   async function removeImage(image:ImageRecord) {
@@ -302,7 +312,7 @@ function VehicleDrawer({api,vehicle,onClose,onSaved}:{api:ApiFn;vehicle:VehicleR
         <label><FieldLabel help="Selecione a montadora exatamente como aparece no Marketplace.">Fabricante</FieldLabel><select name="make" defaultValue={vehicle?.make||''} required><option value="" disabled>Selecione a fabricante</option>{withLegacyOption(VEHICLE_MAKES,vehicle?.make).map(item=><option key={item}>{item}</option>)}</select></label>
         <label><FieldLabel help="Informe o modelo sem repetir fabricante ou ano. A extensão tentará escolher a sugestão correspondente.">Modelo</FieldLabel><input name="model" defaultValue={vehicle?.model||''} placeholder="Corolla" required/></label>
         <label><FieldLabel help="Versão ou acabamento, por exemplo XEi 2.0.">Versão</FieldLabel><input name="trim" defaultValue={vehicle?.trim||''} placeholder="XEi 2.0"/></label>
-        <label><FieldLabel help="Cidade usada no anúncio. O Facebook pode pedir a confirmação de uma sugestão.">Localização</FieldLabel><input name="location" defaultValue={vehicle?.location||''} placeholder="Criciúma, SC" required/></label>
+        <label><FieldLabel help="Cidade usada no anúncio. Se ficar em branco, será aplicada a localização padrão das Configurações. O Facebook pode pedir a confirmação de uma sugestão.">Localização</FieldLabel><input name="location" defaultValue={vehicle?.location||''} placeholder="Usar localização padrão das Configurações"/></label>
       </div></div>
       <div className="drawer-section"><h3>Detalhes</h3><div className="vehicle-form-grid">
         <label><FieldLabel help="Valor total anunciado, sem pontos ou símbolo de moeda.">Preço</FieldLabel><input name="price" type="number" min="1" defaultValue={vehicle?.price||0} required/></label>
@@ -349,13 +359,12 @@ function VehicleDrawer({api,vehicle,onClose,onSaved}:{api:ApiFn;vehicle:VehicleR
         rows={5}
         value={description}
         onChange={e => setDescription(e.target.value)}
-        placeholder="Descreva conservação, opcionais e condições..."
-        required
+        placeholder="Se ficar em branco, será usado o modelo definido nas Configurações."
       />
     </div>
       <div className="drawer-section"><h3 className="section-title-help">Fotos <span>{images.length+files.length}/20</span><HelpTip text="A primeira foto vira a capa. Use as setas para reordenar; a extensão envia no máximo 20 na ordem cadastrada."/></h3>
         {images.length>0&&<div className="image-grid">{images.map((image,index)=><div key={image.id}>{index===0&&<span className="cover-badge">Capa</span>}<img src={image.url} alt={image.originalName}/><button type="button" onClick={()=>removeImage(image)} aria-label={`Excluir ${image.originalName}`}><X/></button><div className="move-controls"><button type="button" disabled={index===0} onClick={()=>moveImage(index,-1)} aria-label={`Mover ${image.originalName} para a esquerda`}><ChevronLeft/></button><button type="button" disabled={index===images.length-1} onClick={()=>moveImage(index,1)} aria-label={`Mover ${image.originalName} para a direita`}><ChevronRight/></button></div></div>)}</div>}
-        <label className="image-upload"><ImagePlus/><strong>Adicionar fotos</strong><span>JPG, PNG ou WebP · até 12 MB cada</span><input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={event=>setFiles([...event.target.files||[]].slice(0,20-images.length))}/></label>
+        {images.length<20&&<label className="image-upload"><ImagePlus/><strong>Adicionar fotos</strong><span>JPG, PNG ou WebP · até 12 MB cada</span><input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={event=>setFiles(current=>[...current,...[...event.target.files||[]]].slice(0,20-images.length))}/></label>}
         {files.length>0&&<div className="pending-files">{files.map(file=><span key={file.name}>{file.name}</span>)}</div>}
       </div>
       <button className="primary save-vehicle" disabled={saving}>{saving?'Salvando...':vehicle?'Salvar alterações':'Adicionar ao estoque'}</button>
