@@ -57,9 +57,12 @@ export function operationalHealth(db: DatabaseSync, organizationId: number) {
   }
   const accounts = db
     .prepare(
-      `SELECT a.id,a.label,a.status,
+      `SELECT a.id,a.label,a.status,a.automation_paused automationPaused,
+    a.automation_pause_reason automationPauseReason,a.automation_paused_at automationPausedAt,
     COALESCE(SUM(j.status IN ('completed','removed') AND datetime(j.filled_at)>=datetime('now','-1 day')),0) completed,
-    COALESCE(SUM(j.status='error' AND datetime(j.updated_at)>=datetime('now','-1 day')),0) errors
+    COALESCE(SUM(j.status='error' AND datetime(j.updated_at)>=datetime('now','-1 day')),0) errors,
+    AVG(CASE WHEN j.status IN ('completed','removed') AND datetime(j.filled_at)>=datetime('now','-1 day')
+      AND unixepoch(j.filled_at)>=unixepoch(j.started_at) THEN unixepoch(j.filled_at)-unixepoch(j.started_at) END) averageDurationSeconds
     FROM social_accounts a LEFT JOIN publication_jobs j ON j.organization_id=a.organization_id AND j.social_account_id=a.id
     WHERE a.organization_id=? GROUP BY a.id ORDER BY a.label,a.id`,
     )
@@ -69,7 +72,69 @@ export function operationalHealth(db: DatabaseSync, organizationId: number) {
     status: string
     completed: number
     errors: number
+    automationPaused: number
+    automationPauseReason?: string
+    automationPausedAt?: string
+    averageDurationSeconds: number | null
   }>
+  const selectorSummary = db
+    .prepare(
+      `SELECT COUNT(*) checks,
+      COALESCE(SUM(severe=1),0) severe,
+      COALESCE(AVG(success_rate),1) averageSuccessRate
+      FROM selector_health_events
+      WHERE organization_id=? AND datetime(created_at)>=datetime('now','-1 day')`,
+    )
+    .get(organizationId) as {
+    checks: number
+    severe: number
+    averageSuccessRate: number
+  }
+  const selectorAccounts = db
+    .prepare(
+      `SELECT social_account_id accountId,COUNT(*) checks,
+      COALESCE(SUM(severe=1),0) severe,COALESCE(AVG(success_rate),1) averageSuccessRate
+      FROM selector_health_events
+      WHERE organization_id=? AND datetime(created_at)>=datetime('now','-1 day')
+      GROUP BY social_account_id`,
+    )
+    .all(organizationId) as Array<{
+    accountId: number
+    checks: number
+    severe: number
+    averageSuccessRate: number
+  }>
+  const selectorByAccount = new Map(selectorAccounts.map((item) => [item.accountId, item]))
+  const selectorFieldRows = db
+    .prepare(
+      `SELECT missing_fields missingFields FROM selector_health_events
+      WHERE organization_id=? AND datetime(created_at)>=datetime('now','-1 day') AND missing_count>0`,
+    )
+    .all(organizationId) as Array<{ missingFields: string }>
+  const fieldFailures = new Map<string, number>()
+  for (const row of selectorFieldRows) {
+    try {
+      const fields = JSON.parse(row.missingFields || '[]')
+      if (Array.isArray(fields))
+        for (const field of fields)
+          fieldFailures.set(String(field), (fieldFailures.get(String(field)) || 0) + 1)
+    } catch {
+      // Ignore legacy/invalid diagnostic rows.
+    }
+  }
+  const sellers = db
+    .prepare(
+      `SELECT u.id,u.name,
+      COALESCE(SUM(j.status IN ('completed','removed') AND datetime(j.filled_at)>=datetime('now','-1 day')),0) completed,
+      COALESCE(SUM(j.status='error' AND datetime(j.updated_at)>=datetime('now','-1 day')),0) errors,
+      AVG(CASE WHEN j.status IN ('completed','removed') AND datetime(j.filled_at)>=datetime('now','-1 day')
+        AND unixepoch(j.filled_at)>=unixepoch(j.started_at) THEN unixepoch(j.filled_at)-unixepoch(j.started_at) END) averageDurationSeconds
+      FROM users u
+      LEFT JOIN vehicles v ON v.organization_id=u.organization_id AND v.assigned_user_id=u.id
+      LEFT JOIN publication_jobs j ON j.organization_id=u.organization_id AND j.vehicle_id=v.id
+      WHERE u.organization_id=? GROUP BY u.id ORDER BY u.name`,
+    )
+    .all(organizationId)
   const autopilot = db
     .prepare(
       `SELECT s.autopilot_enabled enabled,s.autopilot_interval_minutes intervalMinutes,
@@ -86,18 +151,33 @@ export function operationalHealth(db: DatabaseSync, organizationId: number) {
       health.stuckJobsCount === 0 &&
       health.slowJobsCount === 0 &&
       health.expiredLeasesCount === 0 &&
-      health.recentErrorsCount < 5,
+      health.recentErrorsCount < 5 &&
+      accounts.every((account) => !account.automationPaused),
     ...health,
     ...events,
     jobs,
     performance,
-    accounts: accounts.map((account) => ({
-      ...account,
-      successRate:
-        account.completed + account.errors > 0
-          ? account.completed / (account.completed + account.errors)
-          : null,
-    })),
+    selectorHealth: {
+      ...selectorSummary,
+      failingFields: [...fieldFailures.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([field, failures]) => ({ field, failures })),
+    },
+    accounts: accounts.map((account) => {
+      const selector = selectorByAccount.get(account.id)
+      return {
+        ...account,
+        successRate:
+          account.completed + account.errors > 0
+            ? account.completed / (account.completed + account.errors)
+            : null,
+        selectorChecks: selector?.checks || 0,
+        selectorSevereFailures: selector?.severe || 0,
+        selectorSuccessRate: selector?.averageSuccessRate ?? null,
+      }
+    }),
+    sellers,
     autopilot,
   }
 }
@@ -131,6 +211,21 @@ export function prometheusMetrics(report: ReturnType<typeof operationalHealth>):
       'accounts_connected',
       'Connected accounts.',
       report.accounts.filter((account) => account.status === 'connected').length,
+    ],
+    [
+      'accounts_automation_paused',
+      'Accounts paused by the selector circuit breaker or an administrator.',
+      report.accounts.filter((account) => account.automationPaused).length,
+    ],
+    [
+      'selector_checks_24h',
+      'Selector health reports received in the last 24 hours.',
+      report.selectorHealth.checks,
+    ],
+    [
+      'selector_severe_failures_24h',
+      'Severe selector-layout failures received in the last 24 hours.',
+      report.selectorHealth.severe,
     ],
   ]
   if (report.performance.averageDurationSeconds !== null)
