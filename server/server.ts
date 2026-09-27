@@ -10,7 +10,10 @@ import { fileURLToPath } from 'node:url'
 import { randomBytes, timingSafeEqual, createHmac, createHash } from 'node:crypto'
 import { logger } from './lib/logger.ts'
 import { startGroupCurationWorker } from './services/group-curation-worker.ts'
-import { startHealthMonitor, runHealthCheck } from './services/health-monitor.ts'
+import { startHealthMonitor, stopHealthMonitor } from './services/health-monitor.ts'
+import { createAutonomousScheduler } from './services/autonomous-scheduler.ts'
+import { handleOperationsRoute } from './routes/operations.ts'
+import { requestIdFor, withRequestContext } from './lib/request-context.ts'
 import { vehicleOptions } from './services/vehicle-input.ts'
 import { publicationDuplicateRisk as findPublicationDuplicateRisk } from './services/publication-policy.ts'
 import { createAccessControl } from './services/access-control.ts'
@@ -129,7 +132,6 @@ const authRouteDependencies = {
   verifyPassword,
   dummyPasswordHash,
   sign,
-  runHealthCheck,
 }
 function sign(payload: object) {
   const body = Buffer.from(
@@ -212,7 +214,8 @@ function applyCors(req: IncomingMessage, res: ServerResponse) {
     /^chrome-extension:\/\/[a-p]{32}$/.test(origin)
   if (origin) res.setHeader('Vary', 'Origin')
   if (origin && allowed) res.setHeader('Access-Control-Allow-Origin', origin)
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Request-Id')
+  res.setHeader('Access-Control-Expose-Headers', 'X-Request-Id')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
   return allowed
 }
@@ -347,8 +350,10 @@ for (const organization of db.prepare('SELECT id FROM organizations').all() as A
 }
 startHealthMonitor(db, 60000)
 startGroupCurationWorker(db)
+const autopilotScheduler = createAutonomousScheduler(db)
+autopilotScheduler.start()
 
-const server = createServer(async (req, res) => {
+async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   const originAllowed = applyCors(req, res)
   if (req.method === 'OPTIONS')
     return originAllowed ? send(res, 204, null) : send(res, 403, { error: 'Origem não permitida.' })
@@ -386,6 +391,7 @@ const server = createServer(async (req, res) => {
     if (!activeSession(auth))
       return send(res, 401, { error: 'Esta sessão foi encerrada ou revogada. Entre novamente.' })
     if (await handleAuthRoute(req, res, url, auth, authRouteDependencies)) return
+    if (handleOperationsRoute(req, res, url, auth, db, send)) return
     if (
       handleVehicleReadRoute(req, res, url, auth, {
         send,
@@ -493,6 +499,29 @@ const server = createServer(async (req, res) => {
     logger.error('Server', 'Erro não tratado na requisição', { error })
     return send(res, 500, { error: 'Erro interno da aplicação.' })
   }
+}
+const server = createServer((req, res) => {
+  const requestId = requestIdFor(req.headers['x-request-id'])
+  res.setHeader('X-Request-Id', requestId)
+  const started = performance.now()
+  res.once('finish', () =>
+    withRequestContext(requestId, () => {
+      logger.info('HTTP', 'Requisição concluída', {
+        method: req.method,
+        path: (req.url || '/')
+          .split('?')[0]
+          .replace(/\/\d+(?=\/|$)/g, '/:id')
+          .slice(0, 160),
+        status: res.statusCode,
+        durationMs: Math.round(performance.now() - started),
+      })
+    }),
+  )
+  void withRequestContext(requestId, () => handleRequest(req, res))
+})
+server.on('close', () => {
+  autopilotScheduler.stop()
+  stopHealthMonitor()
 })
 server.requestTimeout = 30_000
 server.headersTimeout = 10_000

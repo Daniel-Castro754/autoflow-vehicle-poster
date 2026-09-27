@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { sendCriticalAlert } from './alerting.ts'
 import { publicationMayExist, ambiguousPublicationReport } from './publication-evidence.ts'
 import { logger } from '../lib/logger.ts'
+import { warnSlowExecutions } from './proactive-alerts.ts'
 
 export interface HealthStatusReport {
   timestamp: string
@@ -245,6 +246,7 @@ export async function runHealthCheck(
   const recentErrorsCount = Number(recentErrors?.count || 0)
   const healthy = stuckRows.length === 0 && recentErrorsCount < 5
 
+  if (options.autoRecover) await warnSlowExecutions(db)
   return {
     timestamp,
     healthy,
@@ -258,11 +260,16 @@ export async function runHealthCheck(
 export function startHealthMonitor(db: DatabaseSync, intervalMs = 60000): void {
   if (monitorTimer) return
 
+  let running = false
   monitorTimer = setInterval(async () => {
+    if (running) return
+    running = true
     try {
       await runHealthCheck(db, { autoRecover: true })
     } catch (err) {
       logger.warn('HealthMonitor', 'Erro na verificação periódica de saúde', { error: err })
+    } finally {
+      running = false
     }
   }, intervalMs)
 

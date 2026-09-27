@@ -112,6 +112,23 @@ const migrations: Migration[] = [
     CREATE INDEX IF NOT EXISTS idx_publication_events_org_id ON publication_job_events (organization_id,id DESC);
   `,
   },
+  {
+    version: 9,
+    columns: [
+      ['organization_settings', 'autopilot_enabled', 'INTEGER NOT NULL DEFAULT 0'],
+      ['organization_settings', 'autopilot_interval_minutes', 'INTEGER NOT NULL DEFAULT 5'],
+      ['publication_jobs', 'near_timeout_alert_attempt', 'INTEGER NOT NULL DEFAULT -1'],
+    ],
+    sql: `CREATE TABLE IF NOT EXISTS autopilot_state (
+      organization_id INTEGER PRIMARY KEY,
+      lease_owner TEXT, lease_expires_at TEXT, next_run_at TEXT,
+      last_started_at TEXT, last_finished_at TEXT, last_status TEXT,
+      last_jobs_created INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (organization_id) REFERENCES organizations(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_publication_events_org_time_type
+      ON publication_job_events (organization_id,created_at,event_type);`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

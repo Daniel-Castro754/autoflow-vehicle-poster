@@ -54,6 +54,8 @@ O comando `npm run dev` inicia o painel em `http://localhost:5173` e a API em `h
 - Retorno de preenchimento com campos encontrados, pendências, fotos e versão da extensão
 - Estados operacionais `Pendente`, `Preenchendo`, `Aguardando confirmação`, `Concluída` e `Erro`
 - O piloto automático aplica os mesmos requisitos de publicação da fila normal, incluindo campos completos, fotos válidas e proteção contra anúncios duplicados
+- Agendamento recorrente configurável por organização, com execução exclusiva entre o worker e comandos manuais
+- Saúde operacional no painel, métricas autenticadas por organização e avisos de demora sem repetição por tentativa
 - Retentativas automáticas são limitadas a falhas transitórias reconhecidas, respeitam o máximo configurado e nunca repetem um clique de publicação sem confirmação
 
 As lacunas encontradas na comparação com ferramentas similares e o roadmap recomendado estão em [COMPETITIVE_ANALYSIS.md](./COMPETITIVE_ANALYSIS.md).
@@ -80,6 +82,8 @@ Para testes isolados, `DATA_DIR` permite escolher outra pasta de banco e uploads
 Copie `.env.example` para `.env` e preencha `AUTH_SECRET`, `INITIAL_ADMIN_EMAIL` e `INITIAL_ADMIN_PASSWORD`. Os campos de segredo ficam vazios de propósito. O fuso operacional padrão é `America/Sao_Paulo`; `SCHEDULE_TIMEZONE` aceita um identificador IANA e governa o agendamento, o histórico e a contagem diária, independentemente do fuso do computador.
 
 `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run build` e `npm test` são os mesmos gates da CI. Os testes usam bancos temporários e bloqueiam HTTP externo; não publicam no Facebook nem enviam alertas reais. `LOG_LEVEL` aceita `info`, `warn` e `error`; os logs são JSON com campos sensíveis ocultos.
+
+Para ativar a criação periódica da fila, use **Configurações → Agendar estoque automaticamente** e escolha o intervalo. A configuração **Publicar automaticamente** continua independente. Detalhes sobre limites, métricas, logs e alertas estão em [Operação autônoma e observabilidade](docs/AUTONOMOUS_OPERATIONS.md).
 
 ## Container local
 

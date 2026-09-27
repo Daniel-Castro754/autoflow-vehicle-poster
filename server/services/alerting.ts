@@ -7,6 +7,7 @@ export interface AlertConfig {
 }
 
 export interface CriticalErrorAlert {
+  severity?: 'warning' | 'critical'
   jobId?: number
   accountLabel?: string
   message: string
@@ -38,7 +39,7 @@ export async function sendCriticalAlert(
   const attempts = alert.attemptCount !== undefined ? String(alert.attemptCount) : '1'
 
   const message = [
-    '🚨 *Alerta Crítico no AutoFlow*',
+    alert.severity === 'warning' ? '⚠️ *Aviso no AutoFlow*' : '🚨 *Alerta Crítico no AutoFlow*',
     `• *Tipo:* ${escapeMarkdownV2(alert.type || 'Falha de Publicação')}`,
     `• *Trabalho:* ${escapeMarkdownV2(jobInfo)}`,
     `• *Perfil:* ${escapeMarkdownV2(accountInfo)}`,
@@ -83,7 +84,7 @@ export async function sendCriticalAlert(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           source: 'autoflow-vehicle-poster',
-          severity: 'critical',
+          severity: alert.severity || 'critical',
           ...alert,
           timestamp,
         }),

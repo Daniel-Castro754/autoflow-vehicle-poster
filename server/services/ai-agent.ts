@@ -8,6 +8,7 @@ import {
 import { generateVehicleHashtags } from './trending-hashtags.ts'
 import { calculateOptimalSchedule } from './smart-scheduler.ts'
 import { findBestAccountForVehicle } from './session-manager.ts'
+import { coordinateAutopilot, skippedAutopilot } from './autopilot-coordinator.ts'
 import { curateMarketplaceGroups } from './group-curator.ts'
 import { publicationDuplicateRisk, publicationReadinessIssues } from './publication-policy.ts'
 
@@ -446,7 +447,20 @@ export function auditInventory(db: DatabaseSync, organizationId: number): Invent
 export async function runAutopilotPipeline(
   db: DatabaseSync,
   organizationId: number,
-  userId: number,
+  userId: number | null,
+  { automatic = false } = {},
+): Promise<AutopilotResult> {
+  return coordinateAutopilot(db, organizationId, automatic, (ownsLease) =>
+    planAutopilotJobs(db, organizationId, userId, automatic, ownsLease),
+  )
+}
+
+async function planAutopilotJobs(
+  db: DatabaseSync,
+  organizationId: number,
+  userId: number | null,
+  automatic: boolean,
+  ownsLease: () => boolean,
 ): Promise<AutopilotResult> {
   const settings = db
     .prepare(
@@ -455,10 +469,6 @@ export async function runAutopilotPipeline(
     )
     .get(organizationId) as { dailyLimit?: number; executionIntervalMinutes?: number } | undefined
   const dailyLimit = Math.max(1, Number(settings?.dailyLimit) || 10)
-  const executionIntervalMinutes = Math.max(
-    0,
-    Math.min(1440, Number(settings?.executionIntervalMinutes ?? 25)),
-  )
   const accountCapacity = db
     .prepare(
       `SELECT a.id,MAX(0,?-COALESCE(SUM(CASE WHEN autoflow_day(j.created_at)=autoflow_day(CURRENT_TIMESTAMP) AND j.status!='canceled' THEN 1 ELSE 0 END),0)) remaining
@@ -552,7 +562,7 @@ export async function runAutopilotPipeline(
     )
     .filter((vehicle) => !publicationDuplicateRisk(db, organizationId, vehicle.id))
     .filter((vehicle) => findBestAccountForVehicle(db, organizationId, vehicle.id) !== null)
-    .slice(0, remainingCapacity)
+    .slice(0, automatic ? Math.min(20, remainingCapacity) : remainingCapacity)
   if (!eligibleVehicles.length) {
     return {
       ok: true,
@@ -568,44 +578,6 @@ export async function runAutopilotPipeline(
   const assignments: AutopilotResult['assignments'] = []
   let descriptionsOptimized = 0
 
-  // Existing upcoming jobs to avoid schedule collision
-  const existingJobs = db
-    .prepare(
-      `SELECT social_account_id accountId, scheduled_at scheduledAt FROM publication_jobs
-    WHERE organization_id = ? AND scheduled_at IS NOT NULL AND datetime(scheduled_at) > CURRENT_TIMESTAMP
-    AND status IN ('pending', 'filling', 'error', 'awaiting_confirmation')`,
-    )
-    .all(organizationId) as Array<{ accountId: number; scheduledAt: string }>
-
-  const accountSchedules = new Map<number, number[]>()
-  const accountNextAllowedAt = new Map<number, number>()
-  for (const item of existingJobs) {
-    const ts = Date.parse(item.scheduledAt)
-    if (Number.isFinite(ts)) {
-      accountSchedules.set(item.accountId, [...(accountSchedules.get(item.accountId) || []), ts])
-      accountNextAllowedAt.set(
-        item.accountId,
-        Math.max(accountNextAllowedAt.get(item.accountId) || 0, ts),
-      )
-    }
-  }
-  const completedJobs = db
-    .prepare(
-      `SELECT social_account_id accountId,MAX(updated_at) completedAt FROM publication_jobs
-    WHERE organization_id=? AND status IN ('completed','removed') GROUP BY social_account_id`,
-    )
-    .all(organizationId) as Array<{ accountId: number; completedAt: string }>
-  for (const item of completedJobs) {
-    const completedAt = Date.parse(`${item.completedAt.replace(' ', 'T')}Z`)
-    if (Number.isFinite(completedAt)) {
-      const nextAllowedAt = completedAt + executionIntervalMinutes * 60000
-      accountNextAllowedAt.set(
-        item.accountId,
-        Math.max(accountNextAllowedAt.get(item.accountId) || 0, nextAllowedAt),
-      )
-    }
-  }
-
   const aiConf = db
     .prepare(
       'SELECT gemini_api_key geminiApiKey, openai_api_key openaiApiKey, ai_provider aiProvider FROM organization_settings WHERE organization_id = ?',
@@ -616,6 +588,8 @@ export async function runAutopilotPipeline(
 
   const optimizedDescriptions = new Map<number, string>()
   for (const vehicle of eligibleVehicles) {
+    if (!ownsLease())
+      return skippedAutopilot('Rodada interrompida: configuração alterada ou execução expirada.')
     if (
       !vehicle.description ||
       vehicle.description.length < 60 ||
@@ -643,16 +617,104 @@ export async function runAutopilotPipeline(
     }
   }
 
-  db.exec('BEGIN')
+  if (!ownsLease())
+    return skippedAutopilot('Rodada interrompida: configuração alterada ou execução expirada.')
+  db.exec('BEGIN IMMEDIATE')
   try {
-    for (const vehicle of eligibleVehicles) {
-      const optimizedDescription = optimizedDescriptions.get(vehicle.id)
+    if (!ownsLease()) {
+      db.exec('COMMIT')
+      return skippedAutopilot('Rodada interrompida: configuração alterada ou execução expirada.')
+    }
+    const latestSettings = db
+      .prepare(
+        'SELECT execution_interval_minutes executionIntervalMinutes FROM organization_settings WHERE organization_id=?',
+      )
+      .get(organizationId) as { executionIntervalMinutes: number }
+    const executionIntervalMinutes = Math.max(
+      0,
+      Math.min(1440, Number(latestSettings.executionIntervalMinutes ?? 25)),
+    )
+    // Existing upcoming jobs to avoid schedule collision
+    const existingJobs = db
+      .prepare(
+        `SELECT social_account_id accountId, scheduled_at scheduledAt FROM publication_jobs
+    WHERE organization_id = ? AND scheduled_at IS NOT NULL AND datetime(scheduled_at) > CURRENT_TIMESTAMP
+    AND status IN ('pending', 'filling', 'error', 'awaiting_confirmation')`,
+      )
+      .all(organizationId) as Array<{ accountId: number; scheduledAt: string }>
+
+    const accountSchedules = new Map<number, number[]>()
+    const accountNextAllowedAt = new Map<number, number>()
+    for (const item of existingJobs) {
+      const ts = Date.parse(item.scheduledAt)
+      if (Number.isFinite(ts)) {
+        accountSchedules.set(item.accountId, [...(accountSchedules.get(item.accountId) || []), ts])
+        accountNextAllowedAt.set(
+          item.accountId,
+          Math.max(accountNextAllowedAt.get(item.accountId) || 0, ts),
+        )
+      }
+    }
+    const completedJobs = db
+      .prepare(
+        `SELECT social_account_id accountId,MAX(updated_at) completedAt FROM publication_jobs
+    WHERE organization_id=? AND status IN ('completed','removed') GROUP BY social_account_id`,
+      )
+      .all(organizationId) as Array<{ accountId: number; completedAt: string }>
+    for (const item of completedJobs) {
+      const completedAt = Date.parse(`${item.completedAt.replace(' ', 'T')}Z`)
+      if (Number.isFinite(completedAt)) {
+        const nextAllowedAt = completedAt + executionIntervalMinutes * 60000
+        accountNextAllowedAt.set(
+          item.accountId,
+          Math.max(accountNextAllowedAt.get(item.accountId) || 0, nextAllowedAt),
+        )
+      }
+    }
+
+    for (const candidate of eligibleVehicles) {
+      const vehicle = db
+        .prepare(
+          `SELECT v.id,v.year,v.make,v.model,v.trim,v.price,v.km,v.status,v.description,
+        v.exterior_color exteriorColor,v.interior_color interiorColor,v.transmission,v.fuel_type fuelType,
+        v.vehicle_condition condition,v.vehicle_type vehicleType,v.body_type bodyType,v.location,v.sold_at soldAt,
+        (SELECT COUNT(*) FROM vehicle_images WHERE vehicle_id=v.id AND organization_id=v.organization_id) imageCount
+        FROM vehicles v WHERE v.id=? AND v.organization_id=? AND v.status='Pronto' AND v.sold_at IS NULL`,
+        )
+        .get(candidate.id, organizationId) as typeof candidate | undefined
+      if (!vehicle) continue
+      // Stock can be edited or sold while an AI provider is responding.
+      const descriptionFields = [
+        'year',
+        'make',
+        'model',
+        'trim',
+        'price',
+        'km',
+        'exteriorColor',
+        'transmission',
+        'fuelType',
+        'condition',
+        'location',
+      ] as const
+      if (descriptionFields.some((field) => vehicle[field] !== candidate[field])) continue
+      const optimizedDescription =
+        vehicle.description === candidate.description
+          ? optimizedDescriptions.get(vehicle.id)
+          : undefined
       const effectiveVehicle = {
         ...vehicle,
         description: optimizedDescription || vehicle.description,
       }
       if (publicationReadinessIssues(effectiveVehicle, vehicle.imageCount).length) continue
       if (publicationDuplicateRisk(db, organizationId, vehicle.id)) continue
+      const active = db
+        .prepare(
+          `SELECT 1 FROM publication_jobs WHERE organization_id=? AND vehicle_id=?
+        AND status IN ('pending','filling','error','awaiting_confirmation','completed')`,
+        )
+        .get(organizationId, vehicle.id)
+      if (active) continue
       const best = findBestAccountForVehicle(db, organizationId, vehicle.id)
       if (!best) continue
       if (optimizedDescription) {
@@ -712,7 +774,12 @@ export async function runAutopilotPipeline(
         organizationId,
         jobId,
         userId,
-        JSON.stringify({ scheduledAt: optimal.isoString, window: optimal.window, automated: true }),
+        JSON.stringify({
+          scheduledAt: optimal.isoString,
+          window: optimal.window,
+          automated: true,
+          trigger: automatic ? 'recurring' : 'manual',
+        }),
       )
 
       assignments.push({

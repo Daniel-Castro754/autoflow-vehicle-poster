@@ -48,6 +48,8 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
     ALTER TABLE publication_jobs ADD COLUMN retry_count INTEGER DEFAULT 0;
     ALTER TABLE publication_jobs ADD COLUMN max_retries INTEGER DEFAULT 3;
     ALTER TABLE publication_jobs ADD COLUMN last_lease_token TEXT;
+    ALTER TABLE publication_jobs ADD COLUMN near_timeout_alert_attempt INTEGER NOT NULL DEFAULT -1;
+    ALTER TABLE social_accounts ADD COLUMN organization_id INTEGER NOT NULL DEFAULT 1;
   `)
   const originalFetch = globalThis.fetch
   const calls = []

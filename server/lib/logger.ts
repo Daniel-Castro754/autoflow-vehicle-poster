@@ -1,3 +1,5 @@
+import { currentRequestId } from './request-context.ts'
+
 type Level = 'info' | 'warn' | 'error'
 const LEVELS = { info: 0, warn: 1, error: 2 }
 const SENSITIVE = /password|token|authorization|cookie|secret|api_?key/i
@@ -34,6 +36,7 @@ function emit(level: Level, scope: string, message: string, details?: Record<str
     ts: new Date().toISOString(),
     level,
     scope,
+    ...(currentRequestId() ? { requestId: currentRequestId() } : {}),
     message: redact(message),
     ...(details ? { details: sanitize(details) } : {}),
   })
