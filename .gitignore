@@ -11,3 +11,11 @@ work/
 .tmp-*/
 vite.config.js
 vite.config.d.ts
+
+data/
+backups/
+*.log
+.env.*
+!.env.example
+.DS_Store
+coverage/

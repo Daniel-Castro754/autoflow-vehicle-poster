@@ -16,14 +16,15 @@ let monitorTimer: NodeJS.Timeout | null = null
 
 export async function runHealthCheck(
   db: DatabaseSync,
-  options: { autoRecover?: boolean } = { autoRecover: true }
+  options: { autoRecover?: boolean } = { autoRecover: true },
 ): Promise<HealthStatusReport> {
   const timestamp = new Date().toISOString()
   let recoveredCount = 0
 
   // 1. Identificar trabalhos travados em 'filling' com lease expirado além do timeout
   const stuckRows = db
-    .prepare(`
+    .prepare(
+      `
       SELECT j.id, j.organization_id organizationId, j.social_account_id accountId, j.started_at startedAt,
         j.publish_attempt_at publishAttemptAt, j.fill_report fillReport, j.attempt_count attemptCount, j.retry_count retryCount,
         COALESCE(j.max_retries, s.max_retries, 3) maxRetries,
@@ -41,34 +42,37 @@ export async function runHealthCheck(
         AND (j.lease_expires_at IS NULL OR datetime(j.lease_expires_at) <= CURRENT_TIMESTAMP)
         AND j.started_at IS NOT NULL
         AND (strftime('%s', 'now') - strftime('%s', j.started_at)) >= COALESCE(s.stuck_timeout_minutes, 15) * 60
-    `)
+    `,
+    )
     .all() as Array<{
-      id: number
-      organizationId: number
-      accountId: number
-      startedAt: string
-      publishAttemptAt: string | null
-      fillReport: string
-      alertTelegramToken: string
-      alertTelegramChatId: string
-      alertWebhookUrl: string
-      attemptCount: number
-      retryCount: number
-      maxRetries: number
-      timeoutMinutes: number
-      accountLabel: string
-      year: number
-      make: string
-      model: string
-    }>
+    id: number
+    organizationId: number
+    accountId: number
+    startedAt: string
+    publishAttemptAt: string | null
+    fillReport: string
+    alertTelegramToken: string
+    alertTelegramChatId: string
+    alertWebhookUrl: string
+    attemptCount: number
+    retryCount: number
+    maxRetries: number
+    timeoutMinutes: number
+    accountLabel: string
+    year: number
+    make: string
+    model: string
+  }>
 
   // 2. Identificar leases expirados que ficaram soltos
   const expiredLeases = db
-    .prepare(`
+    .prepare(
+      `
       SELECT id, organization_id organizationId FROM publication_jobs
       WHERE status = 'filling' AND lease_expires_at IS NOT NULL
         AND datetime(lease_expires_at) <= CURRENT_TIMESTAMP
-    `)
+    `,
+    )
     .all() as Array<{ id: number; organizationId: number }>
 
   // 3. Auto-recuperação (Self-Healing) de jobs travados
@@ -77,7 +81,9 @@ export async function runHealthCheck(
       try {
         const elapsedMinutes = Math.max(
           1,
-          Math.floor((Date.now() - new Date(job.startedAt.replace(' ', 'T') + 'Z').getTime()) / 60000)
+          Math.floor(
+            (Date.now() - new Date(job.startedAt.replace(' ', 'T') + 'Z').getTime()) / 60000,
+          ),
         )
 
         // O checkpoint de publish-check foi registrado: o clique em "Publicar" pode já ter
@@ -86,41 +92,54 @@ export async function runHealthCheck(
         if (publicationMayExist(job)) {
           db.exec('BEGIN')
           try {
-            db.prepare(`
+            db.prepare(
+              `
               UPDATE publication_jobs
               SET status = 'awaiting_confirmation', paused = 1, extension_visible = 0, error_code = NULL,
                 fill_report = ?, last_lease_token = COALESCE(lease_token,last_lease_token),
                 lease_token = NULL, lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
               WHERE id = ? AND organization_id = ?
-            `).run(
+            `,
+            ).run(
               JSON.stringify(ambiguousPublicationReport(job.fillReport)),
               job.id,
-              job.organizationId
+              job.organizationId,
             )
 
-            db.prepare(`
+            db.prepare(
+              `
               INSERT INTO publication_job_events (organization_id, publication_job_id, event_type, created_by, details)
               VALUES (?, ?, 'stalled_publish_ambiguous', NULL, ?)
-            `).run(
+            `,
+            ).run(
               job.organizationId,
               job.id,
-              JSON.stringify({ elapsedMinutes, recoveredBy: 'health_monitor' })
+              JSON.stringify({ elapsedMinutes, recoveredBy: 'health_monitor' }),
             )
 
             db.exec('COMMIT')
             recoveredCount++
           } catch (txErr) {
             db.exec('ROLLBACK')
-            logger.warn('HealthMonitor', `Falha ao processar job ambíguo #${job.id}`, { error: txErr })
+            logger.warn('HealthMonitor', `Falha ao processar job ambíguo #${job.id}`, {
+              error: txErr,
+            })
           }
 
-          void sendCriticalAlert({
-            jobId: job.id,
-            accountLabel: job.accountLabel,
-            type: 'job_stalled_publish_ambiguous',
-            message: `Trabalho travado há ${elapsedMinutes} min (${job.year} ${job.make} ${job.model}) pode já ter sido publicado no Facebook antes da falha. Verifique "Seus classificados" antes de liberar uma nova tentativa.`,
-            attemptCount: job.attemptCount,
-          }, {telegramBotToken:job.alertTelegramToken,telegramChatId:job.alertTelegramChatId,webhookUrl:job.alertWebhookUrl})
+          void sendCriticalAlert(
+            {
+              jobId: job.id,
+              accountLabel: job.accountLabel,
+              type: 'job_stalled_publish_ambiguous',
+              message: `Trabalho travado há ${elapsedMinutes} min (${job.year} ${job.make} ${job.model}) pode já ter sido publicado no Facebook antes da falha. Verifique "Seus classificados" antes de liberar uma nova tentativa.`,
+              attemptCount: job.attemptCount,
+            },
+            {
+              telegramBotToken: job.alertTelegramToken,
+              telegramChatId: job.alertTelegramChatId,
+              webhookUrl: job.alertWebhookUrl,
+            },
+          )
           continue
         }
 
@@ -131,39 +150,51 @@ export async function runHealthCheck(
         db.exec('BEGIN')
         try {
           if (exhausted) {
-            db.prepare(`
+            db.prepare(
+              `
               UPDATE publication_jobs
               SET status = 'error', error_code = 'Travado repetidamente sem confirmação da extensão.',
                 last_lease_token = NULL, publish_attempt_at = NULL, lease_token = NULL,
                 lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
               WHERE id = ? AND organization_id = ?
-            `).run(job.id, job.organizationId)
+            `,
+            ).run(job.id, job.organizationId)
 
-            db.prepare(`
+            db.prepare(
+              `
               INSERT INTO publication_job_events (organization_id, publication_job_id, event_type, created_by, details)
               VALUES (?, ?, 'stalled_exhausted', NULL, ?)
-            `).run(
+            `,
+            ).run(
               job.organizationId,
               job.id,
-              JSON.stringify({ elapsedMinutes, retryCount: job.retryCount, maxRetries: job.maxRetries })
+              JSON.stringify({
+                elapsedMinutes,
+                retryCount: job.retryCount,
+                maxRetries: job.maxRetries,
+              }),
             )
           } else {
-            db.prepare(`
+            db.prepare(
+              `
               UPDATE publication_jobs
               SET status = 'pending', paused = 0, extension_visible = 1, error_code = NULL,
                 fill_report = '', started_at = NULL, filled_at = NULL, last_lease_token = NULL,
                 publish_attempt_at = NULL, retry_count = retry_count + 1, lease_token = NULL,
                 lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
               WHERE id = ? AND organization_id = ?
-            `).run(job.id, job.organizationId)
+            `,
+            ).run(job.id, job.organizationId)
 
-            db.prepare(`
+            db.prepare(
+              `
               INSERT INTO publication_job_events (organization_id, publication_job_id, event_type, created_by, details)
               VALUES (?, ?, 'stalled_recovered', NULL, ?)
-            `).run(
+            `,
+            ).run(
               job.organizationId,
               job.id,
-              JSON.stringify({ elapsedMinutes, recoveredBy: 'health_monitor' })
+              JSON.stringify({ elapsedMinutes, recoveredBy: 'health_monitor' }),
             )
           }
 
@@ -176,28 +207,39 @@ export async function runHealthCheck(
 
         // Notifica via alerta caso o travamento tenha sido excessivo (> 30 min) ou as tentativas se esgotaram
         if (elapsedMinutes >= 30 || exhausted) {
-          void sendCriticalAlert({
-            jobId: job.id,
-            accountLabel: job.accountLabel,
-            type: exhausted ? 'job_stalled_exhausted' : 'job_stalled_auto_recovered',
-            message: exhausted
-              ? `Trabalho travado (${job.year} ${job.make} ${job.model}) esgotou as tentativas de retry (${job.retryCount}/${job.maxRetries}) e foi marcado como erro pelo Health Monitor.`
-              : `Trabalho travado há ${elapsedMinutes} min (${job.year} ${job.make} ${job.model}) foi recuperado automaticamente pelo Health Monitor.`,
-            attemptCount: job.attemptCount,
-          }, {telegramBotToken:job.alertTelegramToken,telegramChatId:job.alertTelegramChatId,webhookUrl:job.alertWebhookUrl})
+          void sendCriticalAlert(
+            {
+              jobId: job.id,
+              accountLabel: job.accountLabel,
+              type: exhausted ? 'job_stalled_exhausted' : 'job_stalled_auto_recovered',
+              message: exhausted
+                ? `Trabalho travado (${job.year} ${job.make} ${job.model}) esgotou as tentativas de retry (${job.retryCount}/${job.maxRetries}) e foi marcado como erro pelo Health Monitor.`
+                : `Trabalho travado há ${elapsedMinutes} min (${job.year} ${job.make} ${job.model}) foi recuperado automaticamente pelo Health Monitor.`,
+              attemptCount: job.attemptCount,
+            },
+            {
+              telegramBotToken: job.alertTelegramToken,
+              telegramChatId: job.alertTelegramChatId,
+              webhookUrl: job.alertWebhookUrl,
+            },
+          )
         }
       } catch (err) {
-        logger.warn('HealthMonitor', `Erro no processamento de job travado #${job.id}`, { error: err })
+        logger.warn('HealthMonitor', `Erro no processamento de job travado #${job.id}`, {
+          error: err,
+        })
       }
     }
   }
 
   // 4. Contar erros recentes nas últimas 2 horas
   const recentErrors = db
-    .prepare(`
+    .prepare(
+      `
       SELECT COUNT(*) count FROM publication_jobs
       WHERE status = 'error' AND datetime(updated_at) >= datetime('now', '-2 hours')
-    `)
+    `,
+    )
     .get() as { count?: number } | undefined
 
   const recentErrorsCount = Number(recentErrors?.count || 0)
@@ -213,10 +255,7 @@ export async function runHealthCheck(
   }
 }
 
-export function startHealthMonitor(
-  db: DatabaseSync,
-  intervalMs = 60000
-): void {
+export function startHealthMonitor(db: DatabaseSync, intervalMs = 60000): void {
   if (monitorTimer) return
 
   monitorTimer = setInterval(async () => {

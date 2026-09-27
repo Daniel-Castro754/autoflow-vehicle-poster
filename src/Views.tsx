@@ -1,314 +1,3131 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
-import { Activity, ArrowDown, ArrowLeftRight, ArrowUp, BarChart3, Bell, Bot, CalendarClock, CalendarX, Camera, Car, Check, CircleAlert, Clock3, Eye, EyeOff, ExternalLink, Filter, Gauge, History, Laptop, ListChecks, Moon, Palette, Pause, Play, Plus, RotateCcw, Save, Search, Send, Settings, ShieldCheck, Sparkles, Sun, TrendingUp, Users, WalletCards, Wifi, WifiOff, X } from 'lucide-react'
+import {
+  Activity,
+  ArrowDown,
+  ArrowLeftRight,
+  ArrowUp,
+  BarChart3,
+  Bell,
+  Bot,
+  CalendarClock,
+  CalendarX,
+  Camera,
+  Car,
+  Check,
+  CircleAlert,
+  Clock3,
+  Eye,
+  EyeOff,
+  ExternalLink,
+  Filter,
+  Gauge,
+  History,
+  Laptop,
+  ListChecks,
+  Moon,
+  Palette,
+  Pause,
+  Play,
+  Plus,
+  RotateCcw,
+  Save,
+  Search,
+  Send,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  Sun,
+  TrendingUp,
+  Users,
+  WalletCards,
+  Wifi,
+  WifiOff,
+  X,
+} from 'lucide-react'
 import { FieldLabel, HelpTip } from './HelpTip'
 
-type ApiFn = <T=Record<string,unknown>>(path:string, options?:RequestInit) => Promise<T>
-type Vehicle = {id:number;year:number;make:string;model:string;price:number;km:number;status:string;seller:string;imageCount?:number;updatedAt?:string}
-type AccountOption={id:number;label:string;owner?:string}
-type OverviewData={vehicleStats?:{inventoryValue?:number;total?:number;published?:number;ready?:number;attention?:number}}
-type InventoryValues={total:number;inventoryValue:number;published:number;attention:number;withPhotos:number;publishedStatus:number;readyStatus:number;draftStatus:number;attentionStatus:number;soldStatus:number;noPhotos:number;photos1to4:number;photos5to9:number;photos10plus:number}
-type InventoryStats=InventoryValues & {sellers:Array<InventoryValues & {name:string}>}
-type SettingsData={organization:{name:string};settings:{defaultLocation?:string;dailyLimit?:number;stuckTimeoutMinutes?:number;descriptionTemplate?:string;autoAdvance?:boolean;fillGroups?:boolean;autoPublish?:boolean;groups?:MarketplaceGroup[];autoRetry?:boolean;maxRetries?:number;alertTelegramToken?:string;alertTelegramChatId?:string;alertWebhookUrl?:string;autoCurateGroups?:boolean;geminiApiKey?:string;openaiApiKey?:string;aiProvider?:string}}
-type JobEventDetails={missing?:string[];missingGroups?:string[];flowIssues?:string[];scheduledAt?:string;accountLabel?:string;direction?:string;position?:number;total?:number;intervalMinutes?:number;error?:string;filledCount?:number;totalCount?:number;imageCount?:number;selectedGroups?:number;elapsedMinutes?:number;status?:string}
-type FillReport={filledCount:number;totalCount:number;imageCount:number;missing:string[];fields:Array<{name:string;ok:boolean}>;advanced?:boolean;selectedGroups?:string[];missingGroups?:string[];flowIssues?:string[];published?:boolean;publishAttempted?:boolean;saleInterrupted?:boolean}
-type Job = {id:number;status:string;vehicleId:number;year:number;make:string;model:string;price:number;accountId:number;accountLabel:string;previousAccountLabel?:string;reassignedAt?:string;seller:string;createdAt:string;scheduledAt?:string;resultUrl?:string;errorCode?:string;extensionVersion?:string;extensionVisible?:number;queuePriority?:number;paused?:number;fillReport?:FillReport|null;removedAt?:string;retryCount?:number;maxRetries?:number}
-type JobPage={jobs:Job[];pagination:{totalItems:number;totalPages:number;currentPage:number;pageSize:number}}
-type ReportPerformance={summary:{total:number;completed:number;errors:number;active:number;automatic:number;groupsSelected:number};sellerPerformance:Array<{name:string;total:number;done:number;rate:number}>;profilePerformance:Array<{name:string;total:number;done:number;fail:number;rate:number}>;sellerOptions:string[];recent:Job[]}
-type GlobalStats={publications:{total:number;pending:number;completed:number;errors:number;extensionAvailable:number;scheduled:number}}
-type JobEvent={id:number;eventType:string;details:JobEventDetails;createdAt:string;actor:string;fromAccount?:string;toAccount?:string}
-type ReportIssue={eventId:number;jobId:number;jobStatus:string;extensionVersion:string;year:number;make:string;model:string;accountLabel:string;seller:string;occurredAt:string;severity:'error'|'warning';category:'execution'|'fields'|'groups'|'flow'|'recovery'|'duplicate';message:string;active:boolean}
-type IssuePage={issues:ReportIssue[];page:{limit:number;hasMore:boolean;nextCursor:number|null}}
-type AutomationProfile={id:number;label:string;browserProfile:string;owner:string;online:boolean;lastSeenAt?:string;today:number;dailyLimit:number;successes:number;failures:number;stage:string;currentJob?:{id:number;status:string;paused?:boolean;scheduledAt?:string;attemptCount:number;extensionVersion:string;startedAt?:string;updatedAt?:string;publishAttempted?:boolean;year:number;make:string;model:string;durationSeconds:number;stalled?:boolean;stuckTimeoutMinutes?:number;issues:string[]}|null}
-type MarketplaceGroup={id?:number;name:string;url:string;groupKey?:string;active:boolean;priority:number;successCount?:number;failureCount?:number;lastFoundAt?:string}
-const money = new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0})
-
-export function OverviewView({api,vehicles,navigate}:{api:ApiFn;vehicles:Vehicle[];navigate:(page:string)=>void}) {
-  const [data,setData]=useState<OverviewData|null>(null)
-  useEffect(()=>{api<OverviewData>('/overview').then(setData)},[api])
-  const stats=data?.vehicleStats||{}
-  return <section className="content">
-    <div className="title-row"><div><span className="page-kicker">PAINEL OPERACIONAL</span><h1>Visão geral</h1><p>Acompanhe o estoque e mantenha a equipe em movimento.</p></div><button className="primary" onClick={()=>navigate('Publicações')}><Send size={18}/>Abrir fila</button></div>
-    <div className="hero-card"><div><span>Valor estimado do estoque</span><strong>{money.format(Number(stats.inventoryValue||0))}</strong><p>{stats.total||vehicles.length} veículos ativos na operação</p></div><div className="hero-score"><strong>{stats.total?Math.round((Number(stats.published||0)/Number(stats.total))*100):0}%</strong><span>do estoque publicado</span></div></div>
-    <div className="stats overview-stats">
-      <article><span className="stat-icon blue"><Car/></span><div><small>Estoque ativo</small><strong>{stats.total??vehicles.length}</strong><em>veículos</em></div></article>
-      <article><span className="stat-icon green"><Check/></span><div><small>Publicados</small><strong>{stats.published||0}</strong><em>anúncios ativos</em></div></article>
-      <article><span className="stat-icon amber"><Clock3/></span><div><small>Prontos para fila</small><strong>{stats.ready||0}</strong><em>aguardando ação</em></div></article>
-      <article><span className="stat-icon red"><CircleAlert/></span><div><small>Pendências</small><strong>{stats.attention||0}</strong><em>requer revisão</em></div></article>
-    </div>
-    <div className="overview-grid"><article className="module-card"><div className="module-head"><div><h2>Estoque recente</h2><span>Últimos veículos atualizados</span></div><button onClick={()=>navigate('Veículos')}>Ver todos</button></div><div className="compact-list">{vehicles.slice(0,4).map(v=><div key={v.id}><span className="mini-car"><Car/></span><div><strong>{v.year} {v.make} {v.model}</strong><small>{money.format(v.price)} · {v.seller}</small></div><span className={`simple-status ${v.status.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}`}>{v.status}</span></div>)}</div></article>
-      <article className="module-card quick-card"><div className="module-head"><div><h2>Ações rápidas</h2><span>Atalhos da operação</span></div></div><button onClick={()=>navigate('Veículos')}><Car/><div><strong>Gerenciar estoque</strong><small>Cadastre e revise veículos</small></div><ExternalLink/></button><button onClick={()=>navigate('Publicações')}><Send/><div><strong>Preparar publicações</strong><small>Distribua veículos por perfil</small></div><ExternalLink/></button><button onClick={()=>navigate('Equipe e contas')}><Users/><div><strong>Equipe e contas</strong><small>Gerencie acessos e perfis</small></div><ExternalLink/></button></article></div>
-  </section>
+type ApiFn = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
+type Vehicle = {
+  id: number
+  year: number
+  make: string
+  model: string
+  price: number
+  km: number
+  status: string
+  seller: string
+  imageCount?: number
+  updatedAt?: string
 }
-
-export function PublicationsView({api,reload}:{api:ApiFn;reload:()=>Promise<void>}) {
-  const [accounts,setAccounts]=useState<AccountOption[]>([]),[profiles,setProfiles]=useState<AutomationProfile[]>([]),[canManageQueue,setCanManageQueue]=useState(false),[view,setView]=useState<'central'|'queue'>('central'),[open,setOpen]=useState(false),[scheduleJob,setScheduleJob]=useState<Job|null>(null),[batchScheduleIds,setBatchScheduleIds]=useState<number[]|null>(null),[batchInterval,setBatchInterval]=useState(30),[batchStart,setBatchStart]=useState(''),[reassignIds,setReassignIds]=useState<number[]|null>(null),[timelineJob,setTimelineJob]=useState<Job|null>(null),[timelineEvents,setTimelineEvents]=useState<JobEvent[]>([]),[timelineLoading,setTimelineLoading]=useState(false),[message,setMessage]=useState(''),[selected,setSelected]=useState<Set<number>>(new Set()),[clock,setClock]=useState(()=>Date.now()),[queueSearch,setQueueSearch]=useState(''),[queueStatus,setQueueStatus]=useState('all'),[queueAccount,setQueueAccount]=useState('all'),[queueSituation,setQueueSituation]=useState('all')
-  const [pageJobs,setPageJobs]=useState<Job[]>([]),[queuePage,setQueuePage]=useState(1),[queuePageLoading,setQueuePageLoading]=useState(true),[queuePagination,setQueuePagination]=useState({totalItems:0,totalPages:1,currentPage:1,pageSize:25})
-  const deferredQueueSearch=useDeferredValue(queueSearch)
-  const [vehicleSearch,setVehicleSearch]=useState('')
-  const [vehicleOptions,setVehicleOptions]=useState<Vehicle[]>([])
-  const [selectedVehicleId,setSelectedVehicleId]=useState('')
-  const deferredVehicleSearch=useDeferredValue(vehicleSearch)
-  const [publicationStats,setPublicationStats]=useState({total:0,pending:0,completed:0,errors:0,extensionAvailable:0,scheduled:0}),[refreshVersion,setRefreshVersion]=useState(0)
-  const load=useCallback(()=>Promise.all([api<{accounts:AccountOption[];canManageQueue:boolean}>('/team'),api<{profiles:AutomationProfile[]}>('/automation/overview'),api<GlobalStats>('/stats/global')]).then(([t,a,g])=>{
-    setAccounts(t.accounts);setCanManageQueue(Boolean(t.canManageQueue));setProfiles(a.profiles);setPublicationStats(g.publications);setRefreshVersion(value=>value+1);setSelected(new Set())
-  }),[api])
-  useEffect(()=>{void load().catch(error=>setMessage(error instanceof Error?error.message:'Não foi possível carregar as publicações.'));const timer=window.setInterval(()=>api<{profiles:AutomationProfile[]}>('/automation/overview').then(result=>{setProfiles(result.profiles);setClock(Date.now())}).catch(()=>{}),15000);return()=>window.clearInterval(timer)},[api,load])
-  useEffect(()=>{let active=true;const params=new URLSearchParams({page:String(queuePage),limit:'25',query:deferredQueueSearch,status:queueStatus,account:queueAccount,situation:queueSituation});void api<JobPage>(`/publications/paged?${params}`).then(result=>{if(!active)return;setPageJobs(result.jobs);setQueuePagination(result.pagination);if(result.pagination.currentPage!==queuePage)setQueuePage(result.pagination.currentPage)}).catch(error=>{if(active)setMessage(error instanceof Error?error.message:'Não foi possível carregar a página da fila.')}).finally(()=>{if(active)setQueuePageLoading(false)});return()=>{active=false}},[api,queuePage,deferredQueueSearch,queueStatus,queueAccount,queueSituation,refreshVersion])
-  useEffect(()=>{if(!open)return;let active=true;const params=new URLSearchParams({page:'1',limit:'25',query:deferredVehicleSearch,status:'Todos'});void api<{vehicles:Vehicle[]}>(`/vehicles/paged?${params}`).then(result=>{if(active)setVehicleOptions(result.vehicles.filter(vehicle=>vehicle.status!=='Publicado'&&vehicle.status!=='Vendido'))}).catch(error=>{if(active)setMessage(error instanceof Error?error.message:'Não foi possível buscar veículos.')});return()=>{active=false}},[api,open,deferredVehicleSearch])
-  async function enqueue(e:React.FormEvent<HTMLFormElement>){e.preventDefault();const f=new FormData(e.currentTarget),schedule=String(f.get('scheduledAt')||'');try{await api('/publications',{method:'POST',body:JSON.stringify({vehicleId:Number(selectedVehicleId),accountId:f.get('accountId')?Number(f.get('accountId')):null,scheduledAt:schedule?new Date(schedule).toISOString():null})});setOpen(false);setMessage(schedule?'Veículo agendado e adicionado à fila.':'Veículo adicionado à fila.');await load();await reload()}catch(err){const missing=(err as {missing?:string[]})?.missing;setMessage(missing?.length?`Complete antes de publicar: ${missing.join(', ')}.`:err instanceof Error?err.message:'Erro ao criar publicação')}}
-  async function update(id:number,status:string){
-    const current=pageJobs.find(job=>job.id===id),confirmNoPublication=status==='pending'&&Boolean(current?.fillReport?.publishAttempted)
-    if(confirmNoPublication&&!window.confirm('Confirme primeiro em “Seus classificados” que o anúncio NÃO foi criado. Liberar uma nova tentativa sem verificar pode gerar um anúncio duplicado.'))return
-    try{
-      await api(`/publications/${id}`,{method:'PATCH',body:JSON.stringify({status,confirmNoPublication})});await load();await reload()
-      const labels:Record<string,string>={pending:'Trabalho devolvido à fila.',completed:'Publicação confirmada.',removed:'Anúncio marcado como removido.',canceled:'Trabalho cancelado; veículo preservado como vendido.'}
-      setMessage(labels[status]||'Publicação atualizada.')
-    }catch(error){setMessage(error instanceof Error?error.message:'Não foi possível atualizar a publicação.')}
+type AccountOption = { id: number; label: string; owner?: string }
+type OverviewData = {
+  vehicleStats?: {
+    inventoryValue?: number
+    total?: number
+    published?: number
+    ready?: number
+    attention?: number
   }
-  async function changeExtensionVisibility(ids:number[],visible:boolean){if(!ids.length)return;try{await api('/publications/extension-visibility',{method:'PATCH',body:JSON.stringify({ids,visible})});setSelected(new Set());setMessage(visible?`${ids.length} veículo${ids.length===1?'':'s'} devolvido${ids.length===1?'':'s'} à extensão.`:`${ids.length} veículo${ids.length===1?'':'s'} removido${ids.length===1?'':'s'} da extensão.`);await load()}catch(err){setMessage(err instanceof Error?err.message:'Erro ao atualizar a fila da extensão')}}
-  async function changeQueueState(ids:number[],paused:boolean){if(!ids.length)return;try{await api('/publications/queue-state',{method:'PATCH',body:JSON.stringify({ids,action:paused?'pause':'resume'})});setSelected(new Set());setMessage(`${ids.length} trabalho${ids.length===1?'':'s'} ${paused?'pausado':'retomado'}${ids.length===1?'':'s'}.`);await load()}catch(err){setMessage(err instanceof Error?err.message:'Erro ao atualizar os trabalhos')}}
-  async function movePriority(id:number,direction:'up'|'down'){try{await api(`/publications/${id}/priority`,{method:'PATCH',body:JSON.stringify({direction})});await load()}catch(err){setMessage(err instanceof Error?err.message:'Erro ao alterar a prioridade')}}
-  async function saveSchedule(e:React.FormEvent<HTMLFormElement>){e.preventDefault();if(!scheduleJob)return;const value=String(new FormData(e.currentTarget).get('scheduledAt')||'');try{await api(`/publications/${scheduleJob.id}/schedule`,{method:'PATCH',body:JSON.stringify({scheduledAt:value?new Date(value).toISOString():null})});setMessage(value?'Agendamento atualizado.':'Agendamento removido; o trabalho está disponível agora.');setScheduleJob(null);await load()}catch(err){setMessage(err instanceof Error?err.message:'Erro ao atualizar o agendamento')}}
-  async function clearSchedule(job:Job){try{await api(`/publications/${job.id}/schedule`,{method:'PATCH',body:JSON.stringify({scheduledAt:null})});setScheduleJob(null);setMessage('Agendamento removido; o trabalho está disponível agora.');await load()}catch(err){setMessage(err instanceof Error?err.message:'Erro ao remover o agendamento')}}
-  async function smartScheduleSingle(jobId:number){try{const res=await api<{ok:boolean;scheduledAt:string;window:string;confidence:number}>(`/publications/${jobId}/smart-schedule`,{method:'POST'});const time=new Date(res.scheduledAt).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});setMessage(`Trabalho agendado com IA para ${time} (Janela: ${res.window}).`);await load()}catch(err){setMessage(err instanceof Error?err.message:'Erro ao agendar com IA')}}
-  async function smartScheduleBatch(ids:number[]){if(!ids.length)return;try{const res=await api<{ok:boolean;updated:number}>('/publications/smart-schedule-batch',{method:'POST',body:JSON.stringify({ids})});setMessage(`${res.updated} trabalhos agendados de forma inteligente nos horários de pico.`);setSelected(new Set());await load()}catch(err){setMessage(err instanceof Error?err.message:'Erro ao agendar lote com IA')}}
-  function openBatchSchedule(ids:number[]){const ordered=pageJobs.filter(job=>ids.includes(job.id)).map(job=>job.id);setBatchScheduleIds(ordered);setBatchStart(dateTimeLocal(new Date(clock+5*60000).toISOString()));setBatchInterval(30)}
-  async function saveBatchSchedule(e:React.FormEvent<HTMLFormElement>){e.preventDefault();if(!batchScheduleIds?.length)return;try{const result=await api<{updated:number;intervalMinutes:number}>('/publications/schedule-batch',{method:'PATCH',body:JSON.stringify({ids:batchScheduleIds,startAt:new Date(batchStart).toISOString(),intervalMinutes:batchInterval})});setMessage(`${result.updated} trabalhos agendados em sequência, com intervalo de ${result.intervalMinutes} min.`);setBatchScheduleIds(null);setSelected(new Set());await load()}catch(err){setMessage(err instanceof Error?err.message:'Erro ao agendar a sequência')}}
-  async function saveReassignment(e:React.FormEvent<HTMLFormElement>){e.preventDefault();if(!reassignIds?.length)return;const accountId=Number(new FormData(e.currentTarget).get('accountId'));try{await api('/publications/reassign',{method:'PATCH',body:JSON.stringify({ids:reassignIds,accountId})});setMessage(`${reassignIds.length} trabalho${reassignIds.length===1?'':'s'} redistribuído${reassignIds.length===1?'':'s'} com sucesso.`);setReassignIds(null);setSelected(new Set());await load()}catch(err){setMessage(err instanceof Error?err.message:'Erro ao redistribuir os trabalhos')}}
-  async function openTimeline(job:Job){setTimelineJob(job);setTimelineEvents([]);setTimelineLoading(true);try{const result=await api<{events:JobEvent[]}>(`/publications/${job.id}/timeline`);setTimelineEvents(result.events)}catch(err){setMessage(err instanceof Error?err.message:'Erro ao carregar o histórico');setTimelineJob(null)}finally{setTimelineLoading(false)}}
-  async function recoverStalled(jobId:number){try{await api(`/publications/${jobId}/recover`,{method:'POST'});setMessage('Trabalho recuperado e devolvido ao início da fila.');await load()}catch(err){setMessage(err instanceof Error?err.message:'Erro ao recuperar o trabalho')}}
-  function toggleSelected(id:number){setSelected(current=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next})}
-  const extensionStatuses=['pending','filling','error','awaiting_confirmation']
-  const filteredJobs=pageJobs
-  const activeJobs=filteredJobs.filter(job=>extensionStatuses.includes(job.status)&&job.status!=='filling')
-  const allExtensionSelected=activeJobs.length>0&&activeJobs.every(job=>selected.has(job.id))
-  const pending=publicationStats.pending,completed=publicationStats.completed,errors=publicationStats.errors
-  const scheduledCount=publicationStats.scheduled
-  const eligibleReassignAccounts=reassignIds?accounts.filter(account=>reassignIds.every(id=>pageJobs.find(job=>job.id===id)?.accountId!==account.id)):[]
-  const onlineProfiles=profiles.filter(profile=>profile.online).length
-  const activeProfiles=profiles.filter(profile=>profile.currentJob&&!profile.currentJob.paused&&!profile.currentJob.stalled&&(!profile.currentJob.scheduledAt||new Date(profile.currentJob.scheduledAt).getTime()<=clock)&&['pending','filling','awaiting_confirmation'].includes(profile.currentJob.status)).length
-  const stalledProfiles=profiles.filter(profile=>profile.currentJob?.stalled).length
-  const formatDuration=(seconds:number)=>seconds<60?`${seconds}s`:seconds<3600?`${Math.floor(seconds/60)}min`:`${Math.floor(seconds/3600)}h ${Math.floor(seconds%3600/60)}min`
-  const lastSeen=(value?:string)=>{if(!value)return'Nunca conectado';const elapsed=Math.max(0,clock-new Date(value.replace(' ','T')+'Z').getTime());return elapsed<60000?'Agora':elapsed<3600000?`Há ${Math.floor(elapsed/60000)} min`:`Há ${Math.floor(elapsed/3600000)}h`}
-  const dateTimeLocal=(value?:string)=>{const date=value?new Date(value):new Date(clock+60000);return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16)}
-  return <section className="content"><div className="title-row"><div><span className="page-kicker">CONTROLE DE SAÍDA</span><h1>Publicações</h1><p>Organize o que cada perfil deve publicar no Brave.</p></div><div className="action-with-help"><button className="primary" onClick={()=>setOpen(true)}><Plus size={18}/>Adicionar à fila</button><HelpTip text="A fila distribui um veículo para um perfil local do Brave e respeita o fluxo definido em Configurações." placement="bottom"/></div></div>
-    {message&&<div className="inline-message">{message}<button onClick={()=>setMessage('')}><X/></button></div>}
-    <div className="stats"><article><span className="stat-icon amber"><Clock3/></span><div><small>Pendentes</small><strong>{pending}</strong><em>na fila</em></div></article><article><span className="stat-icon green"><Check/></span><div><small>Concluídas</small><strong>{completed}</strong><em>confirmadas</em></div></article><article><span className="stat-icon red"><CircleAlert/></span><div><small>Com erro</small><strong>{errors}</strong><em>requer atenção</em></div></article><article><span className="stat-icon blue"><Laptop/></span><div><small>Perfis locais</small><strong>{accounts.length}</strong><em>associados</em></div></article></div>
-    <div className="publication-view-tabs"><button className={view==='central'?'active':''} onClick={()=>setView('central')}><Activity/>Central de automação</button><button className={view==='queue'?'active':''} onClick={()=>setView('queue')}><ListChecks/>Fila e histórico</button><button className="refresh-view" onClick={()=>load()}><RotateCcw/>Atualizar</button></div>
-    {view==='central'?<div className="automation-center"><div className="automation-summary"><div><Wifi/><span><strong>{onlineProfiles}/{profiles.length}</strong><small>perfis online</small></span></div><div><Activity/><span><strong>{activeProfiles}</strong><small>em operação</small></span></div><div><Gauge/><span><strong>{profiles.reduce((sum,profile)=>sum+profile.today,0)}</strong><small>trabalhos hoje</small></span></div>{stalledProfiles>0&&<div className="summary-stalled"><CircleAlert/><span><strong>{stalledProfiles}</strong><small>travado{stalledProfiles===1?'':'s'}</small></span></div>}<small>Atualização automática a cada 15 segundos · perfil online quando visto nos últimos 5 minutos</small></div><div className="automation-profile-grid">{profiles.map(profile=>{const job=profile.currentJob,usage=Math.min(100,Math.round(profile.today/Math.max(1,profile.dailyLimit)*100));return <article key={profile.id} className={`automation-profile ${profile.online?'online':'offline'} ${job?.stalled?'stalled':''}`}><div className="profile-live-head"><span className="profile-device"><Laptop/></span><div><strong>{profile.label}</strong><small>{profile.browserProfile} · {profile.owner}</small></div><span className="live-state">{profile.online?<><Wifi/>Online</>:<><WifiOff/>Offline</>}</span></div><div className="profile-stage"><span>Etapa atual</span><strong>{profile.stage}</strong>{job?<small>{job.year} {job.make} {job.model} · trabalho #{job.id}</small>:<small>Nenhum trabalho registrado</small>}</div>{job&&<div className="profile-job-metrics"><span><b>{job.attemptCount}</b><small>tentativas</small></span><span><b>{formatDuration(job.durationSeconds)}</b><small>{job.status==='filling'?'em execução':'desde o início'}</small></span><span><b>{job.extensionVersion||'—'}</b><small>extensão</small></span></div>}<div className="daily-cap"><span><small>Uso diário</small><b>{profile.today}/{profile.dailyLimit}</b></span><i><b style={{width:`${usage}%`}}/></i></div>{job?.issues?.length?<div className="profile-issues"><CircleAlert/><span><strong>{job.issues.length} ponto{job.issues.length===1?'':'s'} para revisar</strong><small>{job.issues.slice(0,2).join(' · ')}</small></span></div>:<div className="profile-ok"><Check/>Nenhuma falha registrada no último trabalho</div>}<div className="profile-card-foot"><span>{lastSeen(profile.lastSeenAt)}</span>{job?.stalled?<button className="recover-stalled" onClick={()=>recoverStalled(job.id)}><RotateCcw/>Recuperar trabalho</button>:job&&['error','awaiting_confirmation'].includes(job.status)&&<button onClick={()=>update(job.id,'pending')}><RotateCcw/>Tentar novamente</button>}</div></article>})}{!profiles.length&&<div className="empty">Associe um perfil do Brave para acompanhar a automação.</div>}</div></div>:<div className="panel"><div className="queue-filters"><label className="queue-search"><Search/><input value={queueSearch} onChange={event=>{setQueueSearch(event.target.value);setQueuePage(1);setSelected(new Set())}} placeholder="Buscar veículo, responsável, perfil ou nº do trabalho" aria-label="Buscar trabalhos na fila"/>{queueSearch&&<button onClick={()=>{setQueueSearch('');setQueuePage(1);setSelected(new Set())}} aria-label="Limpar busca"><X/></button>}</label><select value={queueStatus} onChange={event=>{setQueueStatus(event.target.value);setQueuePage(1);setSelected(new Set())}} aria-label="Filtrar por status"><option value="all">Todos os status</option><option value="pending">Pendente</option><option value="filling">Preenchendo</option><option value="awaiting_confirmation">Aguardando confirmação</option><option value="error">Com erro</option><option value="completed">Concluído</option><option value="canceled">Cancelado</option><option value="removed">Anúncio removido</option></select><select value={queueAccount} onChange={event=>{setQueueAccount(event.target.value);setQueuePage(1);setSelected(new Set())}} aria-label="Filtrar por perfil"><option value="all">Todos os perfis</option>{accounts.map(account=><option key={account.id} value={account.id}>{account.label}</option>)}</select><select value={queueSituation} onChange={event=>{setQueueSituation(event.target.value);setQueuePage(1);setSelected(new Set())}} aria-label="Filtrar por situação"><option value="all">Todas as situações</option><option value="available">Disponível na extensão</option><option value="scheduled">Agendado</option><option value="paused">Pausado</option><option value="stalled">Travado</option><option value="hidden">Fora da extensão</option></select>{(queueSearch||queueStatus!=='all'||queueAccount!=='all'||queueSituation!=='all')&&<button className="clear-queue-filters" onClick={()=>{setQueueSearch('');setQueueStatus('all');setQueueAccount('all');setQueueSituation('all');setQueuePage(1);setSelected(new Set())}}><X/>Limpar filtros</button>}</div><div className="pub-tabs"><strong>{filteredJobs.length===queuePagination.totalItems?'Todas':'Resultados'}</strong><span>{filteredJobs.length} de {queuePagination.totalItems} registros</span><small>{publicationStats.extensionAvailable} disponíveis na extensão</small><small>{scheduledCount} agendado{scheduledCount===1?'':'s'}</small><button onClick={()=>load()}><RotateCcw size={15}/>Atualizar</button></div>{selected.size>0&&<div className="bulk-bar"><div><Check/><strong>{selected.size}</strong><span>selecionado{selected.size===1?'':'s'}</span></div><HelpTip text="Pausar preserva o trabalho e o histórico, mas impede que a extensão o processe até ser retomado." placement="bottom"/><button onClick={()=>changeQueueState([...selected],true)}><Pause/>Pausar</button><button onClick={()=>changeQueueState([...selected],false)}><Play/>Retomar</button>{selected.size>1&&<button onClick={()=>openBatchSchedule([...selected])}><CalendarClock/>Agendar sequência</button>}<button onClick={()=>smartScheduleBatch([...selected])} title="Distribuição inteligente nas janelas de pico"><Sparkles size={14}/>Agendar com IA</button>{canManageQueue&&<button onClick={()=>setReassignIds([...selected])}><ArrowLeftRight/>Trocar perfil</button>}<button onClick={()=>changeExtensionVisibility([...selected],false)}><EyeOff/>Remover da extensão</button><button className="bulk-clear" onClick={()=>setSelected(new Set())}><X/>Limpar</button></div>}<div className="table-wrap"><table><thead><tr><th className="check-cell"><input type="checkbox" checked={allExtensionSelected} disabled={!activeJobs.length} onChange={()=>setSelected(allExtensionSelected?new Set():new Set(activeJobs.map(job=>job.id)))} aria-label="Selecionar todos os trabalhos ativos"/></th><th>VEÍCULO</th><th>RESPONSÁVEL</th><th>PERFIL</th><th>STATUS</th><th>EXECUÇÃO</th><th>AÇÕES</th></tr></thead><tbody>{filteredJobs.map(j=>{const active=extensionStatuses.includes(j.status),controllable=['pending','error','awaiting_confirmation'].includes(j.status),visible=j.extensionVisible!==0,scheduled=Boolean(j.scheduledAt&&new Date(j.scheduledAt).getTime()>clock);return <tr key={j.id} className={`${selected.has(j.id)?'selected-row ':''}${j.paused?'paused-row ':''}${scheduled?'scheduled-row':''}`}><td className="check-cell"><input type="checkbox" checked={selected.has(j.id)} disabled={!controllable} onChange={()=>toggleSelected(j.id)} aria-label={`Selecionar ${j.year} ${j.make} ${j.model} na fila`}/></td><td><strong>{j.year} {j.make} {j.model}</strong><small className="table-sub">{money.format(j.price)} · trabalho #{j.id}{active?` · prioridade ${j.queuePriority||'—'}`:''}</small></td><td>{j.seller}</td><td>{j.accountLabel}{j.previousAccountLabel&&<small className="reassignment-note"><ArrowLeftRight/>Veio de {j.previousAccountLabel}</small>}<small className={`extension-presence ${j.paused?'paused':scheduled?'scheduled':active&&visible?'visible':'hidden'}`}>{j.paused?<><Pause/>Pausado</>:scheduled?<><CalendarClock/>Agendado</>:active&&visible?<><Eye/>Na extensão</>:active?<><EyeOff/>Fora da extensão</>:null}</small></td><td><div className="job-status-cell"><JobBadge status={j.paused?'paused':scheduled?'scheduled':j.status} retryCount={j.retryCount} maxRetries={j.maxRetries}/><JobReport job={j}/></div></td><td className="muted execution-cell">{scheduled?<><strong>{new Date(j.scheduledAt!).toLocaleDateString('pt-BR')}</strong><small>{new Date(j.scheduledAt!).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</small></>:<><strong>Agora</strong><small>{new Date(j.createdAt+'Z').toLocaleDateString('pt-BR')}</small></>}</td><td><div className="job-actions">{controllable&&<span className="priority-actions"><button title="Subir prioridade" aria-label={`Subir prioridade de ${j.year} ${j.make} ${j.model}`} onClick={()=>movePriority(j.id,'up')}><ArrowUp/></button><button title="Descer prioridade" aria-label={`Descer prioridade de ${j.year} ${j.make} ${j.model}`} onClick={()=>movePriority(j.id,'down')}><ArrowDown/></button></span>}{controllable&&canManageQueue&&<button onClick={()=>setReassignIds([j.id])}><ArrowLeftRight/>Trocar perfil</button>}{controllable&&<button onClick={()=>setScheduleJob(j)}><CalendarClock/>{scheduled?'Alterar horário':'Agendar'}</button>}{controllable&&<button onClick={()=>smartScheduleSingle(j.id)} title="Agendar na melhor janela de pico com anti-bot"><Sparkles size={12}/>Agendar IA</button>}{controllable&&scheduled&&<button onClick={()=>clearSchedule(j)}><CalendarX/>Liberar agora</button>}{controllable&&(j.paused?<button onClick={()=>changeQueueState([j.id],false)}><Play/>Retomar</button>:<button onClick={()=>changeQueueState([j.id],true)}><Pause/>Pausar</button>)}{j.status==='awaiting_confirmation'&&<><button onClick={()=>update(j.id,'completed')}><Check/>Confirmar publicado</button>{j.fillReport?.saleInterrupted?<button onClick={()=>update(j.id,'canceled')}><X/>Confirmar que não foi publicado</button>:<button onClick={()=>update(j.id,'pending')}><RotateCcw/>Preencher novamente</button>}</>}{j.status==='completed'&&<button onClick={()=>update(j.id,'removed')}><X/>Marcar anúncio removido</button>}{j.status==='error'&&<button onClick={()=>update(j.id,'pending')}><RotateCcw/>Tentar novamente</button>}{active&&visible&&!j.paused&&<button className="danger-link" onClick={()=>changeExtensionVisibility([j.id],false)}><EyeOff/>Remover da extensão</button>}{active&&!visible&&<button onClick={()=>changeExtensionVisibility([j.id],true)}><Eye/>Mostrar na extensão</button>}<button onClick={()=>openTimeline(j)}><History/>Histórico</button></div></td></tr>})}</tbody></table>{!filteredJobs.length&&<div className="empty">{queuePagination.totalItems?'Nenhum trabalho corresponde aos filtros.':'A fila ainda está vazia. Adicione o primeiro veículo.'}</div>}</div><div className="panel-foot"><span>Página {queuePagination.currentPage} de {queuePagination.totalPages}</span><div><button disabled={queuePageLoading||queuePagination.currentPage<=1} onClick={()=>{setQueuePage(value=>Math.max(1,value-1));setSelected(new Set())}}>Anterior</button><button className="page">{queuePagination.currentPage}</button><button disabled={queuePageLoading||queuePagination.currentPage>=queuePagination.totalPages} onClick={()=>{setQueuePage(value=>Math.min(queuePagination.totalPages,value+1));setSelected(new Set())}}>Próximo</button></div></div></div>}
-    {open&&<div className="overlay" onMouseDown={()=>setOpen(false)}><aside className="drawer" onMouseDown={e=>e.stopPropagation()}><button className="close" onClick={()=>setOpen(false)}><X/></button><span className="eyebrow">NOVA PUBLICAÇÃO</span><h2>Adicionar à fila</h2><p>Escolha o veículo e o perfil local. A extensão seguirá as etapas habilitadas em Configurações.</p><form onSubmit={enqueue}><label><FieldLabel help="Busque no estoque; os resultados são consultados sob demanda e não exigem carregar toda a base.">Buscar veículo</FieldLabel><input value={vehicleSearch} onChange={event=>setVehicleSearch(event.target.value)} placeholder="Marca, modelo, ano ou responsável" aria-label="Buscar veículo para publicação"/></label><label><FieldLabel help="Somente veículos ainda não marcados como Publicado aparecem nesta lista.">Veículo</FieldLabel><select value={selectedVehicleId} onChange={event=>setSelectedVehicleId(event.target.value)} required><option value="">Selecione</option>{vehicleOptions.map(v=><option key={v.id} value={v.id}>{v.year} {v.make} {v.model}</option>)}</select>{!vehicleOptions.length&&<small>Nenhum veículo elegível encontrado nesta busca.</small>}</label><label><FieldLabel help="Cada perfil representa uma sessão local separada do Brave. O trabalho aparecerá somente quando este perfil estiver selecionado na extensão.">Perfil do Brave</FieldLabel><select name="accountId" required><option value="">Selecione o perfil responsável</option>{accounts.map(a=><option key={a.id} value={a.id}>{a.label}</option>)}</select></label><label><FieldLabel help="Opcional. Enquanto o horário não chegar, o trabalho permanece visível no painel, mas não aparece na extensão.">Agendar para</FieldLabel><input name="scheduledAt" type="datetime-local" min={dateTimeLocal()}/><small>Deixe vazio para liberar imediatamente</small></label><div className="drawer-submit-help"><HelpTip tone="warning" text="Confira em Configurações se Avançar, grupos e Publicar devem ser automáticos para esta operação."/><button className="primary" disabled={!selectedVehicleId}>Adicionar à fila</button></div></form></aside></div>}
-    {batchScheduleIds&&<div className="overlay" onMouseDown={()=>setBatchScheduleIds(null)}><aside className="drawer schedule-drawer batch-schedule-drawer" onMouseDown={event=>event.stopPropagation()}><button className="close" onClick={()=>setBatchScheduleIds(null)}><X/></button><span className="eyebrow">PROGRAMAÇÃO DA FILA</span><h2>Agendar sequência</h2><p>Distribua {batchScheduleIds.length} trabalhos em horários consecutivos. A ordem atual da fila será respeitada.</p><form onSubmit={saveBatchSchedule}><div className="settings-fields"><label><FieldLabel help="Horário de liberação do primeiro veículo selecionado.">Primeiro horário</FieldLabel><input type="datetime-local" min={dateTimeLocal()} value={batchStart} onChange={event=>setBatchStart(event.target.value)} required/></label><label><FieldLabel help="Tempo entre um trabalho e o próximo. Se um perfil já tiver outro agendamento próximo, o sistema move o horário adiante.">Intervalo em minutos</FieldLabel><input type="number" min="1" max="1440" value={batchInterval} onChange={event=>setBatchInterval(Number(event.target.value))} required/></label></div><div className="batch-schedule-preview">{batchScheduleIds.map((id,index)=>{const job=pageJobs.find(item=>item.id===id),time=batchStart?new Date(new Date(batchStart).getTime()+index*batchInterval*60000):null;return job?<span key={id}><b>{index+1}</b><div><strong>{job.year} {job.make} {job.model}</strong><small>{job.accountLabel}</small></div><time>{time&&!Number.isNaN(time.getTime())?time.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—'}</time></span>:null})}</div><small className="batch-conflict-note"><CalendarClock/>Conflitos no mesmo perfil serão deslocados automaticamente para o próximo intervalo livre.</small><div className="schedule-actions"><button type="button" className="secondary" onClick={()=>setBatchScheduleIds(null)}>Cancelar</button><button className="primary"><CalendarClock/>Confirmar sequência</button></div></form></aside></div>}
-    {scheduleJob&&<div className="overlay" onMouseDown={()=>setScheduleJob(null)}><aside className="drawer schedule-drawer" onMouseDown={event=>event.stopPropagation()}><button className="close" onClick={()=>setScheduleJob(null)}><X/></button><span className="eyebrow">CONTROLE DA FILA</span><h2>Agendar publicação</h2><p>{scheduleJob.year} {scheduleJob.make} {scheduleJob.model} · {scheduleJob.accountLabel}</p><form onSubmit={saveSchedule}><label><FieldLabel help="O horário usa o fuso deste computador. A extensão somente receberá o trabalho quando esse momento chegar.">Data e hora</FieldLabel><input name="scheduledAt" type="datetime-local" min={dateTimeLocal()} defaultValue={dateTimeLocal(scheduleJob.scheduledAt)} required/></label><div className="schedule-actions">{scheduleJob.scheduledAt&&<button type="button" className="secondary danger-link" onClick={()=>clearSchedule(scheduleJob)}><CalendarX/>Remover agendamento</button>}<button className="primary"><CalendarClock/>Salvar horário</button></div></form></aside></div>}
-    {reassignIds&&<div className="overlay" onMouseDown={()=>setReassignIds(null)}><aside className="drawer schedule-drawer" onMouseDown={event=>event.stopPropagation()}><button className="close" onClick={()=>setReassignIds(null)}><X/></button><span className="eyebrow">DISTRIBUIÇÃO DA FILA</span><h2>Trocar perfil responsável</h2><p>{reassignIds.length} trabalho{reassignIds.length===1?' será transferido':'s serão transferidos'} para o final da fila do novo perfil. Agendamento e histórico serão preservados.</p><form onSubmit={saveReassignment}><label><FieldLabel help="O perfil atual deixa de receber estes trabalhos imediatamente. O destino precisa ter espaço no limite diário.">Perfil de destino</FieldLabel><select name="accountId" required defaultValue=""><option value="">Selecione outro perfil</option>{eligibleReassignAccounts.map(account=><option key={account.id} value={account.id}>{account.label}{account.owner?` · ${account.owner}`:''}</option>)}</select>{!eligibleReassignAccounts.length&&<small className="field-error">Cadastre outro perfil do Brave para redistribuir estes trabalhos.</small>}</label><div className="reassign-preview">{reassignIds.slice(0,4).map(id=>{const job=pageJobs.find(item=>item.id===id);return job?<span key={id}><Car/>{job.year} {job.make} {job.model}<small>{job.accountLabel}</small></span>:null})}{reassignIds.length>4&&<em>+{reassignIds.length-4} trabalho{reassignIds.length-4===1?'':'s'}</em>}</div><div className="schedule-actions"><button type="button" className="secondary" onClick={()=>setReassignIds(null)}>Cancelar</button><button className="primary" disabled={!eligibleReassignAccounts.length}><ArrowLeftRight/>Confirmar transferência</button></div></form></aside></div>}
-    {timelineJob&&<div className="overlay" onMouseDown={()=>setTimelineJob(null)}><aside className="drawer timeline-drawer" onMouseDown={event=>event.stopPropagation()}><button className="close" onClick={()=>setTimelineJob(null)}><X/></button><span className="eyebrow">RASTREABILIDADE</span><h2>Linha do tempo</h2><p>{timelineJob.year} {timelineJob.make} {timelineJob.model} · trabalho #{timelineJob.id}</p><div className="timeline-profile"><Laptop/><span><small>Perfil atual</small><strong>{timelineJob.accountLabel}</strong></span></div>{timelineLoading?<div className="timeline-loading"><RotateCcw/>Carregando histórico...</div>:<div className="job-timeline">{timelineEvents.map(event=>{const presentation=jobEventPresentation(event);return <article key={`${event.id}-${event.createdAt}`} className={presentation.tone}><i>{presentation.icon}</i><div><strong>{presentation.title}</strong><p>{presentation.detail}</p><small>{event.actor} · {formatJobEventDate(event.createdAt)}</small></div></article>})}{!timelineEvents.length&&<div className="mini-empty">Nenhum evento registrado.</div>}</div>}</aside></div>}
-  </section>
 }
-function formatJobEventDate(value:string){const normalized=value.includes('T')?value:`${value.replace(' ','T')}Z`;return new Date(normalized).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}
-function jobEventPresentation(event:JobEvent){
-  const d=event.details||{},missing=[...(d.missing||[]),...(d.missingGroups||[]),...(d.flowIssues||[])]
-  const values:Record<string,{title:string;detail:string;tone:string;icon:string}>={
-    created:{title:'Adicionado à fila',detail:d.scheduledAt?`Criado com execução agendada para ${formatJobEventDate(String(d.scheduledAt))}.`:`Disponibilizado para o perfil ${d.accountLabel||'selecionado'}.`,tone:'success',icon:'+'},
-    paused:{title:'Trabalho pausado',detail:'A extensão deixou de receber este trabalho até uma retomada.',tone:'warning',icon:'Ⅱ'},
-    resumed:{title:'Trabalho retomado',detail:'O trabalho voltou a ficar disponível para a extensão.',tone:'success',icon:'▶'},
-    hidden_from_extension:{title:'Removido da extensão',detail:'Permaneceu salvo no painel e fora da lista do Brave.',tone:'warning',icon:'–'},
-    shown_in_extension:{title:'Devolvido à extensão',detail:'Voltou a aparecer no perfil responsável.',tone:'success',icon:'+'},
-    priority_changed:{title:'Prioridade alterada',detail:`Movido para ${d.direction==='up'?'cima':'baixo'} na ordem da fila.`,tone:'info',icon:'↕'},
-    scheduled:{title:'Execução agendada',detail:`Liberar para a extensão em ${formatJobEventDate(String(d.scheduledAt))}.`,tone:'info',icon:'◷'},
-    batch_scheduled:{title:'Incluído em sequência agendada',detail:`Posição ${d.position||'—'} de ${d.total||'—'}, prevista para ${formatJobEventDate(String(d.scheduledAt))} · intervalo de ${d.intervalMinutes||'—'} min.`,tone:'info',icon:'◷'},
-    schedule_removed:{title:'Agendamento removido',detail:'O trabalho foi liberado para execução imediata.',tone:'success',icon:'✓'},
-    reassigned:{title:'Perfil responsável alterado',detail:`Transferido de ${event.fromAccount||'outro perfil'} para ${event.toAccount||'novo perfil'}.`,tone:'info',icon:'⇄'},
-    filling_started:{title:'Preenchimento iniciado',detail:'A extensão abriu os dados deste veículo para preencher o Marketplace.',tone:'running',icon:'●'},
-    fill_error:{title:'Erro no preenchimento',detail:d.error||'A extensão encontrou uma falha e interrompeu esta tentativa.',tone:'error',icon:'!'},
-    filled_waiting_confirmation:{title:'Preenchimento concluído',detail:missing.length?`${d.filledCount||0}/${d.totalCount||0} campos; revisar: ${missing.slice(0,3).join(', ')}.`:`${d.filledCount||0}/${d.totalCount||0} campos e ${d.imageCount||0} fotos processados. Aguardando confirmação.`,tone:missing.length?'warning':'success',icon:missing.length?'!':'✓'},
-    auto_published:{title:'Publicado automaticamente',detail:`Publicação concluída${d.selectedGroups?` com ${d.selectedGroups} grupo${d.selectedGroups===1?'':'s'}`:''}.`,tone:'success',icon:'✓'},
-    sale_interrupted:{title:'Publicação interrompida por venda',detail:'Confira o resultado no Facebook. O veículo permanece vendido.',tone:'warning',icon:'!'},
-    confirmed_published:{title:'Publicação confirmada',detail:'Um usuário confirmou que o anúncio foi publicado.',tone:'success',icon:'✓'},
-    retry_requested:{title:'Nova tentativa solicitada',detail:'O trabalho voltou ao início da fila para ser preenchido novamente.',tone:'info',icon:'↻'},
-    canceled:{title:'Trabalho cancelado',detail:'O trabalho foi encerrado sem publicação.',tone:'error',icon:'×'},
-    marked_removed:{title:'Anúncio removido',detail:'O anúncio publicado foi marcado como removido.',tone:'warning',icon:'×'},
-    stalled_recovered:{title:'Trabalho travado recuperado',detail:`A execução anterior foi interrompida após ${d.elapsedMinutes||0} min e devolvida à fila.`,tone:'warning',icon:'↻'}
+type InventoryValues = {
+  total: number
+  inventoryValue: number
+  published: number
+  attention: number
+  withPhotos: number
+  publishedStatus: number
+  readyStatus: number
+  draftStatus: number
+  attentionStatus: number
+  soldStatus: number
+  noPhotos: number
+  photos1to4: number
+  photos5to9: number
+  photos10plus: number
+}
+type InventoryStats = InventoryValues & { sellers: Array<InventoryValues & { name: string }> }
+type SettingsData = {
+  organization: { name: string }
+  settings: {
+    defaultLocation?: string
+    dailyLimit?: number
+    stuckTimeoutMinutes?: number
+    descriptionTemplate?: string
+    autoAdvance?: boolean
+    fillGroups?: boolean
+    autoPublish?: boolean
+    groups?: MarketplaceGroup[]
+    autoRetry?: boolean
+    maxRetries?: number
+    alertTelegramToken?: string
+    alertTelegramChatId?: string
+    alertWebhookUrl?: string
+    autoCurateGroups?: boolean
+    geminiApiKey?: string
+    openaiApiKey?: string
+    aiProvider?: string
   }
-  return values[event.eventType]||{title:'Situação atualizada',detail:String(d.status||'O trabalho recebeu uma atualização.'),tone:'info',icon:'•'}
 }
-function JobBadge({status,retryCount,maxRetries}:{status:string;retryCount?:number;maxRetries?:number}){const labels:Record<string,string>={pending:'Pendente',filling:'Preenchendo',paused:'Pausado',scheduled:'Agendado',awaiting_confirmation:'Aguardando confirmação',completed:'Concluída',error:'Erro',canceled:'Cancelada',removed:'Anúncio removido'};return <span className={`job-badge ${status}`}>{labels[status]||status}{Number(retryCount)>0?<small style={{marginLeft:4,opacity:.85}}>({retryCount}/{maxRetries||3}x)</small>:null}</span>}
-function JobReport({job}:{job:Job}){if(job.fillReport){if(job.fillReport.saleInterrupted)return <small className="job-report warning">{job.status==='awaiting_confirmation'?'Veículo vendido: confira no Facebook e confirme a publicação ou cancele o trabalho.':job.status==='completed'?'Veículo vendido: remova o anúncio no Facebook.':'Trabalho encerrado após a venda do veículo.'}</small>;const review=[...job.fillReport.missing,...(job.fillReport.missingGroups||[]).map(group=>`Grupo: ${group}`),...(job.fillReport.flowIssues||[])];return <small className={review.length?'job-report warning':'job-report'} title={review.length?`Revisar: ${review.join(', ')}`:'Fluxo concluído sem pendências'}>{job.fillReport.filledCount}/{job.fillReport.totalCount} campos · {job.fillReport.imageCount} fotos{job.fillReport.selectedGroups?.length?` · ${job.fillReport.selectedGroups.length} grupos`:''}{job.fillReport.published?' · publicado automaticamente':job.fillReport.publishAttempted?' · publicação enviada; verifique no Facebook':job.fillReport.advanced?' · avançou':''}{job.extensionVersion?` · ext. ${job.extensionVersion}`:''}</small>}if(job.errorCode)return <small className="job-report error">{job.errorCode}</small>;return null}
+type JobEventDetails = {
+  missing?: string[]
+  missingGroups?: string[]
+  flowIssues?: string[]
+  scheduledAt?: string
+  accountLabel?: string
+  direction?: string
+  position?: number
+  total?: number
+  intervalMinutes?: number
+  error?: string
+  filledCount?: number
+  totalCount?: number
+  imageCount?: number
+  selectedGroups?: number
+  elapsedMinutes?: number
+  status?: string
+}
+type FillReport = {
+  filledCount: number
+  totalCount: number
+  imageCount: number
+  missing: string[]
+  fields: Array<{ name: string; ok: boolean }>
+  advanced?: boolean
+  selectedGroups?: string[]
+  missingGroups?: string[]
+  flowIssues?: string[]
+  published?: boolean
+  publishAttempted?: boolean
+  saleInterrupted?: boolean
+}
+type Job = {
+  id: number
+  status: string
+  vehicleId: number
+  year: number
+  make: string
+  model: string
+  price: number
+  accountId: number
+  accountLabel: string
+  previousAccountLabel?: string
+  reassignedAt?: string
+  seller: string
+  createdAt: string
+  scheduledAt?: string
+  resultUrl?: string
+  errorCode?: string
+  extensionVersion?: string
+  extensionVisible?: number
+  queuePriority?: number
+  paused?: number
+  fillReport?: FillReport | null
+  removedAt?: string
+  retryCount?: number
+  maxRetries?: number
+}
+type JobPage = {
+  jobs: Job[]
+  pagination: { totalItems: number; totalPages: number; currentPage: number; pageSize: number }
+}
+type ReportPerformance = {
+  summary: {
+    total: number
+    completed: number
+    errors: number
+    active: number
+    automatic: number
+    groupsSelected: number
+  }
+  sellerPerformance: Array<{ name: string; total: number; done: number; rate: number }>
+  profilePerformance: Array<{
+    name: string
+    total: number
+    done: number
+    fail: number
+    rate: number
+  }>
+  sellerOptions: string[]
+  recent: Job[]
+}
+type GlobalStats = {
+  publications: {
+    total: number
+    pending: number
+    completed: number
+    errors: number
+    extensionAvailable: number
+    scheduled: number
+  }
+}
+type JobEvent = {
+  id: number
+  eventType: string
+  details: JobEventDetails
+  createdAt: string
+  actor: string
+  fromAccount?: string
+  toAccount?: string
+}
+type ReportIssue = {
+  eventId: number
+  jobId: number
+  jobStatus: string
+  extensionVersion: string
+  year: number
+  make: string
+  model: string
+  accountLabel: string
+  seller: string
+  occurredAt: string
+  severity: 'error' | 'warning'
+  category: 'execution' | 'fields' | 'groups' | 'flow' | 'recovery' | 'duplicate'
+  message: string
+  active: boolean
+}
+type IssuePage = {
+  issues: ReportIssue[]
+  page: { limit: number; hasMore: boolean; nextCursor: number | null }
+}
+type AutomationProfile = {
+  id: number
+  label: string
+  browserProfile: string
+  owner: string
+  online: boolean
+  lastSeenAt?: string
+  today: number
+  dailyLimit: number
+  successes: number
+  failures: number
+  stage: string
+  currentJob?: {
+    id: number
+    status: string
+    paused?: boolean
+    scheduledAt?: string
+    attemptCount: number
+    extensionVersion: string
+    startedAt?: string
+    updatedAt?: string
+    publishAttempted?: boolean
+    year: number
+    make: string
+    model: string
+    durationSeconds: number
+    stalled?: boolean
+    stuckTimeoutMinutes?: number
+    issues: string[]
+  } | null
+}
+type MarketplaceGroup = {
+  id?: number
+  name: string
+  url: string
+  groupKey?: string
+  active: boolean
+  priority: number
+  successCount?: number
+  failureCount?: number
+  lastFoundAt?: string
+}
+const money = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+  maximumFractionDigits: 0,
+})
 
-export function ReportsView({api,vehicles}:{api:ApiFn;vehicles:Vehicle[]}) {
-  const [issues,setIssues]=useState<ReportIssue[]>([]),[view,setView]=useState<'performance'|'issues'>('performance'),[period,setPeriod]=useState('30'),[seller,setSeller]=useState('Todos'),[loading,setLoading]=useState(true),[issueSearch,setIssueSearch]=useState(''),[issueSeverity,setIssueSeverity]=useState('all'),[issueCategory,setIssueCategory]=useState('all'),[issueAccount,setIssueAccount]=useState('all'),[activeOnly,setActiveOnly]=useState(false),[message,setMessage]=useState('')
-  const [issueCursor,setIssueCursor]=useState<number|null>(null),[issuesHaveMore,setIssuesHaveMore]=useState(false),[issuesLoadingMore,setIssuesLoadingMore]=useState(false)
-  const [inventorySummary,setInventorySummary]=useState<InventoryStats|null>(null)
-  const [performance,setPerformance]=useState<ReportPerformance|null>(null)
-  const [reportNow]=useState(()=>Date.now())
-  const loadReports=useCallback(()=>Promise.all([api<IssuePage>('/reports/issues?limit=50'),api<InventoryStats>('/vehicles/summary'),api<ReportPerformance>(`/reports/performance?period=${period}&seller=${encodeURIComponent(seller)}`)]).then(([issueReport,inventory,reportPerformance])=>{setIssues(issueReport.issues);setIssueCursor(issueReport.page.nextCursor);setIssuesHaveMore(issueReport.page.hasMore);setInventorySummary(inventory);setPerformance(reportPerformance)}),[api,period,seller])
-  async function loadMoreIssues(){if(!issuesHaveMore||issueCursor===null||issuesLoadingMore)return;setIssuesLoadingMore(true);try{const result=await api<IssuePage>(`/reports/issues?limit=50&before=${issueCursor}`);setIssues(current=>[...current,...result.issues]);setIssueCursor(result.page.nextCursor);setIssuesHaveMore(result.page.hasMore)}catch(error){setMessage(error instanceof Error?error.message:'Não foi possível carregar mais ocorrências.')}finally{setIssuesLoadingMore(false)}}
-  useEffect(()=>{loadReports().finally(()=>setLoading(false))},[loadReports])
-  const sellers=useMemo(()=>['Todos',...new Set([...(inventorySummary?.sellers.map(item=>item.name)||vehicles.map(vehicle=>vehicle.seller)),...(performance?.sellerOptions||[])])],[inventorySummary,vehicles,performance])
-  const scopedInventory=useMemo(()=>seller==='Todos'?inventorySummary:inventorySummary?.sellers.find(item=>item.name===seller),[inventorySummary,seller])
-  const scopedJobs=performance?.recent||[]
-  const reportSummary=performance?.summary
-  const total=Number(scopedInventory?.total??vehicles.length)
-  const inventoryValue=Number(scopedInventory?.inventoryValue??vehicles.reduce((sum,vehicle)=>sum+Number(vehicle.price||0),0))
-  const averagePrice=total?inventoryValue/total:0
-  const publishedVehicles=Number(scopedInventory?.published??vehicles.filter(vehicle=>vehicle.status==='Publicado').length)
-  const attentionVehicles=Number(scopedInventory?.attention??vehicles.filter(vehicle=>vehicle.status==='Atenção').length)
-  const withPhotos=Number(scopedInventory?.withPhotos??vehicles.filter(vehicle=>Number(vehicle.imageCount||0)>0).length)
-  const photoCoverage=total?Math.round(withPhotos/total*100):0
-  const reportJobTotal=Number(reportSummary?.total||0)
-  const completed=Number(reportSummary?.completed||0)
-  const errors=Number(reportSummary?.errors||0)
-  const active=Number(reportSummary?.active||0)
-  const successRate=reportJobTotal?Math.round(completed/reportJobTotal*100):0
-  const automatic=Number(reportSummary?.automatic||0)
-  const groupsSelected=Number(reportSummary?.groupsSelected||0)
-  const byStatus=[['Publicado','publishedStatus'],['Pronto','readyStatus'],['Rascunho','draftStatus'],['Atenção','attentionStatus'],['Vendido','soldStatus']].map(([label,key])=>({label,count:Number(scopedInventory?.[key as keyof InventoryValues]??vehicles.filter(vehicle=>vehicle.status===label).length)}))
-  const maxStatus=Math.max(1,...byStatus.map(item=>item.count))
-  const funnel=[
-    {label:'Trabalhos criados',count:reportJobTotal,tone:'blue'},
-    {label:'Em andamento',count:active,tone:'amber'},
-    {label:'Concluídos',count:completed,tone:'green'},
-    {label:'Com erro',count:errors,tone:'red'},
-  ]
-  const sellerPerformance=performance?.sellerPerformance||[]
-  const profilePerformance=performance?.profilePerformance||[]
-  const recent=scopedJobs
-  const periodLabel=period==='all'?'todo o histórico':`últimos ${period} dias`
-  const issueAccounts=useMemo(()=>['all',...new Set(issues.map(issue=>issue.accountLabel))],[issues])
-  const scopedIssues=useMemo(()=>{const cutoff=period==='all'?0:reportNow-Number(period)*86400000,query=issueSearch.trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();return issues.filter(issue=>{const occurred=new Date(`${issue.occurredAt.replace(' ','T')}Z`).getTime(),haystack=`${issue.message} ${issue.year} ${issue.make} ${issue.model} ${issue.accountLabel} ${issue.seller} ${issue.jobId}`.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();return(!cutoff||occurred>=cutoff)&&(seller==='Todos'||issue.seller===seller)&&(issueSeverity==='all'||issue.severity===issueSeverity)&&(issueCategory==='all'||issue.category===issueCategory)&&(issueAccount==='all'||issue.accountLabel===issueAccount)&&(!activeOnly||issue.active)&&(!query||haystack.includes(query))})},[issues,period,seller,issueSeverity,issueCategory,issueAccount,activeOnly,issueSearch,reportNow])
-  const issueErrors=scopedIssues.filter(issue=>issue.severity==='error').length,issueWarnings=scopedIssues.length-issueErrors,activeIssues=scopedIssues.filter(issue=>issue.active).length,affectedJobs=new Set(scopedIssues.map(issue=>issue.jobId)).size
-  const categoryLabels:Record<string,string>={execution:'Execução',fields:'Campos',groups:'Grupos',flow:'Fluxo',recovery:'Recuperação',duplicate:'Duplicidade'}
-  const issueCategories=['execution','fields','groups','flow','recovery','duplicate'].map(category=>({category,label:categoryLabels[category],count:scopedIssues.filter(issue=>issue.category===category).length})).filter(item=>item.count)
-  const maxIssueCategory=Math.max(1,...issueCategories.map(item=>item.count))
-  const recurringIssues=[...new Map(scopedIssues.map(issue=>[issue.message,{message:issue.message,count:scopedIssues.filter(item=>item.message===issue.message).length,severity:issue.severity}])).values()].sort((a,b)=>b.count-a.count).slice(0,6)
-  async function retryIssue(jobId:number){
-    try{
-      const {job}=await api<{job:Pick<Job,'id'|'status'|'fillReport'>}>(`/publications/${jobId}`)
-      const confirmNoPublication=Boolean(job.fillReport?.publishAttempted)
-      if(confirmNoPublication&&!window.confirm('Confirme primeiro em “Seus classificados” que o anúncio NÃO foi criado. Liberar uma nova tentativa sem verificar pode gerar um anúncio duplicado.'))return
-      await api(`/publications/${jobId}`,{method:'PATCH',body:JSON.stringify({status:'pending',confirmNoPublication})})
-      setMessage(`Trabalho #${jobId} devolvido à fila.`)
-      await loadReports()
-    }catch(error){
-      setMessage(error instanceof Error?error.message:'Não foi possível devolver o trabalho à fila.')
+export function OverviewView({
+  api,
+  vehicles,
+  navigate,
+}: {
+  api: ApiFn
+  vehicles: Vehicle[]
+  navigate: (page: string) => void
+}) {
+  const [data, setData] = useState<OverviewData | null>(null)
+  useEffect(() => {
+    api<OverviewData>('/overview').then(setData)
+  }, [api])
+  const stats = data?.vehicleStats || {}
+  return (
+    <section className="content">
+      <div className="title-row">
+        <div>
+          <span className="page-kicker">PAINEL OPERACIONAL</span>
+          <h1>Visão geral</h1>
+          <p>Acompanhe o estoque e mantenha a equipe em movimento.</p>
+        </div>
+        <button className="primary" onClick={() => navigate('Publicações')}>
+          <Send size={18} />
+          Abrir fila
+        </button>
+      </div>
+      <div className="hero-card">
+        <div>
+          <span>Valor estimado do estoque</span>
+          <strong>{money.format(Number(stats.inventoryValue || 0))}</strong>
+          <p>{stats.total || vehicles.length} veículos ativos na operação</p>
+        </div>
+        <div className="hero-score">
+          <strong>
+            {stats.total
+              ? Math.round((Number(stats.published || 0) / Number(stats.total)) * 100)
+              : 0}
+            %
+          </strong>
+          <span>do estoque publicado</span>
+        </div>
+      </div>
+      <div className="stats overview-stats">
+        <article>
+          <span className="stat-icon blue">
+            <Car />
+          </span>
+          <div>
+            <small>Estoque ativo</small>
+            <strong>{stats.total ?? vehicles.length}</strong>
+            <em>veículos</em>
+          </div>
+        </article>
+        <article>
+          <span className="stat-icon green">
+            <Check />
+          </span>
+          <div>
+            <small>Publicados</small>
+            <strong>{stats.published || 0}</strong>
+            <em>anúncios ativos</em>
+          </div>
+        </article>
+        <article>
+          <span className="stat-icon amber">
+            <Clock3 />
+          </span>
+          <div>
+            <small>Prontos para fila</small>
+            <strong>{stats.ready || 0}</strong>
+            <em>aguardando ação</em>
+          </div>
+        </article>
+        <article>
+          <span className="stat-icon red">
+            <CircleAlert />
+          </span>
+          <div>
+            <small>Pendências</small>
+            <strong>{stats.attention || 0}</strong>
+            <em>requer revisão</em>
+          </div>
+        </article>
+      </div>
+      <div className="overview-grid">
+        <article className="module-card">
+          <div className="module-head">
+            <div>
+              <h2>Estoque recente</h2>
+              <span>Últimos veículos atualizados</span>
+            </div>
+            <button onClick={() => navigate('Veículos')}>Ver todos</button>
+          </div>
+          <div className="compact-list">
+            {vehicles.slice(0, 4).map((v) => (
+              <div key={v.id}>
+                <span className="mini-car">
+                  <Car />
+                </span>
+                <div>
+                  <strong>
+                    {v.year} {v.make} {v.model}
+                  </strong>
+                  <small>
+                    {money.format(v.price)} · {v.seller}
+                  </small>
+                </div>
+                <span
+                  className={`simple-status ${v.status
+                    .toLowerCase()
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '')}`}
+                >
+                  {v.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </article>
+        <article className="module-card quick-card">
+          <div className="module-head">
+            <div>
+              <h2>Ações rápidas</h2>
+              <span>Atalhos da operação</span>
+            </div>
+          </div>
+          <button onClick={() => navigate('Veículos')}>
+            <Car />
+            <div>
+              <strong>Gerenciar estoque</strong>
+              <small>Cadastre e revise veículos</small>
+            </div>
+            <ExternalLink />
+          </button>
+          <button onClick={() => navigate('Publicações')}>
+            <Send />
+            <div>
+              <strong>Preparar publicações</strong>
+              <small>Distribua veículos por perfil</small>
+            </div>
+            <ExternalLink />
+          </button>
+          <button onClick={() => navigate('Equipe e contas')}>
+            <Users />
+            <div>
+              <strong>Equipe e contas</strong>
+              <small>Gerencie acessos e perfis</small>
+            </div>
+            <ExternalLink />
+          </button>
+        </article>
+      </div>
+    </section>
+  )
+}
+
+export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Promise<void> }) {
+  const [accounts, setAccounts] = useState<AccountOption[]>([]),
+    [profiles, setProfiles] = useState<AutomationProfile[]>([]),
+    [canManageQueue, setCanManageQueue] = useState(false),
+    [view, setView] = useState<'central' | 'queue'>('central'),
+    [open, setOpen] = useState(false),
+    [scheduleJob, setScheduleJob] = useState<Job | null>(null),
+    [batchScheduleIds, setBatchScheduleIds] = useState<number[] | null>(null),
+    [batchInterval, setBatchInterval] = useState(30),
+    [batchStart, setBatchStart] = useState(''),
+    [reassignIds, setReassignIds] = useState<number[] | null>(null),
+    [timelineJob, setTimelineJob] = useState<Job | null>(null),
+    [timelineEvents, setTimelineEvents] = useState<JobEvent[]>([]),
+    [timelineLoading, setTimelineLoading] = useState(false),
+    [message, setMessage] = useState(''),
+    [selected, setSelected] = useState<Set<number>>(new Set()),
+    [clock, setClock] = useState(() => Date.now()),
+    [queueSearch, setQueueSearch] = useState(''),
+    [queueStatus, setQueueStatus] = useState('all'),
+    [queueAccount, setQueueAccount] = useState('all'),
+    [queueSituation, setQueueSituation] = useState('all')
+  const [pageJobs, setPageJobs] = useState<Job[]>([]),
+    [queuePage, setQueuePage] = useState(1),
+    [queuePageLoading, setQueuePageLoading] = useState(true),
+    [queuePagination, setQueuePagination] = useState({
+      totalItems: 0,
+      totalPages: 1,
+      currentPage: 1,
+      pageSize: 25,
+    })
+  const deferredQueueSearch = useDeferredValue(queueSearch)
+  const [vehicleSearch, setVehicleSearch] = useState('')
+  const [vehicleOptions, setVehicleOptions] = useState<Vehicle[]>([])
+  const [selectedVehicleId, setSelectedVehicleId] = useState('')
+  const deferredVehicleSearch = useDeferredValue(vehicleSearch)
+  const [publicationStats, setPublicationStats] = useState({
+      total: 0,
+      pending: 0,
+      completed: 0,
+      errors: 0,
+      extensionAvailable: 0,
+      scheduled: 0,
+    }),
+    [refreshVersion, setRefreshVersion] = useState(0)
+  const load = useCallback(
+    (isActive: () => boolean = () => true) =>
+      Promise.all([
+        api<{ accounts: AccountOption[]; canManageQueue: boolean }>('/team'),
+        api<{ profiles: AutomationProfile[] }>('/automation/overview'),
+        api<GlobalStats>('/stats/global'),
+      ]).then(([t, a, g]) => {
+        if (!isActive()) return
+        setAccounts(t.accounts)
+        setCanManageQueue(Boolean(t.canManageQueue))
+        setProfiles(a.profiles)
+        setPublicationStats(g.publications)
+        setRefreshVersion((value) => value + 1)
+        setSelected(new Set())
+      }),
+    [api],
+  )
+  useEffect(() => {
+    let active = true,
+      busy = false
+    void load(() => active).catch((error) => {
+      if (active)
+        setMessage(
+          error instanceof Error ? error.message : 'Não foi possível carregar as publicações.',
+        )
+    })
+    const timer = window.setInterval(() => {
+      if (!active || busy) return
+      busy = true
+      void api<{ profiles: AutomationProfile[] }>('/automation/overview')
+        .then((result) => {
+          if (active) {
+            setProfiles(result.profiles)
+            setClock(Date.now())
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          busy = false
+        })
+    }, 15000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [api, load])
+  useEffect(() => {
+    let active = true
+    const params = new URLSearchParams({
+      page: String(queuePage),
+      limit: '25',
+      query: deferredQueueSearch,
+      status: queueStatus,
+      account: queueAccount,
+      situation: queueSituation,
+    })
+    void api<JobPage>(`/publications/paged?${params}`)
+      .then((result) => {
+        if (!active) return
+        setPageJobs(result.jobs)
+        setQueuePagination(result.pagination)
+        if (result.pagination.currentPage !== queuePage) setQueuePage(result.pagination.currentPage)
+      })
+      .catch((error) => {
+        if (active)
+          setMessage(
+            error instanceof Error ? error.message : 'Não foi possível carregar a página da fila.',
+          )
+      })
+      .finally(() => {
+        if (active) setQueuePageLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [
+    api,
+    queuePage,
+    deferredQueueSearch,
+    queueStatus,
+    queueAccount,
+    queueSituation,
+    refreshVersion,
+  ])
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    const params = new URLSearchParams({
+      page: '1',
+      limit: '25',
+      query: deferredVehicleSearch,
+      status: 'Todos',
+    })
+    void api<{ vehicles: Vehicle[] }>(`/vehicles/paged?${params}`)
+      .then((result) => {
+        if (active)
+          setVehicleOptions(
+            result.vehicles.filter(
+              (vehicle) => vehicle.status !== 'Publicado' && vehicle.status !== 'Vendido',
+            ),
+          )
+      })
+      .catch((error) => {
+        if (active)
+          setMessage(error instanceof Error ? error.message : 'Não foi possível buscar veículos.')
+      })
+    return () => {
+      active = false
+    }
+  }, [api, open, deferredVehicleSearch])
+  async function enqueue(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const f = new FormData(e.currentTarget),
+      schedule = String(f.get('scheduledAt') || '')
+    try {
+      await api('/publications', {
+        method: 'POST',
+        body: JSON.stringify({
+          vehicleId: Number(selectedVehicleId),
+          accountId: f.get('accountId') ? Number(f.get('accountId')) : null,
+          scheduledAt: schedule ? new Date(schedule).toISOString() : null,
+        }),
+      })
+      setOpen(false)
+      setMessage(schedule ? 'Veículo agendado e adicionado à fila.' : 'Veículo adicionado à fila.')
+      await load()
+      await reload()
+    } catch (err) {
+      const missing = (err as { missing?: string[] })?.missing
+      setMessage(
+        missing?.length
+          ? `Complete antes de publicar: ${missing.join(', ')}.`
+          : err instanceof Error
+            ? err.message
+            : 'Erro ao criar publicação',
+      )
     }
   }
-  if(loading)return <section className="content"><div className="empty">Carregando relatórios...</div></section>
-  return <section className="content reports-page"><div className="title-row"><div><span className="page-kicker">INTELIGÊNCIA OPERACIONAL</span><h1>Relatórios</h1><p>Estoque atual e desempenho das publicações para orientar a operação.</p></div><button className="secondary" onClick={()=>window.print()}><BarChart3 size={17}/>Imprimir relatório</button></div>
-    {message&&<div className="inline-message success">{message}<button onClick={()=>setMessage('')}><X/></button></div>}
-    <div className="report-view-tabs"><button className={view==='performance'?'active':''} onClick={()=>setView('performance')}><BarChart3/>Desempenho e estoque</button><button className={view==='issues'?'active':''} onClick={()=>setView('issues')}><CircleAlert/>Erros e avisos{issues.filter(issue=>issue.active).length>0&&<span>{issues.filter(issue=>issue.active).length}</span>}</button><button className="refresh-view" onClick={()=>loadReports()}><RotateCcw/>Atualizar</button></div>
-    <div className="report-filters"><div><Filter/><span>Filtros</span></div><label>Período das publicações<select value={period} onChange={event=>setPeriod(event.target.value)}><option value="7">Últimos 7 dias</option><option value="30">Últimos 30 dias</option><option value="90">Últimos 90 dias</option><option value="all">Todo o histórico</option></select></label><label>Responsável<select value={seller} onChange={event=>setSeller(event.target.value)}>{sellers.map(name=><option key={name}>{name}</option>)}</select></label><small>Estoque: posição atual · Publicações: {periodLabel}</small></div>
-    {view==='performance'?<>
-    <div className="report-kpis rich-kpis">
-      <article><span className="kpi-icon"><WalletCards/></span><div><span>Valor em estoque</span><strong>{money.format(inventoryValue)}</strong><small>{total} veículo{total===1?'':'s'} no recorte</small></div></article>
-      <article><span className="kpi-icon"><TrendingUp/></span><div><span>Preço médio</span><strong>{money.format(averagePrice)}</strong><small>Média do estoque atual</small></div></article>
-      <article><span className="kpi-icon"><Car/></span><div><span>Estoque publicado</span><strong>{total?Math.round(publishedVehicles/total*100):0}%</strong><small>{publishedVehicles} publicado{publishedVehicles===1?'':'s'} · {attentionVehicles} em atenção</small></div></article>
-      <article><span className="kpi-icon"><Camera/></span><div><span>Cobertura de fotos</span><strong>{photoCoverage}%</strong><small>{withPhotos} de {total} com pelo menos uma foto</small></div></article>
-      <article><span className="kpi-icon"><Check/></span><div><span>Taxa de conclusão</span><strong>{successRate}%</strong><small>{completed} concluída{completed===1?'':'s'} em {reportJobTotal} trabalho{reportJobTotal===1?'':'s'}</small></div></article>
-      <article><span className="kpi-icon"><Send/></span><div><span>Automação utilizada</span><strong>{automatic}</strong><small>{groupsSelected} seleções de grupos registradas</small></div></article>
-    </div>
-    <div className="report-grid primary-report-grid">
-      <article className="module-card"><div className="module-head"><div><h2>Funil de publicação</h2><span>Movimentações em {periodLabel}</span></div></div><div className="funnel-list">{funnel.map((item,index)=><div key={item.label}><span className={`funnel-index ${item.tone}`}>{index+1}</span><div><strong>{item.label}</strong><small>{reportJobTotal?Math.round(item.count/reportJobTotal*100):0}% dos trabalhos no recorte</small></div><b>{item.count}</b></div>)}</div></article>
-      <article className="module-card"><div className="module-head"><div><h2>Distribuição do estoque</h2><span>Veículos por situação atual</span></div></div><div className="bars status-bars">{byStatus.map(item=><div key={item.label}><div><span>{item.label}</span><strong>{item.count}</strong></div><i><b style={{width:`${item.count/maxStatus*100}%`}}/></i></div>)}</div></article>
-    </div>
-    <div className="report-grid secondary-report-grid">
-      <article className="module-card"><div className="module-head"><div><h2>Qualidade das fotos</h2><span>Cobertura do estoque atual</span></div></div><div className="photo-quality"><div className="coverage-ring" style={{'--coverage':`${photoCoverage*3.6}deg`} as React.CSSProperties}><span><strong>{photoCoverage}%</strong><small>cobertura</small></span></div><div><div><span>Sem fotos</span><strong>{Number(scopedInventory?.noPhotos??(total-withPhotos))}</strong></div><div><span>1 a 4 fotos</span><strong>{Number(scopedInventory?.photos1to4??vehicles.filter(vehicle=>Number(vehicle.imageCount||0)>=1&&Number(vehicle.imageCount||0)<=4).length)}</strong></div><div><span>5 a 9 fotos</span><strong>{Number(scopedInventory?.photos5to9??vehicles.filter(vehicle=>Number(vehicle.imageCount||0)>=5&&Number(vehicle.imageCount||0)<=9).length)}</strong></div><div><span>10 ou mais</span><strong>{Number(scopedInventory?.photos10plus??vehicles.filter(vehicle=>Number(vehicle.imageCount||0)>=10).length)}</strong></div></div></div></article>
-      <article className="module-card"><div className="module-head"><div><h2>Desempenho por responsável</h2><span>Conclusões em {periodLabel}</span></div></div><div className="ranking-list">{sellerPerformance.length?sellerPerformance.slice(0,6).map(item=><div key={item.name}><span className="ranking-avatar">{item.name.split(' ').map(part=>part[0]).slice(0,2).join('')}</span><div><strong>{item.name}</strong><small>{item.done} concluída{item.done===1?'':'s'} em {item.total}</small><i><b style={{width:`${item.rate}%`}}/></i></div><em>{item.rate}%</em></div>):<div className="mini-empty">Sem publicações no período.</div>}</div></article>
-    </div>
-    <article className="module-card profile-performance"><div className="module-head"><div><h2>Desempenho por perfil do Brave</h2><span>Volume, conclusões e erros no período</span></div></div><div className="profile-metrics">{profilePerformance.length?profilePerformance.map(item=><div key={item.name}><div><Laptop/><span><strong>{item.name}</strong><small>{item.total} trabalho{item.total===1?'':'s'} processado{item.total===1?'':'s'}</small></span></div><span><b>{item.done}</b><small>concluídos</small></span><span className={item.fail?'metric-alert':''}><b>{item.fail}</b><small>erros</small></span><span><b>{item.rate}%</b><small>conclusão</small></span></div>):<div className="mini-empty">Nenhuma atividade de perfil neste recorte.</div>}</div></article>
-    <article className="module-card recent-operations"><div className="module-head"><div><h2>Operações recentes</h2><span>Últimos trabalhos no recorte selecionado</span></div><span className="source-freshness">Atualizado com os dados do painel</span></div><div className="table-wrap"><table><thead><tr><th>VEÍCULO</th><th>RESPONSÁVEL</th><th>PERFIL</th><th>RESULTADO</th><th>AUTOMAÇÃO</th><th>DATA</th></tr></thead><tbody>{recent.map(job=>{const review=[...(job.fillReport?.missing||[]),...(job.fillReport?.missingGroups||[]).map(group=>`Grupo: ${group}`),...(job.fillReport?.flowIssues||[])];return <tr key={job.id}><td><strong>{job.year} {job.make} {job.model}</strong><small className="table-sub">Trabalho #{job.id}</small></td><td>{job.seller}</td><td>{job.accountLabel}</td><td><JobBadge status={job.status}/>{review.length>0&&<small className="table-warning" title={review.join(', ')}>{review.length} pendência{review.length===1?'':'s'}</small>}</td><td>{job.fillReport?.published?<span className="automation-chip auto">Publicação automática</span>:job.fillReport?.advanced?<span className="automation-chip">Avançou</span>:<span className="muted">Manual</span>}</td><td className="muted">{new Date(`${job.createdAt}Z`).toLocaleDateString('pt-BR')}</td></tr>})}</tbody></table>{!recent.length&&<div className="empty">Nenhuma operação encontrada para os filtros selecionados.</div>}</div></article>
-    </>:<>
-      <div className="issue-filters"><label className="queue-search"><Search/><input value={issueSearch} onChange={event=>setIssueSearch(event.target.value)} placeholder="Buscar mensagem, veículo, perfil ou nº do trabalho" aria-label="Buscar erros e avisos"/>{issueSearch&&<button onClick={()=>setIssueSearch('')} aria-label="Limpar busca"><X/></button>}</label><select value={issueSeverity} onChange={event=>setIssueSeverity(event.target.value)} aria-label="Filtrar por severidade"><option value="all">Erros e avisos</option><option value="error">Somente erros</option><option value="warning">Somente avisos</option></select><select value={issueCategory} onChange={event=>setIssueCategory(event.target.value)} aria-label="Filtrar por categoria"><option value="all">Todas as categorias</option><option value="execution">Execução</option><option value="fields">Campos</option><option value="groups">Grupos</option><option value="flow">Fluxo</option><option value="duplicate">Duplicidade</option><option value="recovery">Recuperação</option></select><select value={issueAccount} onChange={event=>setIssueAccount(event.target.value)} aria-label="Filtrar por perfil"><option value="all">Todos os perfis</option>{issueAccounts.slice(1).map(account=><option key={account}>{account}</option>)}</select><label className="active-issue-toggle"><input type="checkbox" checked={activeOnly} onChange={event=>setActiveOnly(event.target.checked)}/><span>Somente pendentes atuais</span></label></div>
-      <div className="issue-kpis"><article className="error"><span><CircleAlert/></span><div><small>Erros de execução</small><strong>{issueErrors}</strong><em>tentativas interrompidas</em></div></article><article className="warning"><span><CircleAlert/></span><div><small>Avisos</small><strong>{issueWarnings}</strong><em>pontos de atenção</em></div></article><article><span><Car/></span><div><small>Trabalhos afetados</small><strong>{affectedJobs}</strong><em>no recorte selecionado</em></div></article><article className="active"><span><Activity/></span><div><small>Pendências atuais</small><strong>{activeIssues}</strong><em>ainda precisam de ação</em></div></article></div>
-      <div className="report-grid issue-summary-grid"><article className="module-card"><div className="module-head"><div><h2>Ocorrências por categoria</h2><span>Cada campo, grupo ou falha conta como uma ocorrência</span></div></div><div className="issue-category-bars">{issueCategories.map(item=><div key={item.category}><div><span>{item.label}</span><strong>{item.count}</strong></div><i><b style={{width:`${item.count/maxIssueCategory*100}%`}}/></i></div>)}{!issueCategories.length&&<div className="mini-empty">Nenhuma ocorrência para os filtros selecionados.</div>}</div></article><article className="module-card"><div className="module-head"><div><h2>Mais recorrentes</h2><span>Mensagens repetidas que merecem correção prioritária</span></div></div><div className="recurring-issues">{recurringIssues.map((item,index)=><div key={item.message}><span className={item.severity}>{index+1}</span><p title={item.message}>{item.message}</p><strong>{item.count}×</strong></div>)}{!recurringIssues.length&&<div className="mini-empty">Nenhum padrão recorrente neste recorte.</div>}</div></article></div>
-      <article className="module-card issue-table"><div className="module-head"><div><h2>Registro de erros e avisos</h2><span>Ocorrências carregadas do histórico da automação</span></div><span className="source-freshness">{scopedIssues.length} ocorrência{scopedIssues.length===1?'':'s'} · {activeIssues} pendente{activeIssues===1?'':'s'}</span></div><div className="table-wrap"><table><thead><tr><th>SEVERIDADE</th><th>OCORRÊNCIA</th><th>VEÍCULO / TRABALHO</th><th>RESPONSÁVEL</th><th>PERFIL</th><th>DATA</th><th>SITUAÇÃO</th></tr></thead><tbody>{scopedIssues.map((issue,index)=><tr key={`${issue.eventId}-${issue.category}-${index}`}><td><span className={`issue-severity ${issue.severity}`}>{issue.severity==='error'?'Erro':'Aviso'}</span><small className="issue-category">{categoryLabels[issue.category]}</small></td><td className="issue-message">{issue.message}{issue.extensionVersion&&<small>Extensão {issue.extensionVersion}</small>}</td><td><strong>{issue.year} {issue.make} {issue.model}</strong><small className="table-sub">Trabalho #{issue.jobId}</small></td><td>{issue.seller}</td><td>{issue.accountLabel}</td><td className="muted">{new Date(`${issue.occurredAt.replace(' ','T')}Z`).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'})}</td><td>{issue.active?<div className="issue-action"><span className="issue-state active">Pendente atual</span>{['error','awaiting_confirmation'].includes(issue.jobStatus)&&<button onClick={()=>retryIssue(issue.jobId)}><RotateCcw/>Tentar novamente</button>}</div>:<span className="issue-state resolved">Histórico</span>}</td></tr>)}</tbody></table>{!scopedIssues.length&&<div className="empty">Nenhum erro ou aviso encontrado para os filtros selecionados.</div>}</div>{issuesHaveMore&&<div className="settings-save"><button className="secondary" onClick={loadMoreIssues} disabled={issuesLoadingMore}><RotateCcw/>{issuesLoadingMore?'Carregando...':'Carregar mais ocorrências'}</button></div>}</article>
-    </>}
-  </section>
+  async function update(id: number, status: string) {
+    const current = pageJobs.find((job) => job.id === id),
+      confirmNoPublication = status === 'pending' && Boolean(current?.fillReport?.publishAttempted)
+    if (
+      confirmNoPublication &&
+      !window.confirm(
+        'Confirme primeiro em “Seus classificados” que o anúncio NÃO foi criado. Liberar uma nova tentativa sem verificar pode gerar um anúncio duplicado.',
+      )
+    )
+      return
+    try {
+      await api(`/publications/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status, confirmNoPublication }),
+      })
+      await load()
+      await reload()
+      const labels: Record<string, string> = {
+        pending: 'Trabalho devolvido à fila.',
+        completed: 'Publicação confirmada.',
+        removed: 'Anúncio marcado como removido.',
+        canceled: 'Trabalho cancelado; veículo preservado como vendido.',
+      }
+      setMessage(labels[status] || 'Publicação atualizada.')
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : 'Não foi possível atualizar a publicação.',
+      )
+    }
+  }
+  async function changeExtensionVisibility(ids: number[], visible: boolean) {
+    if (!ids.length) return
+    try {
+      await api('/publications/extension-visibility', {
+        method: 'PATCH',
+        body: JSON.stringify({ ids, visible }),
+      })
+      setSelected(new Set())
+      setMessage(
+        visible
+          ? `${ids.length} veículo${ids.length === 1 ? '' : 's'} devolvido${ids.length === 1 ? '' : 's'} à extensão.`
+          : `${ids.length} veículo${ids.length === 1 ? '' : 's'} removido${ids.length === 1 ? '' : 's'} da extensão.`,
+      )
+      await load()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Erro ao atualizar a fila da extensão')
+    }
+  }
+  async function changeQueueState(ids: number[], paused: boolean) {
+    if (!ids.length) return
+    try {
+      await api('/publications/queue-state', {
+        method: 'PATCH',
+        body: JSON.stringify({ ids, action: paused ? 'pause' : 'resume' }),
+      })
+      setSelected(new Set())
+      setMessage(
+        `${ids.length} trabalho${ids.length === 1 ? '' : 's'} ${paused ? 'pausado' : 'retomado'}${ids.length === 1 ? '' : 's'}.`,
+      )
+      await load()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Erro ao atualizar os trabalhos')
+    }
+  }
+  async function movePriority(id: number, direction: 'up' | 'down') {
+    try {
+      await api(`/publications/${id}/priority`, {
+        method: 'PATCH',
+        body: JSON.stringify({ direction }),
+      })
+      await load()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Erro ao alterar a prioridade')
+    }
+  }
+  async function saveSchedule(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!scheduleJob) return
+    const value = String(new FormData(e.currentTarget).get('scheduledAt') || '')
+    try {
+      await api(`/publications/${scheduleJob.id}/schedule`, {
+        method: 'PATCH',
+        body: JSON.stringify({ scheduledAt: value ? new Date(value).toISOString() : null }),
+      })
+      setMessage(
+        value
+          ? 'Agendamento atualizado.'
+          : 'Agendamento removido; o trabalho está disponível agora.',
+      )
+      setScheduleJob(null)
+      await load()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Erro ao atualizar o agendamento')
+    }
+  }
+  async function clearSchedule(job: Job) {
+    try {
+      await api(`/publications/${job.id}/schedule`, {
+        method: 'PATCH',
+        body: JSON.stringify({ scheduledAt: null }),
+      })
+      setScheduleJob(null)
+      setMessage('Agendamento removido; o trabalho está disponível agora.')
+      await load()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Erro ao remover o agendamento')
+    }
+  }
+  async function smartScheduleSingle(jobId: number) {
+    try {
+      const res = await api<{
+        ok: boolean
+        scheduledAt: string
+        window: string
+        confidence: number
+      }>(`/publications/${jobId}/smart-schedule`, { method: 'POST' })
+      const time = new Date(res.scheduledAt).toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+      setMessage(`Trabalho agendado com IA para ${time} (Janela: ${res.window}).`)
+      await load()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Erro ao agendar com IA')
+    }
+  }
+  async function smartScheduleBatch(ids: number[]) {
+    if (!ids.length) return
+    try {
+      const res = await api<{ ok: boolean; updated: number }>(
+        '/publications/smart-schedule-batch',
+        { method: 'POST', body: JSON.stringify({ ids }) },
+      )
+      setMessage(`${res.updated} trabalhos agendados de forma inteligente nos horários de pico.`)
+      setSelected(new Set())
+      await load()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Erro ao agendar lote com IA')
+    }
+  }
+  function openBatchSchedule(ids: number[]) {
+    const ordered = pageJobs.filter((job) => ids.includes(job.id)).map((job) => job.id)
+    setBatchScheduleIds(ordered)
+    setBatchStart(dateTimeLocal(new Date(clock + 5 * 60000).toISOString()))
+    setBatchInterval(30)
+  }
+  async function saveBatchSchedule(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!batchScheduleIds?.length) return
+    try {
+      const result = await api<{ updated: number; intervalMinutes: number }>(
+        '/publications/schedule-batch',
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            ids: batchScheduleIds,
+            startAt: new Date(batchStart).toISOString(),
+            intervalMinutes: batchInterval,
+          }),
+        },
+      )
+      setMessage(
+        `${result.updated} trabalhos agendados em sequência, com intervalo de ${result.intervalMinutes} min.`,
+      )
+      setBatchScheduleIds(null)
+      setSelected(new Set())
+      await load()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Erro ao agendar a sequência')
+    }
+  }
+  async function saveReassignment(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!reassignIds?.length) return
+    const accountId = Number(new FormData(e.currentTarget).get('accountId'))
+    try {
+      await api('/publications/reassign', {
+        method: 'PATCH',
+        body: JSON.stringify({ ids: reassignIds, accountId }),
+      })
+      setMessage(
+        `${reassignIds.length} trabalho${reassignIds.length === 1 ? '' : 's'} redistribuído${reassignIds.length === 1 ? '' : 's'} com sucesso.`,
+      )
+      setReassignIds(null)
+      setSelected(new Set())
+      await load()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Erro ao redistribuir os trabalhos')
+    }
+  }
+  async function openTimeline(job: Job) {
+    setTimelineJob(job)
+    setTimelineEvents([])
+    setTimelineLoading(true)
+    try {
+      const result = await api<{ events: JobEvent[] }>(`/publications/${job.id}/timeline`)
+      setTimelineEvents(result.events)
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Erro ao carregar o histórico')
+      setTimelineJob(null)
+    } finally {
+      setTimelineLoading(false)
+    }
+  }
+  async function recoverStalled(jobId: number) {
+    try {
+      await api(`/publications/${jobId}/recover`, { method: 'POST' })
+      setMessage('Trabalho recuperado e devolvido ao início da fila.')
+      await load()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Erro ao recuperar o trabalho')
+    }
+  }
+  function toggleSelected(id: number) {
+    setSelected((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const extensionStatuses = ['pending', 'filling', 'error', 'awaiting_confirmation']
+  const filteredJobs = pageJobs
+  const activeJobs = filteredJobs.filter(
+    (job) => extensionStatuses.includes(job.status) && job.status !== 'filling',
+  )
+  const allExtensionSelected =
+    activeJobs.length > 0 && activeJobs.every((job) => selected.has(job.id))
+  const pending = publicationStats.pending,
+    completed = publicationStats.completed,
+    errors = publicationStats.errors
+  const scheduledCount = publicationStats.scheduled
+  const eligibleReassignAccounts = reassignIds
+    ? accounts.filter((account) =>
+        reassignIds.every((id) => pageJobs.find((job) => job.id === id)?.accountId !== account.id),
+      )
+    : []
+  const onlineProfiles = profiles.filter((profile) => profile.online).length
+  const activeProfiles = profiles.filter(
+    (profile) =>
+      profile.currentJob &&
+      !profile.currentJob.paused &&
+      !profile.currentJob.stalled &&
+      (!profile.currentJob.scheduledAt ||
+        new Date(profile.currentJob.scheduledAt).getTime() <= clock) &&
+      ['pending', 'filling', 'awaiting_confirmation'].includes(profile.currentJob.status),
+  ).length
+  const stalledProfiles = profiles.filter((profile) => profile.currentJob?.stalled).length
+  const formatDuration = (seconds: number) =>
+    seconds < 60
+      ? `${seconds}s`
+      : seconds < 3600
+        ? `${Math.floor(seconds / 60)}min`
+        : `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}min`
+  const lastSeen = (value?: string) => {
+    if (!value) return 'Nunca conectado'
+    const elapsed = Math.max(0, clock - new Date(value.replace(' ', 'T') + 'Z').getTime())
+    return elapsed < 60000
+      ? 'Agora'
+      : elapsed < 3600000
+        ? `Há ${Math.floor(elapsed / 60000)} min`
+        : `Há ${Math.floor(elapsed / 3600000)}h`
+  }
+  const dateTimeLocal = (value?: string) => {
+    const date = value ? new Date(value) : new Date(clock + 60000)
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+  }
+  return (
+    <section className="content">
+      <div className="title-row">
+        <div>
+          <span className="page-kicker">CONTROLE DE SAÍDA</span>
+          <h1>Publicações</h1>
+          <p>Organize o que cada perfil deve publicar no Brave.</p>
+        </div>
+        <div className="action-with-help">
+          <button className="primary" onClick={() => setOpen(true)}>
+            <Plus size={18} />
+            Adicionar à fila
+          </button>
+          <HelpTip
+            text="A fila distribui um veículo para um perfil local do Brave e respeita o fluxo definido em Configurações."
+            placement="bottom"
+          />
+        </div>
+      </div>
+      {message && (
+        <div className="inline-message">
+          {message}
+          <button onClick={() => setMessage('')}>
+            <X />
+          </button>
+        </div>
+      )}
+      <div className="stats">
+        <article>
+          <span className="stat-icon amber">
+            <Clock3 />
+          </span>
+          <div>
+            <small>Pendentes</small>
+            <strong>{pending}</strong>
+            <em>na fila</em>
+          </div>
+        </article>
+        <article>
+          <span className="stat-icon green">
+            <Check />
+          </span>
+          <div>
+            <small>Concluídas</small>
+            <strong>{completed}</strong>
+            <em>confirmadas</em>
+          </div>
+        </article>
+        <article>
+          <span className="stat-icon red">
+            <CircleAlert />
+          </span>
+          <div>
+            <small>Com erro</small>
+            <strong>{errors}</strong>
+            <em>requer atenção</em>
+          </div>
+        </article>
+        <article>
+          <span className="stat-icon blue">
+            <Laptop />
+          </span>
+          <div>
+            <small>Perfis locais</small>
+            <strong>{accounts.length}</strong>
+            <em>associados</em>
+          </div>
+        </article>
+      </div>
+      <div className="publication-view-tabs">
+        <button className={view === 'central' ? 'active' : ''} onClick={() => setView('central')}>
+          <Activity />
+          Central de automação
+        </button>
+        <button className={view === 'queue' ? 'active' : ''} onClick={() => setView('queue')}>
+          <ListChecks />
+          Fila e histórico
+        </button>
+        <button className="refresh-view" onClick={() => load()}>
+          <RotateCcw />
+          Atualizar
+        </button>
+      </div>
+      {view === 'central' ? (
+        <div className="automation-center">
+          <div className="automation-summary">
+            <div>
+              <Wifi />
+              <span>
+                <strong>
+                  {onlineProfiles}/{profiles.length}
+                </strong>
+                <small>perfis online</small>
+              </span>
+            </div>
+            <div>
+              <Activity />
+              <span>
+                <strong>{activeProfiles}</strong>
+                <small>em operação</small>
+              </span>
+            </div>
+            <div>
+              <Gauge />
+              <span>
+                <strong>{profiles.reduce((sum, profile) => sum + profile.today, 0)}</strong>
+                <small>trabalhos hoje</small>
+              </span>
+            </div>
+            {stalledProfiles > 0 && (
+              <div className="summary-stalled">
+                <CircleAlert />
+                <span>
+                  <strong>{stalledProfiles}</strong>
+                  <small>travado{stalledProfiles === 1 ? '' : 's'}</small>
+                </span>
+              </div>
+            )}
+            <small>
+              Atualização automática a cada 15 segundos · perfil online quando visto nos últimos 5
+              minutos
+            </small>
+          </div>
+          <div className="automation-profile-grid">
+            {profiles.map((profile) => {
+              const job = profile.currentJob,
+                usage = Math.min(
+                  100,
+                  Math.round((profile.today / Math.max(1, profile.dailyLimit)) * 100),
+                )
+              return (
+                <article
+                  key={profile.id}
+                  className={`automation-profile ${profile.online ? 'online' : 'offline'} ${job?.stalled ? 'stalled' : ''}`}
+                >
+                  <div className="profile-live-head">
+                    <span className="profile-device">
+                      <Laptop />
+                    </span>
+                    <div>
+                      <strong>{profile.label}</strong>
+                      <small>
+                        {profile.browserProfile} · {profile.owner}
+                      </small>
+                    </div>
+                    <span className="live-state">
+                      {profile.online ? (
+                        <>
+                          <Wifi />
+                          Online
+                        </>
+                      ) : (
+                        <>
+                          <WifiOff />
+                          Offline
+                        </>
+                      )}
+                    </span>
+                  </div>
+                  <div className="profile-stage">
+                    <span>Etapa atual</span>
+                    <strong>{profile.stage}</strong>
+                    {job ? (
+                      <small>
+                        {job.year} {job.make} {job.model} · trabalho #{job.id}
+                      </small>
+                    ) : (
+                      <small>Nenhum trabalho registrado</small>
+                    )}
+                  </div>
+                  {job && (
+                    <div className="profile-job-metrics">
+                      <span>
+                        <b>{job.attemptCount}</b>
+                        <small>tentativas</small>
+                      </span>
+                      <span>
+                        <b>{formatDuration(job.durationSeconds)}</b>
+                        <small>{job.status === 'filling' ? 'em execução' : 'desde o início'}</small>
+                      </span>
+                      <span>
+                        <b>{job.extensionVersion || '—'}</b>
+                        <small>extensão</small>
+                      </span>
+                    </div>
+                  )}
+                  <div className="daily-cap">
+                    <span>
+                      <small>Uso diário</small>
+                      <b>
+                        {profile.today}/{profile.dailyLimit}
+                      </b>
+                    </span>
+                    <i>
+                      <b style={{ width: `${usage}%` }} />
+                    </i>
+                  </div>
+                  {job?.issues?.length ? (
+                    <div className="profile-issues">
+                      <CircleAlert />
+                      <span>
+                        <strong>
+                          {job.issues.length} ponto{job.issues.length === 1 ? '' : 's'} para revisar
+                        </strong>
+                        <small>{job.issues.slice(0, 2).join(' · ')}</small>
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="profile-ok">
+                      <Check />
+                      Nenhuma falha registrada no último trabalho
+                    </div>
+                  )}
+                  <div className="profile-card-foot">
+                    <span>{lastSeen(profile.lastSeenAt)}</span>
+                    {job?.stalled ? (
+                      <button className="recover-stalled" onClick={() => recoverStalled(job.id)}>
+                        <RotateCcw />
+                        Recuperar trabalho
+                      </button>
+                    ) : (
+                      job &&
+                      ['error', 'awaiting_confirmation'].includes(job.status) && (
+                        <button onClick={() => update(job.id, 'pending')}>
+                          <RotateCcw />
+                          Tentar novamente
+                        </button>
+                      )
+                    )}
+                  </div>
+                </article>
+              )
+            })}
+            {!profiles.length && (
+              <div className="empty">Associe um perfil do Brave para acompanhar a automação.</div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="panel">
+          <div className="queue-filters">
+            <label className="queue-search">
+              <Search />
+              <input
+                value={queueSearch}
+                onChange={(event) => {
+                  setQueueSearch(event.target.value)
+                  setQueuePage(1)
+                  setSelected(new Set())
+                }}
+                placeholder="Buscar veículo, responsável, perfil ou nº do trabalho"
+                aria-label="Buscar trabalhos na fila"
+              />
+              {queueSearch && (
+                <button
+                  onClick={() => {
+                    setQueueSearch('')
+                    setQueuePage(1)
+                    setSelected(new Set())
+                  }}
+                  aria-label="Limpar busca"
+                >
+                  <X />
+                </button>
+              )}
+            </label>
+            <select
+              value={queueStatus}
+              onChange={(event) => {
+                setQueueStatus(event.target.value)
+                setQueuePage(1)
+                setSelected(new Set())
+              }}
+              aria-label="Filtrar por status"
+            >
+              <option value="all">Todos os status</option>
+              <option value="pending">Pendente</option>
+              <option value="filling">Preenchendo</option>
+              <option value="awaiting_confirmation">Aguardando confirmação</option>
+              <option value="error">Com erro</option>
+              <option value="completed">Concluído</option>
+              <option value="canceled">Cancelado</option>
+              <option value="removed">Anúncio removido</option>
+            </select>
+            <select
+              value={queueAccount}
+              onChange={(event) => {
+                setQueueAccount(event.target.value)
+                setQueuePage(1)
+                setSelected(new Set())
+              }}
+              aria-label="Filtrar por perfil"
+            >
+              <option value="all">Todos os perfis</option>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={queueSituation}
+              onChange={(event) => {
+                setQueueSituation(event.target.value)
+                setQueuePage(1)
+                setSelected(new Set())
+              }}
+              aria-label="Filtrar por situação"
+            >
+              <option value="all">Todas as situações</option>
+              <option value="available">Disponível na extensão</option>
+              <option value="scheduled">Agendado</option>
+              <option value="paused">Pausado</option>
+              <option value="stalled">Travado</option>
+              <option value="hidden">Fora da extensão</option>
+            </select>
+            {(queueSearch ||
+              queueStatus !== 'all' ||
+              queueAccount !== 'all' ||
+              queueSituation !== 'all') && (
+              <button
+                className="clear-queue-filters"
+                onClick={() => {
+                  setQueueSearch('')
+                  setQueueStatus('all')
+                  setQueueAccount('all')
+                  setQueueSituation('all')
+                  setQueuePage(1)
+                  setSelected(new Set())
+                }}
+              >
+                <X />
+                Limpar filtros
+              </button>
+            )}
+          </div>
+          <div className="pub-tabs">
+            <strong>
+              {filteredJobs.length === queuePagination.totalItems ? 'Todas' : 'Resultados'}
+            </strong>
+            <span>
+              {filteredJobs.length} de {queuePagination.totalItems} registros
+            </span>
+            <small>{publicationStats.extensionAvailable} disponíveis na extensão</small>
+            <small>
+              {scheduledCount} agendado{scheduledCount === 1 ? '' : 's'}
+            </small>
+            <button onClick={() => load()}>
+              <RotateCcw size={15} />
+              Atualizar
+            </button>
+          </div>
+          {selected.size > 0 && (
+            <div className="bulk-bar">
+              <div>
+                <Check />
+                <strong>{selected.size}</strong>
+                <span>selecionado{selected.size === 1 ? '' : 's'}</span>
+              </div>
+              <HelpTip
+                text="Pausar preserva o trabalho e o histórico, mas impede que a extensão o processe até ser retomado."
+                placement="bottom"
+              />
+              <button onClick={() => changeQueueState([...selected], true)}>
+                <Pause />
+                Pausar
+              </button>
+              <button onClick={() => changeQueueState([...selected], false)}>
+                <Play />
+                Retomar
+              </button>
+              {selected.size > 1 && (
+                <button onClick={() => openBatchSchedule([...selected])}>
+                  <CalendarClock />
+                  Agendar sequência
+                </button>
+              )}
+              <button
+                onClick={() => smartScheduleBatch([...selected])}
+                title="Distribuição inteligente nas janelas de pico"
+              >
+                <Sparkles size={14} />
+                Agendar com IA
+              </button>
+              {canManageQueue && (
+                <button onClick={() => setReassignIds([...selected])}>
+                  <ArrowLeftRight />
+                  Trocar perfil
+                </button>
+              )}
+              <button onClick={() => changeExtensionVisibility([...selected], false)}>
+                <EyeOff />
+                Remover da extensão
+              </button>
+              <button className="bulk-clear" onClick={() => setSelected(new Set())}>
+                <X />
+                Limpar
+              </button>
+            </div>
+          )}
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th className="check-cell">
+                    <input
+                      type="checkbox"
+                      checked={allExtensionSelected}
+                      disabled={!activeJobs.length}
+                      onChange={() =>
+                        setSelected(
+                          allExtensionSelected
+                            ? new Set()
+                            : new Set(activeJobs.map((job) => job.id)),
+                        )
+                      }
+                      aria-label="Selecionar todos os trabalhos ativos"
+                    />
+                  </th>
+                  <th>VEÍCULO</th>
+                  <th>RESPONSÁVEL</th>
+                  <th>PERFIL</th>
+                  <th>STATUS</th>
+                  <th>EXECUÇÃO</th>
+                  <th>AÇÕES</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredJobs.map((j) => {
+                  const active = extensionStatuses.includes(j.status),
+                    controllable = ['pending', 'error', 'awaiting_confirmation'].includes(j.status),
+                    visible = j.extensionVisible !== 0,
+                    scheduled = Boolean(j.scheduledAt && new Date(j.scheduledAt).getTime() > clock)
+                  return (
+                    <tr
+                      key={j.id}
+                      className={`${selected.has(j.id) ? 'selected-row ' : ''}${j.paused ? 'paused-row ' : ''}${scheduled ? 'scheduled-row' : ''}`}
+                    >
+                      <td className="check-cell">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(j.id)}
+                          disabled={!controllable}
+                          onChange={() => toggleSelected(j.id)}
+                          aria-label={`Selecionar ${j.year} ${j.make} ${j.model} na fila`}
+                        />
+                      </td>
+                      <td>
+                        <strong>
+                          {j.year} {j.make} {j.model}
+                        </strong>
+                        <small className="table-sub">
+                          {money.format(j.price)} · trabalho #{j.id}
+                          {active ? ` · prioridade ${j.queuePriority || '—'}` : ''}
+                        </small>
+                      </td>
+                      <td>{j.seller}</td>
+                      <td>
+                        {j.accountLabel}
+                        {j.previousAccountLabel && (
+                          <small className="reassignment-note">
+                            <ArrowLeftRight />
+                            Veio de {j.previousAccountLabel}
+                          </small>
+                        )}
+                        <small
+                          className={`extension-presence ${j.paused ? 'paused' : scheduled ? 'scheduled' : active && visible ? 'visible' : 'hidden'}`}
+                        >
+                          {j.paused ? (
+                            <>
+                              <Pause />
+                              Pausado
+                            </>
+                          ) : scheduled ? (
+                            <>
+                              <CalendarClock />
+                              Agendado
+                            </>
+                          ) : active && visible ? (
+                            <>
+                              <Eye />
+                              Na extensão
+                            </>
+                          ) : active ? (
+                            <>
+                              <EyeOff />
+                              Fora da extensão
+                            </>
+                          ) : null}
+                        </small>
+                      </td>
+                      <td>
+                        <div className="job-status-cell">
+                          <JobBadge
+                            status={j.paused ? 'paused' : scheduled ? 'scheduled' : j.status}
+                            retryCount={j.retryCount ?? 0}
+                            maxRetries={j.maxRetries ?? 3}
+                          />
+                          <JobReport job={j} />
+                        </div>
+                      </td>
+                      <td className="muted execution-cell">
+                        {scheduled ? (
+                          <>
+                            <strong>{new Date(j.scheduledAt!).toLocaleDateString('pt-BR')}</strong>
+                            <small>
+                              {new Date(j.scheduledAt!).toLocaleTimeString('pt-BR', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </small>
+                          </>
+                        ) : (
+                          <>
+                            <strong>Agora</strong>
+                            <small>{new Date(j.createdAt + 'Z').toLocaleDateString('pt-BR')}</small>
+                          </>
+                        )}
+                      </td>
+                      <td>
+                        <div className="job-actions">
+                          {controllable && (
+                            <span className="priority-actions">
+                              <button
+                                title="Subir prioridade"
+                                aria-label={`Subir prioridade de ${j.year} ${j.make} ${j.model}`}
+                                onClick={() => movePriority(j.id, 'up')}
+                              >
+                                <ArrowUp />
+                              </button>
+                              <button
+                                title="Descer prioridade"
+                                aria-label={`Descer prioridade de ${j.year} ${j.make} ${j.model}`}
+                                onClick={() => movePriority(j.id, 'down')}
+                              >
+                                <ArrowDown />
+                              </button>
+                            </span>
+                          )}
+                          {controllable && canManageQueue && (
+                            <button onClick={() => setReassignIds([j.id])}>
+                              <ArrowLeftRight />
+                              Trocar perfil
+                            </button>
+                          )}
+                          {controllable && (
+                            <button onClick={() => setScheduleJob(j)}>
+                              <CalendarClock />
+                              {scheduled ? 'Alterar horário' : 'Agendar'}
+                            </button>
+                          )}
+                          {controllable && (
+                            <button
+                              onClick={() => smartScheduleSingle(j.id)}
+                              title="Agendar na melhor janela de pico com anti-bot"
+                            >
+                              <Sparkles size={12} />
+                              Agendar IA
+                            </button>
+                          )}
+                          {controllable && scheduled && (
+                            <button onClick={() => clearSchedule(j)}>
+                              <CalendarX />
+                              Liberar agora
+                            </button>
+                          )}
+                          {controllable &&
+                            (j.paused ? (
+                              <button onClick={() => changeQueueState([j.id], false)}>
+                                <Play />
+                                Retomar
+                              </button>
+                            ) : (
+                              <button onClick={() => changeQueueState([j.id], true)}>
+                                <Pause />
+                                Pausar
+                              </button>
+                            ))}
+                          {j.status === 'awaiting_confirmation' && (
+                            <>
+                              <button onClick={() => update(j.id, 'completed')}>
+                                <Check />
+                                Confirmar publicado
+                              </button>
+                              {j.fillReport?.saleInterrupted ? (
+                                <button onClick={() => update(j.id, 'canceled')}>
+                                  <X />
+                                  Confirmar que não foi publicado
+                                </button>
+                              ) : (
+                                <button onClick={() => update(j.id, 'pending')}>
+                                  <RotateCcw />
+                                  Preencher novamente
+                                </button>
+                              )}
+                            </>
+                          )}
+                          {j.status === 'completed' && (
+                            <button onClick={() => update(j.id, 'removed')}>
+                              <X />
+                              Marcar anúncio removido
+                            </button>
+                          )}
+                          {j.status === 'error' && (
+                            <button onClick={() => update(j.id, 'pending')}>
+                              <RotateCcw />
+                              Tentar novamente
+                            </button>
+                          )}
+                          {active && visible && !j.paused && (
+                            <button
+                              className="danger-link"
+                              onClick={() => changeExtensionVisibility([j.id], false)}
+                            >
+                              <EyeOff />
+                              Remover da extensão
+                            </button>
+                          )}
+                          {active && !visible && (
+                            <button onClick={() => changeExtensionVisibility([j.id], true)}>
+                              <Eye />
+                              Mostrar na extensão
+                            </button>
+                          )}
+                          <button onClick={() => openTimeline(j)}>
+                            <History />
+                            Histórico
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+            {!filteredJobs.length && (
+              <div className="empty">
+                {queuePagination.totalItems
+                  ? 'Nenhum trabalho corresponde aos filtros.'
+                  : 'A fila ainda está vazia. Adicione o primeiro veículo.'}
+              </div>
+            )}
+          </div>
+          <div className="panel-foot">
+            <span>
+              Página {queuePagination.currentPage} de {queuePagination.totalPages}
+            </span>
+            <div>
+              <button
+                disabled={queuePageLoading || queuePagination.currentPage <= 1}
+                onClick={() => {
+                  setQueuePage((value) => Math.max(1, value - 1))
+                  setSelected(new Set())
+                }}
+              >
+                Anterior
+              </button>
+              <button className="page">{queuePagination.currentPage}</button>
+              <button
+                disabled={
+                  queuePageLoading || queuePagination.currentPage >= queuePagination.totalPages
+                }
+                onClick={() => {
+                  setQueuePage((value) => Math.min(queuePagination.totalPages, value + 1))
+                  setSelected(new Set())
+                }}
+              >
+                Próximo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {open && (
+        <div className="overlay" onMouseDown={() => setOpen(false)}>
+          <aside className="drawer" onMouseDown={(e) => e.stopPropagation()}>
+            <button className="close" onClick={() => setOpen(false)}>
+              <X />
+            </button>
+            <span className="eyebrow">NOVA PUBLICAÇÃO</span>
+            <h2>Adicionar à fila</h2>
+            <p>
+              Escolha o veículo e o perfil local. A extensão seguirá as etapas habilitadas em
+              Configurações.
+            </p>
+            <form onSubmit={enqueue}>
+              <label>
+                <FieldLabel help="Busque no estoque; os resultados são consultados sob demanda e não exigem carregar toda a base.">
+                  Buscar veículo
+                </FieldLabel>
+                <input
+                  value={vehicleSearch}
+                  onChange={(event) => setVehicleSearch(event.target.value)}
+                  placeholder="Marca, modelo, ano ou responsável"
+                  aria-label="Buscar veículo para publicação"
+                />
+              </label>
+              <label>
+                <FieldLabel help="Somente veículos ainda não marcados como Publicado aparecem nesta lista.">
+                  Veículo
+                </FieldLabel>
+                <select
+                  value={selectedVehicleId}
+                  onChange={(event) => setSelectedVehicleId(event.target.value)}
+                  required
+                >
+                  <option value="">Selecione</option>
+                  {vehicleOptions.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.year} {v.make} {v.model}
+                    </option>
+                  ))}
+                </select>
+                {!vehicleOptions.length && (
+                  <small>Nenhum veículo elegível encontrado nesta busca.</small>
+                )}
+              </label>
+              <label>
+                <FieldLabel help="Cada perfil representa uma sessão local separada do Brave. O trabalho aparecerá somente quando este perfil estiver selecionado na extensão.">
+                  Perfil do Brave
+                </FieldLabel>
+                <select name="accountId" required>
+                  <option value="">Selecione o perfil responsável</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <FieldLabel help="Opcional. Enquanto o horário não chegar, o trabalho permanece visível no painel, mas não aparece na extensão.">
+                  Agendar para
+                </FieldLabel>
+                <input name="scheduledAt" type="datetime-local" min={dateTimeLocal()} />
+                <small>Deixe vazio para liberar imediatamente</small>
+              </label>
+              <div className="drawer-submit-help">
+                <HelpTip
+                  tone="warning"
+                  text="Confira em Configurações se Avançar, grupos e Publicar devem ser automáticos para esta operação."
+                />
+                <button className="primary" disabled={!selectedVehicleId}>
+                  Adicionar à fila
+                </button>
+              </div>
+            </form>
+          </aside>
+        </div>
+      )}
+      {batchScheduleIds && (
+        <div className="overlay" onMouseDown={() => setBatchScheduleIds(null)}>
+          <aside
+            className="drawer schedule-drawer batch-schedule-drawer"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button className="close" onClick={() => setBatchScheduleIds(null)}>
+              <X />
+            </button>
+            <span className="eyebrow">PROGRAMAÇÃO DA FILA</span>
+            <h2>Agendar sequência</h2>
+            <p>
+              Distribua {batchScheduleIds.length} trabalhos em horários consecutivos. A ordem atual
+              da fila será respeitada.
+            </p>
+            <form onSubmit={saveBatchSchedule}>
+              <div className="settings-fields">
+                <label>
+                  <FieldLabel help="Horário de liberação do primeiro veículo selecionado.">
+                    Primeiro horário
+                  </FieldLabel>
+                  <input
+                    type="datetime-local"
+                    min={dateTimeLocal()}
+                    value={batchStart}
+                    onChange={(event) => setBatchStart(event.target.value)}
+                    required
+                  />
+                </label>
+                <label>
+                  <FieldLabel help="Tempo entre um trabalho e o próximo. Se um perfil já tiver outro agendamento próximo, o sistema move o horário adiante.">
+                    Intervalo em minutos
+                  </FieldLabel>
+                  <input
+                    type="number"
+                    min="1"
+                    max="1440"
+                    value={batchInterval}
+                    onChange={(event) => setBatchInterval(Number(event.target.value))}
+                    required
+                  />
+                </label>
+              </div>
+              <div className="batch-schedule-preview">
+                {batchScheduleIds.map((id, index) => {
+                  const job = pageJobs.find((item) => item.id === id),
+                    time = batchStart
+                      ? new Date(new Date(batchStart).getTime() + index * batchInterval * 60000)
+                      : null
+                  return job ? (
+                    <span key={id}>
+                      <b>{index + 1}</b>
+                      <div>
+                        <strong>
+                          {job.year} {job.make} {job.model}
+                        </strong>
+                        <small>{job.accountLabel}</small>
+                      </div>
+                      <time>
+                        {time && !Number.isNaN(time.getTime())
+                          ? time.toLocaleString('pt-BR', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : '—'}
+                      </time>
+                    </span>
+                  ) : null
+                })}
+              </div>
+              <small className="batch-conflict-note">
+                <CalendarClock />
+                Conflitos no mesmo perfil serão deslocados automaticamente para o próximo intervalo
+                livre.
+              </small>
+              <div className="schedule-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setBatchScheduleIds(null)}
+                >
+                  Cancelar
+                </button>
+                <button className="primary">
+                  <CalendarClock />
+                  Confirmar sequência
+                </button>
+              </div>
+            </form>
+          </aside>
+        </div>
+      )}
+      {scheduleJob && (
+        <div className="overlay" onMouseDown={() => setScheduleJob(null)}>
+          <aside
+            className="drawer schedule-drawer"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button className="close" onClick={() => setScheduleJob(null)}>
+              <X />
+            </button>
+            <span className="eyebrow">CONTROLE DA FILA</span>
+            <h2>Agendar publicação</h2>
+            <p>
+              {scheduleJob.year} {scheduleJob.make} {scheduleJob.model} · {scheduleJob.accountLabel}
+            </p>
+            <form onSubmit={saveSchedule}>
+              <label>
+                <FieldLabel help="O horário usa o fuso deste computador. A extensão somente receberá o trabalho quando esse momento chegar.">
+                  Data e hora
+                </FieldLabel>
+                <input
+                  name="scheduledAt"
+                  type="datetime-local"
+                  min={dateTimeLocal()}
+                  defaultValue={dateTimeLocal(scheduleJob.scheduledAt)}
+                  required
+                />
+              </label>
+              <div className="schedule-actions">
+                {scheduleJob.scheduledAt && (
+                  <button
+                    type="button"
+                    className="secondary danger-link"
+                    onClick={() => clearSchedule(scheduleJob)}
+                  >
+                    <CalendarX />
+                    Remover agendamento
+                  </button>
+                )}
+                <button className="primary">
+                  <CalendarClock />
+                  Salvar horário
+                </button>
+              </div>
+            </form>
+          </aside>
+        </div>
+      )}
+      {reassignIds && (
+        <div className="overlay" onMouseDown={() => setReassignIds(null)}>
+          <aside
+            className="drawer schedule-drawer"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button className="close" onClick={() => setReassignIds(null)}>
+              <X />
+            </button>
+            <span className="eyebrow">DISTRIBUIÇÃO DA FILA</span>
+            <h2>Trocar perfil responsável</h2>
+            <p>
+              {reassignIds.length} trabalho
+              {reassignIds.length === 1 ? ' será transferido' : 's serão transferidos'} para o final
+              da fila do novo perfil. Agendamento e histórico serão preservados.
+            </p>
+            <form onSubmit={saveReassignment}>
+              <label>
+                <FieldLabel help="O perfil atual deixa de receber estes trabalhos imediatamente. O destino precisa ter espaço no limite diário.">
+                  Perfil de destino
+                </FieldLabel>
+                <select name="accountId" required defaultValue="">
+                  <option value="">Selecione outro perfil</option>
+                  {eligibleReassignAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.label}
+                      {account.owner ? ` · ${account.owner}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {!eligibleReassignAccounts.length && (
+                  <small className="field-error">
+                    Cadastre outro perfil do Brave para redistribuir estes trabalhos.
+                  </small>
+                )}
+              </label>
+              <div className="reassign-preview">
+                {reassignIds.slice(0, 4).map((id) => {
+                  const job = pageJobs.find((item) => item.id === id)
+                  return job ? (
+                    <span key={id}>
+                      <Car />
+                      {job.year} {job.make} {job.model}
+                      <small>{job.accountLabel}</small>
+                    </span>
+                  ) : null
+                })}
+                {reassignIds.length > 4 && (
+                  <em>
+                    +{reassignIds.length - 4} trabalho{reassignIds.length - 4 === 1 ? '' : 's'}
+                  </em>
+                )}
+              </div>
+              <div className="schedule-actions">
+                <button type="button" className="secondary" onClick={() => setReassignIds(null)}>
+                  Cancelar
+                </button>
+                <button className="primary" disabled={!eligibleReassignAccounts.length}>
+                  <ArrowLeftRight />
+                  Confirmar transferência
+                </button>
+              </div>
+            </form>
+          </aside>
+        </div>
+      )}
+      {timelineJob && (
+        <div className="overlay" onMouseDown={() => setTimelineJob(null)}>
+          <aside
+            className="drawer timeline-drawer"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button className="close" onClick={() => setTimelineJob(null)}>
+              <X />
+            </button>
+            <span className="eyebrow">RASTREABILIDADE</span>
+            <h2>Linha do tempo</h2>
+            <p>
+              {timelineJob.year} {timelineJob.make} {timelineJob.model} · trabalho #{timelineJob.id}
+            </p>
+            <div className="timeline-profile">
+              <Laptop />
+              <span>
+                <small>Perfil atual</small>
+                <strong>{timelineJob.accountLabel}</strong>
+              </span>
+            </div>
+            {timelineLoading ? (
+              <div className="timeline-loading">
+                <RotateCcw />
+                Carregando histórico...
+              </div>
+            ) : (
+              <div className="job-timeline">
+                {timelineEvents.map((event) => {
+                  const presentation = jobEventPresentation(event)
+                  return (
+                    <article key={`${event.id}-${event.createdAt}`} className={presentation.tone}>
+                      <i>{presentation.icon}</i>
+                      <div>
+                        <strong>{presentation.title}</strong>
+                        <p>{presentation.detail}</p>
+                        <small>
+                          {event.actor} · {formatJobEventDate(event.createdAt)}
+                        </small>
+                      </div>
+                    </article>
+                  )
+                })}
+                {!timelineEvents.length && (
+                  <div className="mini-empty">Nenhum evento registrado.</div>
+                )}
+              </div>
+            )}
+          </aside>
+        </div>
+      )}
+    </section>
+  )
 }
-export function SettingsView({api,onSaved,theme,onThemeChange}:{api:ApiFn;onSaved:()=>void;theme:'light'|'dark';onThemeChange:(theme:'light'|'dark')=>void}) {
-  const [data,setData]=useState<SettingsData|null>(null),[message,setMessage]=useState('')
-  const [autoAdvance,setAutoAdvance]=useState(false),[fillGroups,setFillGroups]=useState(false),[autoPublish,setAutoPublish]=useState(false),[groups,setGroups]=useState<MarketplaceGroup[]>([])
-  const [autoRetry,setAutoRetry]=useState(false),[maxRetries,setMaxRetries]=useState(3),[autoCurateGroups,setAutoCurateGroups]=useState(false)
-  const [alertTelegramToken,setAlertTelegramToken]=useState(''),[alertTelegramChatId,setAlertTelegramChatId]=useState(''),[alertWebhookUrl,setAlertWebhookUrl]=useState('')
-  const [testingAlert,setTestingAlert]=useState(false),[curating,setCurating]=useState(false)
-  const [geminiApiKey,setGeminiApiKey]=useState(''),[openaiApiKey,setOpenaiApiKey]=useState(''),[aiProvider,setAiProvider]=useState('auto')
-  const [testingKey,setTestingKey]=useState<'gemini'|'openai'|null>(null),[testKeyStatus,setTestKeyStatus]=useState('')
+function formatJobEventDate(value: string) {
+  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`
+  return new Date(normalized).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+function jobEventPresentation(event: JobEvent) {
+  const d = event.details || {},
+    missing = [...(d.missing || []), ...(d.missingGroups || []), ...(d.flowIssues || [])]
+  const values: Record<string, { title: string; detail: string; tone: string; icon: string }> = {
+    created: {
+      title: 'Adicionado à fila',
+      detail: d.scheduledAt
+        ? `Criado com execução agendada para ${formatJobEventDate(String(d.scheduledAt))}.`
+        : `Disponibilizado para o perfil ${d.accountLabel || 'selecionado'}.`,
+      tone: 'success',
+      icon: '+',
+    },
+    paused: {
+      title: 'Trabalho pausado',
+      detail: 'A extensão deixou de receber este trabalho até uma retomada.',
+      tone: 'warning',
+      icon: 'Ⅱ',
+    },
+    resumed: {
+      title: 'Trabalho retomado',
+      detail: 'O trabalho voltou a ficar disponível para a extensão.',
+      tone: 'success',
+      icon: '▶',
+    },
+    hidden_from_extension: {
+      title: 'Removido da extensão',
+      detail: 'Permaneceu salvo no painel e fora da lista do Brave.',
+      tone: 'warning',
+      icon: '–',
+    },
+    shown_in_extension: {
+      title: 'Devolvido à extensão',
+      detail: 'Voltou a aparecer no perfil responsável.',
+      tone: 'success',
+      icon: '+',
+    },
+    priority_changed: {
+      title: 'Prioridade alterada',
+      detail: `Movido para ${d.direction === 'up' ? 'cima' : 'baixo'} na ordem da fila.`,
+      tone: 'info',
+      icon: '↕',
+    },
+    scheduled: {
+      title: 'Execução agendada',
+      detail: `Liberar para a extensão em ${formatJobEventDate(String(d.scheduledAt))}.`,
+      tone: 'info',
+      icon: '◷',
+    },
+    batch_scheduled: {
+      title: 'Incluído em sequência agendada',
+      detail: `Posição ${d.position || '—'} de ${d.total || '—'}, prevista para ${formatJobEventDate(String(d.scheduledAt))} · intervalo de ${d.intervalMinutes || '—'} min.`,
+      tone: 'info',
+      icon: '◷',
+    },
+    schedule_removed: {
+      title: 'Agendamento removido',
+      detail: 'O trabalho foi liberado para execução imediata.',
+      tone: 'success',
+      icon: '✓',
+    },
+    reassigned: {
+      title: 'Perfil responsável alterado',
+      detail: `Transferido de ${event.fromAccount || 'outro perfil'} para ${event.toAccount || 'novo perfil'}.`,
+      tone: 'info',
+      icon: '⇄',
+    },
+    filling_started: {
+      title: 'Preenchimento iniciado',
+      detail: 'A extensão abriu os dados deste veículo para preencher o Marketplace.',
+      tone: 'running',
+      icon: '●',
+    },
+    fill_error: {
+      title: 'Erro no preenchimento',
+      detail: d.error || 'A extensão encontrou uma falha e interrompeu esta tentativa.',
+      tone: 'error',
+      icon: '!',
+    },
+    filled_waiting_confirmation: {
+      title: 'Preenchimento concluído',
+      detail: missing.length
+        ? `${d.filledCount || 0}/${d.totalCount || 0} campos; revisar: ${missing.slice(0, 3).join(', ')}.`
+        : `${d.filledCount || 0}/${d.totalCount || 0} campos e ${d.imageCount || 0} fotos processados. Aguardando confirmação.`,
+      tone: missing.length ? 'warning' : 'success',
+      icon: missing.length ? '!' : '✓',
+    },
+    auto_published: {
+      title: 'Publicado automaticamente',
+      detail: `Publicação concluída${d.selectedGroups ? ` com ${d.selectedGroups} grupo${d.selectedGroups === 1 ? '' : 's'}` : ''}.`,
+      tone: 'success',
+      icon: '✓',
+    },
+    sale_interrupted: {
+      title: 'Publicação interrompida por venda',
+      detail: 'Confira o resultado no Facebook. O veículo permanece vendido.',
+      tone: 'warning',
+      icon: '!',
+    },
+    confirmed_published: {
+      title: 'Publicação confirmada',
+      detail: 'Um usuário confirmou que o anúncio foi publicado.',
+      tone: 'success',
+      icon: '✓',
+    },
+    retry_requested: {
+      title: 'Nova tentativa solicitada',
+      detail: 'O trabalho voltou ao início da fila para ser preenchido novamente.',
+      tone: 'info',
+      icon: '↻',
+    },
+    canceled: {
+      title: 'Trabalho cancelado',
+      detail: 'O trabalho foi encerrado sem publicação.',
+      tone: 'error',
+      icon: '×',
+    },
+    marked_removed: {
+      title: 'Anúncio removido',
+      detail: 'O anúncio publicado foi marcado como removido.',
+      tone: 'warning',
+      icon: '×',
+    },
+    stalled_recovered: {
+      title: 'Trabalho travado recuperado',
+      detail: `A execução anterior foi interrompida após ${d.elapsedMinutes || 0} min e devolvida à fila.`,
+      tone: 'warning',
+      icon: '↻',
+    },
+  }
+  return (
+    values[event.eventType] || {
+      title: 'Situação atualizada',
+      detail: String(d.status || 'O trabalho recebeu uma atualização.'),
+      tone: 'info',
+      icon: '•',
+    }
+  )
+}
+function JobBadge({
+  status,
+  retryCount,
+  maxRetries,
+}: {
+  status: string
+  retryCount?: number
+  maxRetries?: number
+}) {
+  const labels: Record<string, string> = {
+    pending: 'Pendente',
+    filling: 'Preenchendo',
+    paused: 'Pausado',
+    scheduled: 'Agendado',
+    awaiting_confirmation: 'Aguardando confirmação',
+    completed: 'Concluída',
+    error: 'Erro',
+    canceled: 'Cancelada',
+    removed: 'Anúncio removido',
+  }
+  return (
+    <span className={`job-badge ${status}`}>
+      {labels[status] || status}
+      {Number(retryCount) > 0 ? (
+        <small style={{ marginLeft: 4, opacity: 0.85 }}>
+          ({retryCount}/{maxRetries || 3}x)
+        </small>
+      ) : null}
+    </span>
+  )
+}
+function JobReport({ job }: { job: Job }) {
+  if (job.fillReport) {
+    if (job.fillReport.saleInterrupted)
+      return (
+        <small className="job-report warning">
+          {job.status === 'awaiting_confirmation'
+            ? 'Veículo vendido: confira no Facebook e confirme a publicação ou cancele o trabalho.'
+            : job.status === 'completed'
+              ? 'Veículo vendido: remova o anúncio no Facebook.'
+              : 'Trabalho encerrado após a venda do veículo.'}
+        </small>
+      )
+    const review = [
+      ...job.fillReport.missing,
+      ...(job.fillReport.missingGroups || []).map((group) => `Grupo: ${group}`),
+      ...(job.fillReport.flowIssues || []),
+    ]
+    return (
+      <small
+        className={review.length ? 'job-report warning' : 'job-report'}
+        title={review.length ? `Revisar: ${review.join(', ')}` : 'Fluxo concluído sem pendências'}
+      >
+        {job.fillReport.filledCount}/{job.fillReport.totalCount} campos ·{' '}
+        {job.fillReport.imageCount} fotos
+        {job.fillReport.selectedGroups?.length
+          ? ` · ${job.fillReport.selectedGroups.length} grupos`
+          : ''}
+        {job.fillReport.published
+          ? ' · publicado automaticamente'
+          : job.fillReport.publishAttempted
+            ? ' · publicação enviada; verifique no Facebook'
+            : job.fillReport.advanced
+              ? ' · avançou'
+              : ''}
+        {job.extensionVersion ? ` · ext. ${job.extensionVersion}` : ''}
+      </small>
+    )
+  }
+  if (job.errorCode) return <small className="job-report error">{job.errorCode}</small>
+  return null
+}
 
-  useEffect(()=>{api<SettingsData>('/settings').then(result=>{
-    setData(result);
-    setAutoAdvance(Boolean(result.settings.autoAdvance));
-    setFillGroups(Boolean(result.settings.fillGroups));
-    setAutoPublish(Boolean(result.settings.autoPublish));
-    setAutoRetry(Boolean(result.settings.autoRetry));
-    setMaxRetries(Number(result.settings.maxRetries)||3);
-    setAutoCurateGroups(Boolean(result.settings.autoCurateGroups));
-    setAlertTelegramToken(result.settings.alertTelegramToken||'');
-    setAlertTelegramChatId(result.settings.alertTelegramChatId||'');
-    setAlertWebhookUrl(result.settings.alertWebhookUrl||'');
-    setGeminiApiKey(result.settings.geminiApiKey||'');
-    setOpenaiApiKey(result.settings.openaiApiKey||'');
-    setAiProvider(result.settings.aiProvider||'auto');
-    setGroups((result.settings.groups||[]).map((group:MarketplaceGroup,index:number)=>({...group,active:Boolean(group.active),priority:group.priority||index+1})))
-  })},[api])
+export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[] }) {
+  const [issues, setIssues] = useState<ReportIssue[]>([]),
+    [view, setView] = useState<'performance' | 'issues'>('performance'),
+    [period, setPeriod] = useState('30'),
+    [seller, setSeller] = useState('Todos'),
+    [loading, setLoading] = useState(true),
+    [issueSearch, setIssueSearch] = useState(''),
+    [issueSeverity, setIssueSeverity] = useState('all'),
+    [issueCategory, setIssueCategory] = useState('all'),
+    [issueAccount, setIssueAccount] = useState('all'),
+    [activeOnly, setActiveOnly] = useState(false),
+    [message, setMessage] = useState('')
+  const [issueCursor, setIssueCursor] = useState<number | null>(null),
+    [issuesHaveMore, setIssuesHaveMore] = useState(false),
+    [issuesLoadingMore, setIssuesLoadingMore] = useState(false)
+  const [inventorySummary, setInventorySummary] = useState<InventoryStats | null>(null)
+  const [performance, setPerformance] = useState<ReportPerformance | null>(null)
+  const [reportNow] = useState(() => Date.now())
+  const loadReports = useCallback(
+    () =>
+      Promise.all([
+        api<IssuePage>('/reports/issues?limit=50'),
+        api<InventoryStats>('/vehicles/summary'),
+        api<ReportPerformance>(
+          `/reports/performance?period=${period}&seller=${encodeURIComponent(seller)}`,
+        ),
+      ]).then(([issueReport, inventory, reportPerformance]) => {
+        setIssues(issueReport.issues)
+        setIssueCursor(issueReport.page.nextCursor)
+        setIssuesHaveMore(issueReport.page.hasMore)
+        setInventorySummary(inventory)
+        setPerformance(reportPerformance)
+      }),
+    [api, period, seller],
+  )
+  async function loadMoreIssues() {
+    if (!issuesHaveMore || issueCursor === null || issuesLoadingMore) return
+    setIssuesLoadingMore(true)
+    try {
+      const result = await api<IssuePage>(`/reports/issues?limit=50&before=${issueCursor}`)
+      setIssues((current) => [...current, ...result.issues])
+      setIssueCursor(result.page.nextCursor)
+      setIssuesHaveMore(result.page.hasMore)
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : 'Não foi possível carregar mais ocorrências.',
+      )
+    } finally {
+      setIssuesLoadingMore(false)
+    }
+  }
+  useEffect(() => {
+    loadReports().finally(() => setLoading(false))
+  }, [loadReports])
+  const sellers = useMemo(
+    () => [
+      'Todos',
+      ...new Set([
+        ...(inventorySummary?.sellers.map((item) => item.name) ||
+          vehicles.map((vehicle) => vehicle.seller)),
+        ...(performance?.sellerOptions || []),
+      ]),
+    ],
+    [inventorySummary, vehicles, performance],
+  )
+  const scopedInventory = useMemo(
+    () =>
+      seller === 'Todos'
+        ? inventorySummary
+        : inventorySummary?.sellers.find((item) => item.name === seller),
+    [inventorySummary, seller],
+  )
+  const scopedJobs = performance?.recent || []
+  const reportSummary = performance?.summary
+  const total = Number(scopedInventory?.total ?? vehicles.length)
+  const inventoryValue = Number(
+    scopedInventory?.inventoryValue ??
+      vehicles.reduce((sum, vehicle) => sum + Number(vehicle.price || 0), 0),
+  )
+  const averagePrice = total ? inventoryValue / total : 0
+  const publishedVehicles = Number(
+    scopedInventory?.published ??
+      vehicles.filter((vehicle) => vehicle.status === 'Publicado').length,
+  )
+  const attentionVehicles = Number(
+    scopedInventory?.attention ?? vehicles.filter((vehicle) => vehicle.status === 'Atenção').length,
+  )
+  const withPhotos = Number(
+    scopedInventory?.withPhotos ??
+      vehicles.filter((vehicle) => Number(vehicle.imageCount || 0) > 0).length,
+  )
+  const photoCoverage = total ? Math.round((withPhotos / total) * 100) : 0
+  const reportJobTotal = Number(reportSummary?.total || 0)
+  const completed = Number(reportSummary?.completed || 0)
+  const errors = Number(reportSummary?.errors || 0)
+  const active = Number(reportSummary?.active || 0)
+  const successRate = reportJobTotal ? Math.round((completed / reportJobTotal) * 100) : 0
+  const automatic = Number(reportSummary?.automatic || 0)
+  const groupsSelected = Number(reportSummary?.groupsSelected || 0)
+  const byStatus = [
+    ['Publicado', 'publishedStatus'],
+    ['Pronto', 'readyStatus'],
+    ['Rascunho', 'draftStatus'],
+    ['Atenção', 'attentionStatus'],
+    ['Vendido', 'soldStatus'],
+  ].map(([label, key]) => ({
+    label,
+    count: Number(
+      scopedInventory?.[key as keyof InventoryValues] ??
+        vehicles.filter((vehicle) => vehicle.status === label).length,
+    ),
+  }))
+  const maxStatus = Math.max(1, ...byStatus.map((item) => item.count))
+  const funnel = [
+    { label: 'Trabalhos criados', count: reportJobTotal, tone: 'blue' },
+    { label: 'Em andamento', count: active, tone: 'amber' },
+    { label: 'Concluídos', count: completed, tone: 'green' },
+    { label: 'Com erro', count: errors, tone: 'red' },
+  ]
+  const sellerPerformance = performance?.sellerPerformance || []
+  const profilePerformance = performance?.profilePerformance || []
+  const recent = scopedJobs
+  const periodLabel = period === 'all' ? 'todo o histórico' : `últimos ${period} dias`
+  const issueAccounts = useMemo(
+    () => ['all', ...new Set(issues.map((issue) => issue.accountLabel))],
+    [issues],
+  )
+  const scopedIssues = useMemo(() => {
+    const cutoff = period === 'all' ? 0 : reportNow - Number(period) * 86400000,
+      query = issueSearch
+        .trim()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+    return issues.filter((issue) => {
+      const occurred = new Date(`${issue.occurredAt.replace(' ', 'T')}Z`).getTime(),
+        haystack =
+          `${issue.message} ${issue.year} ${issue.make} ${issue.model} ${issue.accountLabel} ${issue.seller} ${issue.jobId}`
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+      return (
+        (!cutoff || occurred >= cutoff) &&
+        (seller === 'Todos' || issue.seller === seller) &&
+        (issueSeverity === 'all' || issue.severity === issueSeverity) &&
+        (issueCategory === 'all' || issue.category === issueCategory) &&
+        (issueAccount === 'all' || issue.accountLabel === issueAccount) &&
+        (!activeOnly || issue.active) &&
+        (!query || haystack.includes(query))
+      )
+    })
+  }, [
+    issues,
+    period,
+    seller,
+    issueSeverity,
+    issueCategory,
+    issueAccount,
+    activeOnly,
+    issueSearch,
+    reportNow,
+  ])
+  const issueErrors = scopedIssues.filter((issue) => issue.severity === 'error').length,
+    issueWarnings = scopedIssues.length - issueErrors,
+    activeIssues = scopedIssues.filter((issue) => issue.active).length,
+    affectedJobs = new Set(scopedIssues.map((issue) => issue.jobId)).size
+  const categoryLabels: Record<string, string> = {
+    execution: 'Execução',
+    fields: 'Campos',
+    groups: 'Grupos',
+    flow: 'Fluxo',
+    recovery: 'Recuperação',
+    duplicate: 'Duplicidade',
+  }
+  const issueCategories = ['execution', 'fields', 'groups', 'flow', 'recovery', 'duplicate']
+    .map((category) => ({
+      category,
+      label: categoryLabels[category],
+      count: scopedIssues.filter((issue) => issue.category === category).length,
+    }))
+    .filter((item) => item.count)
+  const maxIssueCategory = Math.max(1, ...issueCategories.map((item) => item.count))
+  const recurringIssues = [
+    ...new Map(
+      scopedIssues.map((issue) => [
+        issue.message,
+        {
+          message: issue.message,
+          count: scopedIssues.filter((item) => item.message === issue.message).length,
+          severity: issue.severity,
+        },
+      ]),
+    ).values(),
+  ]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6)
+  async function retryIssue(jobId: number) {
+    try {
+      const { job } = await api<{ job: Pick<Job, 'id' | 'status' | 'fillReport'> }>(
+        `/publications/${jobId}`,
+      )
+      const confirmNoPublication = Boolean(job.fillReport?.publishAttempted)
+      if (
+        confirmNoPublication &&
+        !window.confirm(
+          'Confirme primeiro em “Seus classificados” que o anúncio NÃO foi criado. Liberar uma nova tentativa sem verificar pode gerar um anúncio duplicado.',
+        )
+      )
+        return
+      await api(`/publications/${jobId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'pending', confirmNoPublication }),
+      })
+      setMessage(`Trabalho #${jobId} devolvido à fila.`)
+      await loadReports()
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : 'Não foi possível devolver o trabalho à fila.',
+      )
+    }
+  }
+  if (loading)
+    return (
+      <section className="content">
+        <div className="empty">Carregando relatórios...</div>
+      </section>
+    )
+  return (
+    <section className="content reports-page">
+      <div className="title-row">
+        <div>
+          <span className="page-kicker">INTELIGÊNCIA OPERACIONAL</span>
+          <h1>Relatórios</h1>
+          <p>Estoque atual e desempenho das publicações para orientar a operação.</p>
+        </div>
+        <button className="secondary" onClick={() => window.print()}>
+          <BarChart3 size={17} />
+          Imprimir relatório
+        </button>
+      </div>
+      {message && (
+        <div className="inline-message success">
+          {message}
+          <button onClick={() => setMessage('')}>
+            <X />
+          </button>
+        </div>
+      )}
+      <div className="report-view-tabs">
+        <button
+          className={view === 'performance' ? 'active' : ''}
+          onClick={() => setView('performance')}
+        >
+          <BarChart3 />
+          Desempenho e estoque
+        </button>
+        <button className={view === 'issues' ? 'active' : ''} onClick={() => setView('issues')}>
+          <CircleAlert />
+          Erros e avisos
+          {issues.filter((issue) => issue.active).length > 0 && (
+            <span>{issues.filter((issue) => issue.active).length}</span>
+          )}
+        </button>
+        <button className="refresh-view" onClick={() => loadReports()}>
+          <RotateCcw />
+          Atualizar
+        </button>
+      </div>
+      <div className="report-filters">
+        <div>
+          <Filter />
+          <span>Filtros</span>
+        </div>
+        <label>
+          Período das publicações
+          <select value={period} onChange={(event) => setPeriod(event.target.value)}>
+            <option value="7">Últimos 7 dias</option>
+            <option value="30">Últimos 30 dias</option>
+            <option value="90">Últimos 90 dias</option>
+            <option value="all">Todo o histórico</option>
+          </select>
+        </label>
+        <label>
+          Responsável
+          <select value={seller} onChange={(event) => setSeller(event.target.value)}>
+            {sellers.map((name) => (
+              <option key={name}>{name}</option>
+            ))}
+          </select>
+        </label>
+        <small>Estoque: posição atual · Publicações: {periodLabel}</small>
+      </div>
+      {view === 'performance' ? (
+        <>
+          <div className="report-kpis rich-kpis">
+            <article>
+              <span className="kpi-icon">
+                <WalletCards />
+              </span>
+              <div>
+                <span>Valor em estoque</span>
+                <strong>{money.format(inventoryValue)}</strong>
+                <small>
+                  {total} veículo{total === 1 ? '' : 's'} no recorte
+                </small>
+              </div>
+            </article>
+            <article>
+              <span className="kpi-icon">
+                <TrendingUp />
+              </span>
+              <div>
+                <span>Preço médio</span>
+                <strong>{money.format(averagePrice)}</strong>
+                <small>Média do estoque atual</small>
+              </div>
+            </article>
+            <article>
+              <span className="kpi-icon">
+                <Car />
+              </span>
+              <div>
+                <span>Estoque publicado</span>
+                <strong>{total ? Math.round((publishedVehicles / total) * 100) : 0}%</strong>
+                <small>
+                  {publishedVehicles} publicado{publishedVehicles === 1 ? '' : 's'} ·{' '}
+                  {attentionVehicles} em atenção
+                </small>
+              </div>
+            </article>
+            <article>
+              <span className="kpi-icon">
+                <Camera />
+              </span>
+              <div>
+                <span>Cobertura de fotos</span>
+                <strong>{photoCoverage}%</strong>
+                <small>
+                  {withPhotos} de {total} com pelo menos uma foto
+                </small>
+              </div>
+            </article>
+            <article>
+              <span className="kpi-icon">
+                <Check />
+              </span>
+              <div>
+                <span>Taxa de conclusão</span>
+                <strong>{successRate}%</strong>
+                <small>
+                  {completed} concluída{completed === 1 ? '' : 's'} em {reportJobTotal} trabalho
+                  {reportJobTotal === 1 ? '' : 's'}
+                </small>
+              </div>
+            </article>
+            <article>
+              <span className="kpi-icon">
+                <Send />
+              </span>
+              <div>
+                <span>Automação utilizada</span>
+                <strong>{automatic}</strong>
+                <small>{groupsSelected} seleções de grupos registradas</small>
+              </div>
+            </article>
+          </div>
+          <div className="report-grid primary-report-grid">
+            <article className="module-card">
+              <div className="module-head">
+                <div>
+                  <h2>Funil de publicação</h2>
+                  <span>Movimentações em {periodLabel}</span>
+                </div>
+              </div>
+              <div className="funnel-list">
+                {funnel.map((item, index) => (
+                  <div key={item.label}>
+                    <span className={`funnel-index ${item.tone}`}>{index + 1}</span>
+                    <div>
+                      <strong>{item.label}</strong>
+                      <small>
+                        {reportJobTotal ? Math.round((item.count / reportJobTotal) * 100) : 0}% dos
+                        trabalhos no recorte
+                      </small>
+                    </div>
+                    <b>{item.count}</b>
+                  </div>
+                ))}
+              </div>
+            </article>
+            <article className="module-card">
+              <div className="module-head">
+                <div>
+                  <h2>Distribuição do estoque</h2>
+                  <span>Veículos por situação atual</span>
+                </div>
+              </div>
+              <div className="bars status-bars">
+                {byStatus.map((item) => (
+                  <div key={item.label}>
+                    <div>
+                      <span>{item.label}</span>
+                      <strong>{item.count}</strong>
+                    </div>
+                    <i>
+                      <b style={{ width: `${(item.count / maxStatus) * 100}%` }} />
+                    </i>
+                  </div>
+                ))}
+              </div>
+            </article>
+          </div>
+          <div className="report-grid secondary-report-grid">
+            <article className="module-card">
+              <div className="module-head">
+                <div>
+                  <h2>Qualidade das fotos</h2>
+                  <span>Cobertura do estoque atual</span>
+                </div>
+              </div>
+              <div className="photo-quality">
+                <div
+                  className="coverage-ring"
+                  style={{ '--coverage': `${photoCoverage * 3.6}deg` } as React.CSSProperties}
+                >
+                  <span>
+                    <strong>{photoCoverage}%</strong>
+                    <small>cobertura</small>
+                  </span>
+                </div>
+                <div>
+                  <div>
+                    <span>Sem fotos</span>
+                    <strong>{Number(scopedInventory?.noPhotos ?? total - withPhotos)}</strong>
+                  </div>
+                  <div>
+                    <span>1 a 4 fotos</span>
+                    <strong>
+                      {Number(
+                        scopedInventory?.photos1to4 ??
+                          vehicles.filter(
+                            (vehicle) =>
+                              Number(vehicle.imageCount || 0) >= 1 &&
+                              Number(vehicle.imageCount || 0) <= 4,
+                          ).length,
+                      )}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>5 a 9 fotos</span>
+                    <strong>
+                      {Number(
+                        scopedInventory?.photos5to9 ??
+                          vehicles.filter(
+                            (vehicle) =>
+                              Number(vehicle.imageCount || 0) >= 5 &&
+                              Number(vehicle.imageCount || 0) <= 9,
+                          ).length,
+                      )}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>10 ou mais</span>
+                    <strong>
+                      {Number(
+                        scopedInventory?.photos10plus ??
+                          vehicles.filter((vehicle) => Number(vehicle.imageCount || 0) >= 10)
+                            .length,
+                      )}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+            </article>
+            <article className="module-card">
+              <div className="module-head">
+                <div>
+                  <h2>Desempenho por responsável</h2>
+                  <span>Conclusões em {periodLabel}</span>
+                </div>
+              </div>
+              <div className="ranking-list">
+                {sellerPerformance.length ? (
+                  sellerPerformance.slice(0, 6).map((item) => (
+                    <div key={item.name}>
+                      <span className="ranking-avatar">
+                        {item.name
+                          .split(' ')
+                          .map((part) => part[0])
+                          .slice(0, 2)
+                          .join('')}
+                      </span>
+                      <div>
+                        <strong>{item.name}</strong>
+                        <small>
+                          {item.done} concluída{item.done === 1 ? '' : 's'} em {item.total}
+                        </small>
+                        <i>
+                          <b style={{ width: `${item.rate}%` }} />
+                        </i>
+                      </div>
+                      <em>{item.rate}%</em>
+                    </div>
+                  ))
+                ) : (
+                  <div className="mini-empty">Sem publicações no período.</div>
+                )}
+              </div>
+            </article>
+          </div>
+          <article className="module-card profile-performance">
+            <div className="module-head">
+              <div>
+                <h2>Desempenho por perfil do Brave</h2>
+                <span>Volume, conclusões e erros no período</span>
+              </div>
+            </div>
+            <div className="profile-metrics">
+              {profilePerformance.length ? (
+                profilePerformance.map((item) => (
+                  <div key={item.name}>
+                    <div>
+                      <Laptop />
+                      <span>
+                        <strong>{item.name}</strong>
+                        <small>
+                          {item.total} trabalho{item.total === 1 ? '' : 's'} processado
+                          {item.total === 1 ? '' : 's'}
+                        </small>
+                      </span>
+                    </div>
+                    <span>
+                      <b>{item.done}</b>
+                      <small>concluídos</small>
+                    </span>
+                    <span className={item.fail ? 'metric-alert' : ''}>
+                      <b>{item.fail}</b>
+                      <small>erros</small>
+                    </span>
+                    <span>
+                      <b>{item.rate}%</b>
+                      <small>conclusão</small>
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="mini-empty">Nenhuma atividade de perfil neste recorte.</div>
+              )}
+            </div>
+          </article>
+          <article className="module-card recent-operations">
+            <div className="module-head">
+              <div>
+                <h2>Operações recentes</h2>
+                <span>Últimos trabalhos no recorte selecionado</span>
+              </div>
+              <span className="source-freshness">Atualizado com os dados do painel</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>VEÍCULO</th>
+                    <th>RESPONSÁVEL</th>
+                    <th>PERFIL</th>
+                    <th>RESULTADO</th>
+                    <th>AUTOMAÇÃO</th>
+                    <th>DATA</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recent.map((job) => {
+                    const review = [
+                      ...(job.fillReport?.missing || []),
+                      ...(job.fillReport?.missingGroups || []).map((group) => `Grupo: ${group}`),
+                      ...(job.fillReport?.flowIssues || []),
+                    ]
+                    return (
+                      <tr key={job.id}>
+                        <td>
+                          <strong>
+                            {job.year} {job.make} {job.model}
+                          </strong>
+                          <small className="table-sub">Trabalho #{job.id}</small>
+                        </td>
+                        <td>{job.seller}</td>
+                        <td>{job.accountLabel}</td>
+                        <td>
+                          <JobBadge status={job.status} />
+                          {review.length > 0 && (
+                            <small className="table-warning" title={review.join(', ')}>
+                              {review.length} pendência{review.length === 1 ? '' : 's'}
+                            </small>
+                          )}
+                        </td>
+                        <td>
+                          {job.fillReport?.published ? (
+                            <span className="automation-chip auto">Publicação automática</span>
+                          ) : job.fillReport?.advanced ? (
+                            <span className="automation-chip">Avançou</span>
+                          ) : (
+                            <span className="muted">Manual</span>
+                          )}
+                        </td>
+                        <td className="muted">
+                          {new Date(`${job.createdAt}Z`).toLocaleDateString('pt-BR')}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              {!recent.length && (
+                <div className="empty">
+                  Nenhuma operação encontrada para os filtros selecionados.
+                </div>
+              )}
+            </div>
+          </article>
+        </>
+      ) : (
+        <>
+          <div className="issue-filters">
+            <label className="queue-search">
+              <Search />
+              <input
+                value={issueSearch}
+                onChange={(event) => setIssueSearch(event.target.value)}
+                placeholder="Buscar mensagem, veículo, perfil ou nº do trabalho"
+                aria-label="Buscar erros e avisos"
+              />
+              {issueSearch && (
+                <button onClick={() => setIssueSearch('')} aria-label="Limpar busca">
+                  <X />
+                </button>
+              )}
+            </label>
+            <select
+              value={issueSeverity}
+              onChange={(event) => setIssueSeverity(event.target.value)}
+              aria-label="Filtrar por severidade"
+            >
+              <option value="all">Erros e avisos</option>
+              <option value="error">Somente erros</option>
+              <option value="warning">Somente avisos</option>
+            </select>
+            <select
+              value={issueCategory}
+              onChange={(event) => setIssueCategory(event.target.value)}
+              aria-label="Filtrar por categoria"
+            >
+              <option value="all">Todas as categorias</option>
+              <option value="execution">Execução</option>
+              <option value="fields">Campos</option>
+              <option value="groups">Grupos</option>
+              <option value="flow">Fluxo</option>
+              <option value="duplicate">Duplicidade</option>
+              <option value="recovery">Recuperação</option>
+            </select>
+            <select
+              value={issueAccount}
+              onChange={(event) => setIssueAccount(event.target.value)}
+              aria-label="Filtrar por perfil"
+            >
+              <option value="all">Todos os perfis</option>
+              {issueAccounts.slice(1).map((account) => (
+                <option key={account}>{account}</option>
+              ))}
+            </select>
+            <label className="active-issue-toggle">
+              <input
+                type="checkbox"
+                checked={activeOnly}
+                onChange={(event) => setActiveOnly(event.target.checked)}
+              />
+              <span>Somente pendentes atuais</span>
+            </label>
+          </div>
+          <div className="issue-kpis">
+            <article className="error">
+              <span>
+                <CircleAlert />
+              </span>
+              <div>
+                <small>Erros de execução</small>
+                <strong>{issueErrors}</strong>
+                <em>tentativas interrompidas</em>
+              </div>
+            </article>
+            <article className="warning">
+              <span>
+                <CircleAlert />
+              </span>
+              <div>
+                <small>Avisos</small>
+                <strong>{issueWarnings}</strong>
+                <em>pontos de atenção</em>
+              </div>
+            </article>
+            <article>
+              <span>
+                <Car />
+              </span>
+              <div>
+                <small>Trabalhos afetados</small>
+                <strong>{affectedJobs}</strong>
+                <em>no recorte selecionado</em>
+              </div>
+            </article>
+            <article className="active">
+              <span>
+                <Activity />
+              </span>
+              <div>
+                <small>Pendências atuais</small>
+                <strong>{activeIssues}</strong>
+                <em>ainda precisam de ação</em>
+              </div>
+            </article>
+          </div>
+          <div className="report-grid issue-summary-grid">
+            <article className="module-card">
+              <div className="module-head">
+                <div>
+                  <h2>Ocorrências por categoria</h2>
+                  <span>Cada campo, grupo ou falha conta como uma ocorrência</span>
+                </div>
+              </div>
+              <div className="issue-category-bars">
+                {issueCategories.map((item) => (
+                  <div key={item.category}>
+                    <div>
+                      <span>{item.label}</span>
+                      <strong>{item.count}</strong>
+                    </div>
+                    <i>
+                      <b style={{ width: `${(item.count / maxIssueCategory) * 100}%` }} />
+                    </i>
+                  </div>
+                ))}
+                {!issueCategories.length && (
+                  <div className="mini-empty">Nenhuma ocorrência para os filtros selecionados.</div>
+                )}
+              </div>
+            </article>
+            <article className="module-card">
+              <div className="module-head">
+                <div>
+                  <h2>Mais recorrentes</h2>
+                  <span>Mensagens repetidas que merecem correção prioritária</span>
+                </div>
+              </div>
+              <div className="recurring-issues">
+                {recurringIssues.map((item, index) => (
+                  <div key={item.message}>
+                    <span className={item.severity}>{index + 1}</span>
+                    <p title={item.message}>{item.message}</p>
+                    <strong>{item.count}×</strong>
+                  </div>
+                ))}
+                {!recurringIssues.length && (
+                  <div className="mini-empty">Nenhum padrão recorrente neste recorte.</div>
+                )}
+              </div>
+            </article>
+          </div>
+          <article className="module-card issue-table">
+            <div className="module-head">
+              <div>
+                <h2>Registro de erros e avisos</h2>
+                <span>Ocorrências carregadas do histórico da automação</span>
+              </div>
+              <span className="source-freshness">
+                {scopedIssues.length} ocorrência{scopedIssues.length === 1 ? '' : 's'} ·{' '}
+                {activeIssues} pendente{activeIssues === 1 ? '' : 's'}
+              </span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>SEVERIDADE</th>
+                    <th>OCORRÊNCIA</th>
+                    <th>VEÍCULO / TRABALHO</th>
+                    <th>RESPONSÁVEL</th>
+                    <th>PERFIL</th>
+                    <th>DATA</th>
+                    <th>SITUAÇÃO</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scopedIssues.map((issue, index) => (
+                    <tr key={`${issue.eventId}-${issue.category}-${index}`}>
+                      <td>
+                        <span className={`issue-severity ${issue.severity}`}>
+                          {issue.severity === 'error' ? 'Erro' : 'Aviso'}
+                        </span>
+                        <small className="issue-category">{categoryLabels[issue.category]}</small>
+                      </td>
+                      <td className="issue-message">
+                        {issue.message}
+                        {issue.extensionVersion && <small>Extensão {issue.extensionVersion}</small>}
+                      </td>
+                      <td>
+                        <strong>
+                          {issue.year} {issue.make} {issue.model}
+                        </strong>
+                        <small className="table-sub">Trabalho #{issue.jobId}</small>
+                      </td>
+                      <td>{issue.seller}</td>
+                      <td>{issue.accountLabel}</td>
+                      <td className="muted">
+                        {new Date(`${issue.occurredAt.replace(' ', 'T')}Z`).toLocaleString(
+                          'pt-BR',
+                          { dateStyle: 'short', timeStyle: 'short' },
+                        )}
+                      </td>
+                      <td>
+                        {issue.active ? (
+                          <div className="issue-action">
+                            <span className="issue-state active">Pendente atual</span>
+                            {['error', 'awaiting_confirmation'].includes(issue.jobStatus) && (
+                              <button onClick={() => retryIssue(issue.jobId)}>
+                                <RotateCcw />
+                                Tentar novamente
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="issue-state resolved">Histórico</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!scopedIssues.length && (
+                <div className="empty">
+                  Nenhum erro ou aviso encontrado para os filtros selecionados.
+                </div>
+              )}
+            </div>
+            {issuesHaveMore && (
+              <div className="settings-save">
+                <button className="secondary" onClick={loadMoreIssues} disabled={issuesLoadingMore}>
+                  <RotateCcw />
+                  {issuesLoadingMore ? 'Carregando...' : 'Carregar mais ocorrências'}
+                </button>
+              </div>
+            )}
+          </article>
+        </>
+      )}
+    </section>
+  )
+}
+export function SettingsView({
+  api,
+  onSaved,
+  theme,
+  onThemeChange,
+}: {
+  api: ApiFn
+  onSaved: () => void
+  theme: 'light' | 'dark'
+  onThemeChange: (theme: 'light' | 'dark') => void
+}) {
+  const [data, setData] = useState<SettingsData | null>(null),
+    [message, setMessage] = useState('')
+  const [autoAdvance, setAutoAdvance] = useState(false),
+    [fillGroups, setFillGroups] = useState(false),
+    [autoPublish, setAutoPublish] = useState(false),
+    [groups, setGroups] = useState<MarketplaceGroup[]>([])
+  const [autoRetry, setAutoRetry] = useState(false),
+    [maxRetries, setMaxRetries] = useState(3),
+    [autoCurateGroups, setAutoCurateGroups] = useState(false)
+  const [alertTelegramToken, setAlertTelegramToken] = useState(''),
+    [alertTelegramChatId, setAlertTelegramChatId] = useState(''),
+    [alertWebhookUrl, setAlertWebhookUrl] = useState('')
+  const [testingAlert, setTestingAlert] = useState(false),
+    [curating, setCurating] = useState(false)
+  const [geminiApiKey, setGeminiApiKey] = useState(''),
+    [openaiApiKey, setOpenaiApiKey] = useState(''),
+    [aiProvider, setAiProvider] = useState('auto')
+  const [testingKey, setTestingKey] = useState<'gemini' | 'openai' | null>(null),
+    [testKeyStatus, setTestKeyStatus] = useState('')
 
-  function updateGroup(index:number,patch:Partial<MarketplaceGroup>){setGroups(current=>current.map((group,itemIndex)=>itemIndex===index?{...group,...patch}:group))}
-  function moveGroup(index:number,direction:-1|1){setGroups(current=>{const target=index+direction;if(target<0||target>=current.length)return current;const next=[...current];[next[index],next[target]]=[next[target],next[index]];return next.map((group,itemIndex)=>({...group,priority:itemIndex+1}))})}
+  useEffect(() => {
+    api<SettingsData>('/settings').then((result) => {
+      setData(result)
+      setAutoAdvance(Boolean(result.settings.autoAdvance))
+      setFillGroups(Boolean(result.settings.fillGroups))
+      setAutoPublish(Boolean(result.settings.autoPublish))
+      setAutoRetry(Boolean(result.settings.autoRetry))
+      setMaxRetries(Number(result.settings.maxRetries) || 3)
+      setAutoCurateGroups(Boolean(result.settings.autoCurateGroups))
+      setAlertTelegramToken(result.settings.alertTelegramToken || '')
+      setAlertTelegramChatId(result.settings.alertTelegramChatId || '')
+      setAlertWebhookUrl(result.settings.alertWebhookUrl || '')
+      setGeminiApiKey(result.settings.geminiApiKey || '')
+      setOpenaiApiKey(result.settings.openaiApiKey || '')
+      setAiProvider(result.settings.aiProvider || 'auto')
+      setGroups(
+        (result.settings.groups || []).map((group: MarketplaceGroup, index: number) => ({
+          ...group,
+          active: Boolean(group.active),
+          priority: group.priority || index + 1,
+        })),
+      )
+    })
+  }, [api])
 
-  async function testKey(provider:'gemini'|'openai'){
+  function updateGroup(index: number, patch: Partial<MarketplaceGroup>) {
+    setGroups((current) =>
+      current.map((group, itemIndex) => (itemIndex === index ? { ...group, ...patch } : group)),
+    )
+  }
+  function moveGroup(index: number, direction: -1 | 1) {
+    setGroups((current) => {
+      const target = index + direction
+      if (target < 0 || target >= current.length) return current
+      const sourceGroup = current[index],
+        targetGroup = current[target]
+      if (!sourceGroup || !targetGroup) return current
+      const next = [...current]
+      ;[next[index], next[target]] = [targetGroup, sourceGroup]
+      return next.map((group, itemIndex) => ({ ...group, priority: itemIndex + 1 }))
+    })
+  }
+
+  async function testKey(provider: 'gemini' | 'openai') {
     setTestingKey(provider)
     setTestKeyStatus('')
-    try{
-      const res=await api<{ok:boolean;message:string}>('/ai/test-key',{method:'POST',body:JSON.stringify({provider,apiKey:provider==='gemini'?geminiApiKey:openaiApiKey})})
+    try {
+      const res = await api<{ ok: boolean; message: string }>('/ai/test-key', {
+        method: 'POST',
+        body: JSON.stringify({
+          provider,
+          apiKey: provider === 'gemini' ? geminiApiKey : openaiApiKey,
+        }),
+      })
       setTestKeyStatus(res.message)
-    }catch(err){
-      setTestKeyStatus(err instanceof Error?err.message:'Erro ao testar chave de API')
-    }finally{
+    } catch (err) {
+      setTestKeyStatus(err instanceof Error ? err.message : 'Erro ao testar chave de API')
+    } finally {
       setTestingKey(null)
     }
   }
 
-  async function testAlert(){
+  async function testAlert() {
     setTestingAlert(true)
     try {
-      const res = await api<{ok:boolean;result:{telegram:boolean;webhook:boolean;details:string[]}}>('/alerts/test',{method:'POST'})
+      const res = await api<{
+        ok: boolean
+        result: { telegram: boolean; webhook: boolean; details: string[] }
+      }>('/alerts/test', { method: 'POST' })
       setMessage(`Teste de alerta concluído: ${res.result.details.join(' · ')}`)
-    } catch(err) {
-      setMessage(err instanceof Error?err.message:'Erro ao testar alerta')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Erro ao testar alerta')
     } finally {
       setTestingAlert(false)
     }
   }
 
-  async function runAutoCurate(){
+  async function runAutoCurate() {
     setCurating(true)
     try {
-      const res = await api<{ok:boolean;curatedCount:number;groups:MarketplaceGroup[]}>('/groups/auto-curate',{method:'POST'})
-      if(res.groups) setGroups(res.groups.map((g:MarketplaceGroup)=>({...g,active:Boolean(g.active)})))
-      setMessage(`Curadoria concluída: ${res.curatedCount} grupos pontuados e reordenados por confiabilidade.`)
+      const res = await api<{ ok: boolean; curatedCount: number; groups: MarketplaceGroup[] }>(
+        '/groups/auto-curate',
+        { method: 'POST' },
+      )
+      if (res.groups)
+        setGroups(res.groups.map((g: MarketplaceGroup) => ({ ...g, active: Boolean(g.active) })))
+      setMessage(
+        `Curadoria concluída: ${res.curatedCount} grupos pontuados e reordenados por confiabilidade.`,
+      )
       onSaved()
-    } catch(err) {
-      setMessage(err instanceof Error?err.message:'Erro ao executar curadoria')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Erro ao executar curadoria')
     } finally {
       setCurating(false)
     }
   }
 
-  async function save(e:React.FormEvent<HTMLFormElement>){
-    e.preventDefault();
-    const f=new FormData(e.currentTarget);
-    try{
-      const normalizedGroups=groups.filter(group=>group.name.trim()).map((group,index)=>({...group,name:group.name.trim(),url:group.url.trim(),priority:index+1}));
-      const result=await api<{groups?:MarketplaceGroup[]}>('/settings',{
-        method:'PATCH',
-        body:JSON.stringify({
-          organizationName:f.get('organizationName'),
-          defaultLocation:f.get('defaultLocation'),
-          dailyLimit:Number(f.get('dailyLimit')),
-          stuckTimeoutMinutes:Number(f.get('stuckTimeoutMinutes')),
+  async function save(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const f = new FormData(e.currentTarget)
+    try {
+      const normalizedGroups = groups
+        .filter((group) => group.name.trim())
+        .map((group, index) => ({
+          ...group,
+          name: group.name.trim(),
+          url: group.url.trim(),
+          priority: index + 1,
+        }))
+      const result = await api<{ groups?: MarketplaceGroup[] }>('/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          organizationName: f.get('organizationName'),
+          defaultLocation: f.get('defaultLocation'),
+          dailyLimit: Number(f.get('dailyLimit')),
+          stuckTimeoutMinutes: Number(f.get('stuckTimeoutMinutes')),
           autoAdvance,
           fillGroups,
-          groups:normalizedGroups,
-          targetGroups:normalizedGroups.filter(group=>group.active).map(group=>group.url?`${group.name} | ${group.url}`:group.name),
+          groups: normalizedGroups,
+          targetGroups: normalizedGroups
+            .filter((group) => group.active)
+            .map((group) => (group.url ? `${group.name} | ${group.url}` : group.name)),
           autoPublish,
-          descriptionTemplate:f.get('descriptionTemplate'),
+          descriptionTemplate: f.get('descriptionTemplate'),
           autoRetry,
           maxRetries,
           alertTelegramToken,
@@ -318,114 +3135,591 @@ export function SettingsView({api,onSaved,theme,onThemeChange}:{api:ApiFn;onSave
           geminiApiKey,
           openaiApiKey,
           aiProvider,
-        })
-      });
-      if(result.groups)setGroups(result.groups.map((group:MarketplaceGroup)=>({...group,active:Boolean(group.active)})));
-      setMessage('Configurações salvas com sucesso.');
+        }),
+      })
+      if (result.groups)
+        setGroups(
+          result.groups.map((group: MarketplaceGroup) => ({
+            ...group,
+            active: Boolean(group.active),
+          })),
+        )
+      setMessage('Configurações salvas com sucesso.')
       onSaved()
-    }catch(err){
-      setMessage(err instanceof Error?err.message:'Erro ao salvar')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Erro ao salvar')
     }
   }
 
-  if(!data)return <section className="content"><div className="empty">Carregando configurações...</div></section>
-  return <section className="content settings-page"><div className="title-row"><div><span className="page-kicker">ADMINISTRAÇÃO</span><h1>Configurações</h1><p>Personalize a empresa e os controles autônomos de publicação.</p></div></div>{message&&<div className="inline-message success">{message}<button onClick={()=>setMessage('')}><X/></button></div>}
-    <form onSubmit={save}><article className="settings-card"><div className="settings-icon"><Settings/></div><div className="settings-content"><h2>Dados da empresa</h2><p>Identificação exibida para todos os usuários.</p><div className="settings-fields"><label><FieldLabel help="Nome exibido no painel para todos os integrantes desta organização.">Nome da empresa</FieldLabel><input name="organizationName" defaultValue={data.organization.name} required/></label><label><FieldLabel help="Valor sugerido nos novos veículos; pode ser alterado em cada cadastro.">Localização padrão</FieldLabel><input name="defaultLocation" defaultValue={data.settings.defaultLocation}/></label></div></div></article>
-      <article className="settings-card"><div className="settings-icon"><Send/></div><div className="settings-content"><h2>Fluxo do Marketplace</h2><p>Escolha exatamente até onde a extensão deve conduzir cada anúncio.</p><div className="automation-options">
-        <label className="toggle-label"><span><span className="field-label"><strong>Avançar automaticamente</strong><HelpTip text="Tenta avançar mesmo quando o diagnóstico interno não reconhece algum campo. Se o Facebook recusar, a extensão corrige os campos e tenta novamente."/></span><small>O próprio Facebook confirma se a primeira etapa foi aceita</small></span><input name="autoAdvance" type="checkbox" checked={autoAdvance} onChange={event=>{setAutoAdvance(event.target.checked);if(!event.target.checked){setFillGroups(false);setAutoPublish(false)}}}/></label>
-        <label className="toggle-label"><span><span className="field-label"><strong>Selecionar grupos configurados</strong><HelpTip text="A extensão procura primeiro pelo ID/URL do grupo e usa o nome como alternativa. Cada seleção precisa ser confirmada antes de publicar."/></span><small>{autoAdvance?'Seleciona e confirma os grupos na segunda etapa':'Ative primeiro o avanço automático'}</small></span><input name="fillGroups" type="checkbox" checked={fillGroups} disabled={!autoAdvance} onChange={event=>setFillGroups(event.target.checked)}/></label>
-        <label className="toggle-label"><span><span className="field-label"><strong>Curadoria inteligente de grupos (IA)</strong><HelpTip text="Prioriza automaticamente os grupos com maior histórico de sucesso e confiabilidade, penalizando os que frequentemente falham."/></span><small>Otimiza conversão e evita grupos com restrições</small></span><input name="autoCurateGroups" type="checkbox" checked={autoCurateGroups} onChange={event=>setAutoCurateGroups(event.target.checked)}/></label>
-        <div className="group-list-field group-manager"><div className="group-manager-head"><div><FieldLabel help="Cadastre nome e URL do Facebook. O ID extraído da URL é mais estável que o nome e reduz falhas quando o grupo for renomeado.">Gerenciador de grupos</FieldLabel><small>{groups.filter(group=>group.active).length} ativo{groups.filter(group=>group.active).length===1?'':'s'} · prioridade de cima para baixo</small></div><div style={{display:'flex',gap:8}}><button type="button" disabled={curating||!groups.length} onClick={runAutoCurate} title="Reordena os grupos pela taxa histórica de sucesso"><Sparkles size={14}/>{curating?'Curando...':'Reordenar por IA'}</button><button type="button" disabled={groups.length>=20} onClick={()=>setGroups(current=>[...current,{name:'',url:'',active:true,priority:current.length+1}])}><Plus/>Adicionar grupo</button></div></div><div className="managed-groups">{groups.map((group,index)=><article key={group.id||`new-${index}`} className={group.active?'active':'inactive'}><span className="group-order">{index+1}</span><div className="group-fields"><input value={group.name} onChange={event=>updateGroup(index,{name:event.target.value})} placeholder="Nome exibido no Facebook" aria-label={`Nome do grupo ${index+1}`}/><input value={group.url} onChange={event=>updateGroup(index,{url:event.target.value})} placeholder="https://www.facebook.com/groups/123456789" aria-label={`URL do grupo ${index+1}`}/><small>{group.groupKey?`ID: ${group.groupKey}`:'O ID será extraído da URL ao salvar'}{group.successCount||group.failureCount?` · ${group.successCount||0} sucessos · ${group.failureCount||0} falhas`:''}</small></div><label className="group-active"><input type="checkbox" checked={group.active} onChange={event=>updateGroup(index,{active:event.target.checked})}/><span>{group.active?'Ativo':'Pausado'}</span></label><div className="group-controls"><button type="button" disabled={index===0} onClick={()=>moveGroup(index,-1)} aria-label="Subir prioridade">↑</button><button type="button" disabled={index===groups.length-1} onClick={()=>moveGroup(index,1)} aria-label="Descer prioridade">↓</button><button type="button" className="danger" onClick={()=>setGroups(current=>current.filter((_,itemIndex)=>itemIndex!==index))} aria-label="Excluir grupo"><X/></button></div></article>)}{!groups.length&&<div className="mini-empty">Nenhum grupo cadastrado. Adicione um grupo para começar.</div>}</div></div>
-        <label className="toggle-label publish-toggle"><span><span className="field-label"><strong>Publicar automaticamente</strong><HelpTip tone="warning" text="Quando ligado, a extensão pressiona Publicar somente se todos os campos e grupos configurados forem confirmados. Deixe desligado para revisar manualmente."/></span><small>{autoAdvance?'Desligue para manter o clique final manual':'Ative primeiro o avanço automático'}</small></span><input name="autoPublish" type="checkbox" checked={autoPublish} disabled={!autoAdvance} onChange={event=>setAutoPublish(event.target.checked)}/></label>
-        <label className="toggle-label"><span><span className="field-label"><strong>Recuperação autônoma com backoff exponencial</strong><HelpTip text="Reagenda automaticamente erros transitórios de preenchimento com intervalos exponenciais (2m, 4m, 8m...) e jitter anti-bot aleatório."/></span><small>Sistema auto-recuperável sem intervenção manual imediata</small></span><input name="autoRetry" type="checkbox" checked={autoRetry} onChange={event=>setAutoRetry(event.target.checked)}/></label>
-      </div><div className="settings-fields"><label><FieldLabel help="Limite operacional interno por perfil. Use um valor compatível com a rotina da equipe e revise qualquer alerta do Facebook.">Limite diário por perfil</FieldLabel><input name="dailyLimit" type="number" min="1" max="50" defaultValue={data.settings.dailyLimit}/><small>Entre 1 e 50 publicações</small></label><label><FieldLabel help="Quando um preenchimento ultrapassa esse tempo, o Watchdog recupera o trabalho travado automaticamente.">Detectar travamento após</FieldLabel><input name="stuckTimeoutMinutes" type="number" min="1" max="120" defaultValue={data.settings.stuckTimeoutMinutes||15}/><small>Entre 1 e 120 minutos</small></label>{autoRetry&&<label><FieldLabel help="Número máximo de retentativas automáticas antes de marcar como erro permanente e disparar alerta crítico.">Tentativas máximas (retries)</FieldLabel><input name="maxRetries" type="number" min="1" max="10" value={maxRetries} onChange={e=>setMaxRetries(Number(e.target.value))}/><small>Padrão: 3 tentativas</small></label>}</div><label><FieldLabel help="Texto-base aplicado à descrição. As variáveis entre chaves são substituídas pelos dados do veículo.">Modelo de descrição</FieldLabel><textarea name="descriptionTemplate" rows={4} defaultValue={data.settings.descriptionTemplate}/><small>Variáveis disponíveis: {'{ano} {marca} {modelo} {versao} {km}'}</small></label></div></article>
-      <article className="settings-card">
-        <div className="settings-icon"><Bot/></div>
-        <div className="settings-content">
-          <h2>Inteligência Artificial & Chaves de API</h2>
-          <p>Configure suas chaves da API Gemini ou OpenAI para potencializar o gerador de descrições e o leitor de anúncios.</p>
-          <div className="settings-fields">
-            <label>
-              <FieldLabel help="Selecione qual provedor de IA terá prioridade nas operações da plataforma.">
-                Provedor Preferencial
-              </FieldLabel>
-              <select name="aiProvider" value={aiProvider} onChange={e => setAiProvider(e.target.value)}>
-                <option value="auto">Automático (Gemini ➔ OpenAI ➔ Fallback Offline)</option>
-                <option value="gemini">Google Gemini (Recomendado)</option>
-                <option value="openai">OpenAI (ChatGPT / GPT-4o)</option>
-                <option value="procedural">Offline / Procedural (Sem API externa)</option>
-              </select>
-            </label>
-          </div>
-
-          <div className="settings-fields" style={{ marginTop: 12 }}>
-            <label>
-              <FieldLabel help="Chave de API do Google AI Studio. Gratuita e com alta velocidade para o modelo gemini-2.5-flash.">
-                Google Gemini API Key
-              </FieldLabel>
-              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                <input
-                  name="geminiApiKey"
-                  type="password"
-                  value={geminiApiKey}
-                  onChange={e => setGeminiApiKey(e.target.value)}
-                  placeholder="AIzaSy..."
-                  style={{ flex: 1 }}
-                />
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => testKey('gemini')}
-                  disabled={testingKey === 'gemini'}
-                >
-                  <Sparkles size={14} />
-                  {testingKey === 'gemini' ? 'Testando...' : 'Testar Gemini'}
-                </button>
-              </div>
-              <small style={{ display: 'block', marginTop: 4, color: '#6b7c77' }}>
-                Obtenha gratuitamente em <a href="https://aistudio.google.com/" target="_blank" rel="noreferrer" style={{ color: '#059669', textDecoration: 'underline' }}>Google AI Studio</a>
-              </small>
-            </label>
-
-            <label>
-              <FieldLabel help="Opcional. Chave de API da OpenAI (compatível com modelos GPT-4o-mini).">
-                OpenAI API Key (Opcional)
-              </FieldLabel>
-              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                <input
-                  name="openaiApiKey"
-                  type="password"
-                  value={openaiApiKey}
-                  onChange={e => setOpenaiApiKey(e.target.value)}
-                  placeholder="sk-proj-..."
-                  style={{ flex: 1 }}
-                />
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => testKey('openai')}
-                  disabled={testingKey === 'openai'}
-                >
-                  <Sparkles size={14} />
-                  {testingKey === 'openai' ? 'Testando...' : 'Testar OpenAI'}
-                </button>
-              </div>
-              <small style={{ display: 'block', marginTop: 4, color: '#6b7c77' }}>
-                Obtenha em <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" style={{ color: '#059669', textDecoration: 'underline' }}>platform.openai.com</a>
-              </small>
-            </label>
-          </div>
-
-          {testKeyStatus && (
-            <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 6, fontSize: 12, background: testKeyStatus.startsWith('✓') ? '#f0fdf4' : '#fef2f2', color: testKeyStatus.startsWith('✓') ? '#166534' : '#991b1b', border: '1px solid currentColor' }}>
-              {testKeyStatus}
-            </div>
-          )}
+  if (!data)
+    return (
+      <section className="content">
+        <div className="empty">Carregando configurações...</div>
+      </section>
+    )
+  return (
+    <section className="content settings-page">
+      <div className="title-row">
+        <div>
+          <span className="page-kicker">ADMINISTRAÇÃO</span>
+          <h1>Configurações</h1>
+          <p>Personalize a empresa e os controles autônomos de publicação.</p>
         </div>
-      </article>
-      <article className="settings-card"><div className="settings-icon"><Bell/></div><div className="settings-content"><h2>Alertas Críticos e Notificações</h2><p>Receba alertas em tempo real no Telegram ou Webhook quando ocorrerem falhas definitivas, limites estourados ou travamentos.</p><div className="settings-fields"><label><FieldLabel help="Token do bot criado no BotFather do Telegram.">Telegram Bot Token</FieldLabel><input name="alertTelegramToken" value={alertTelegramToken} onChange={e=>setAlertTelegramToken(e.target.value)} placeholder="123456:ABC-DEF..."/></label><label><FieldLabel help="ID numérico do chat, grupo ou canal de destino no Telegram.">Telegram Chat ID</FieldLabel><input name="alertTelegramChatId" value={alertTelegramChatId} onChange={e=>setAlertTelegramChatId(e.target.value)} placeholder="-1001234567890"/></label></div><label style={{marginTop:10}}><FieldLabel help="Endpoint HTTP POST para enviar JSON estruturado com alertas (compatível com Discord, Slack, n8n ou webhook customizado).">Webhook URL (Opcional)</FieldLabel><input name="alertWebhookUrl" value={alertWebhookUrl} onChange={e=>setAlertWebhookUrl(e.target.value)} placeholder="https://webhook.site/... ou https://discord.com/api/webhooks/..."/></label><div style={{marginTop:14,display:'flex',gap:10,alignItems:'center'}}><button type="button" className="secondary" onClick={testAlert} disabled={testingAlert||(!alertTelegramToken&&!alertWebhookUrl)}><Bell size={15}/>{testingAlert?'Enviando teste...':'Testar envio de alerta'}</button><small style={{color:'#81908c'}}>{(!alertTelegramToken&&!alertWebhookUrl)?'Configure Telegram ou Webhook para habilitar o teste':'Envia um alerta imediato de verificação'}</small></div></div></article>
-      <article className="settings-card"><div className="settings-icon"><Palette/></div><div className="settings-content"><h2>Aparência</h2><p>O tema é salvo somente neste navegador.</p><div className="theme-options"><button type="button" className={theme==='light'?'selected':''} onClick={()=>onThemeChange('light')}><span><Sun/></span><div><strong>Tema claro</strong><small>Maior luminosidade</small></div><Check/></button><button type="button" className={theme==='dark'?'selected':''} onClick={()=>onThemeChange('dark')}><span><Moon/></span><div><strong>Tema escuro</strong><small>Conforto em ambientes escuros</small></div><Check/></button></div></div></article>
-      <article className="settings-card security-settings"><div className="settings-icon"><ShieldCheck/></div><div className="settings-content"><h2>Segurança das contas</h2><p>Credenciais do Facebook não são aceitas nem armazenadas. Cada sessão permanece no perfil local do Brave utilizado pelo vendedor.</p><div className="policy-row"><Check/><span>Cookies e senhas fora do servidor</span></div><div className="policy-row"><Check/><span>Interrupção automática quando campos ou grupos falham</span></div></div></article><div className="settings-save"><button className="primary"><Save size={17}/>Salvar configurações</button></div></form>
-  </section>
+      </div>
+      {message && (
+        <div className="inline-message success">
+          {message}
+          <button onClick={() => setMessage('')}>
+            <X />
+          </button>
+        </div>
+      )}
+      <form onSubmit={save}>
+        <article className="settings-card">
+          <div className="settings-icon">
+            <Settings />
+          </div>
+          <div className="settings-content">
+            <h2>Dados da empresa</h2>
+            <p>Identificação exibida para todos os usuários.</p>
+            <div className="settings-fields">
+              <label>
+                <FieldLabel help="Nome exibido no painel para todos os integrantes desta organização.">
+                  Nome da empresa
+                </FieldLabel>
+                <input name="organizationName" defaultValue={data.organization.name} required />
+              </label>
+              <label>
+                <FieldLabel help="Valor sugerido nos novos veículos; pode ser alterado em cada cadastro.">
+                  Localização padrão
+                </FieldLabel>
+                <input name="defaultLocation" defaultValue={data.settings.defaultLocation} />
+              </label>
+            </div>
+          </div>
+        </article>
+        <article className="settings-card">
+          <div className="settings-icon">
+            <Send />
+          </div>
+          <div className="settings-content">
+            <h2>Fluxo do Marketplace</h2>
+            <p>Escolha exatamente até onde a extensão deve conduzir cada anúncio.</p>
+            <div className="automation-options">
+              <label className="toggle-label">
+                <span>
+                  <span className="field-label">
+                    <strong>Avançar automaticamente</strong>
+                    <HelpTip text="Tenta avançar mesmo quando o diagnóstico interno não reconhece algum campo. Se o Facebook recusar, a extensão corrige os campos e tenta novamente." />
+                  </span>
+                  <small>O próprio Facebook confirma se a primeira etapa foi aceita</small>
+                </span>
+                <input
+                  name="autoAdvance"
+                  type="checkbox"
+                  checked={autoAdvance}
+                  onChange={(event) => {
+                    setAutoAdvance(event.target.checked)
+                    if (!event.target.checked) {
+                      setFillGroups(false)
+                      setAutoPublish(false)
+                    }
+                  }}
+                />
+              </label>
+              <label className="toggle-label">
+                <span>
+                  <span className="field-label">
+                    <strong>Selecionar grupos configurados</strong>
+                    <HelpTip text="A extensão procura primeiro pelo ID/URL do grupo e usa o nome como alternativa. Cada seleção precisa ser confirmada antes de publicar." />
+                  </span>
+                  <small>
+                    {autoAdvance
+                      ? 'Seleciona e confirma os grupos na segunda etapa'
+                      : 'Ative primeiro o avanço automático'}
+                  </small>
+                </span>
+                <input
+                  name="fillGroups"
+                  type="checkbox"
+                  checked={fillGroups}
+                  disabled={!autoAdvance}
+                  onChange={(event) => setFillGroups(event.target.checked)}
+                />
+              </label>
+              <label className="toggle-label">
+                <span>
+                  <span className="field-label">
+                    <strong>Curadoria inteligente de grupos (IA)</strong>
+                    <HelpTip text="Prioriza automaticamente os grupos com maior histórico de sucesso e confiabilidade, penalizando os que frequentemente falham." />
+                  </span>
+                  <small>Otimiza conversão e evita grupos com restrições</small>
+                </span>
+                <input
+                  name="autoCurateGroups"
+                  type="checkbox"
+                  checked={autoCurateGroups}
+                  onChange={(event) => setAutoCurateGroups(event.target.checked)}
+                />
+              </label>
+              <div className="group-list-field group-manager">
+                <div className="group-manager-head">
+                  <div>
+                    <FieldLabel help="Cadastre nome e URL do Facebook. O ID extraído da URL é mais estável que o nome e reduz falhas quando o grupo for renomeado.">
+                      Gerenciador de grupos
+                    </FieldLabel>
+                    <small>
+                      {groups.filter((group) => group.active).length} ativo
+                      {groups.filter((group) => group.active).length === 1 ? '' : 's'} · prioridade
+                      de cima para baixo
+                    </small>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      type="button"
+                      disabled={curating || !groups.length}
+                      onClick={runAutoCurate}
+                      title="Reordena os grupos pela taxa histórica de sucesso"
+                    >
+                      <Sparkles size={14} />
+                      {curating ? 'Curando...' : 'Reordenar por IA'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={groups.length >= 20}
+                      onClick={() =>
+                        setGroups((current) => [
+                          ...current,
+                          { name: '', url: '', active: true, priority: current.length + 1 },
+                        ])
+                      }
+                    >
+                      <Plus />
+                      Adicionar grupo
+                    </button>
+                  </div>
+                </div>
+                <div className="managed-groups">
+                  {groups.map((group, index) => (
+                    <article
+                      key={group.id || `new-${index}`}
+                      className={group.active ? 'active' : 'inactive'}
+                    >
+                      <span className="group-order">{index + 1}</span>
+                      <div className="group-fields">
+                        <input
+                          value={group.name}
+                          onChange={(event) => updateGroup(index, { name: event.target.value })}
+                          placeholder="Nome exibido no Facebook"
+                          aria-label={`Nome do grupo ${index + 1}`}
+                        />
+                        <input
+                          value={group.url}
+                          onChange={(event) => updateGroup(index, { url: event.target.value })}
+                          placeholder="https://www.facebook.com/groups/123456789"
+                          aria-label={`URL do grupo ${index + 1}`}
+                        />
+                        <small>
+                          {group.groupKey
+                            ? `ID: ${group.groupKey}`
+                            : 'O ID será extraído da URL ao salvar'}
+                          {group.successCount || group.failureCount
+                            ? ` · ${group.successCount || 0} sucessos · ${group.failureCount || 0} falhas`
+                            : ''}
+                        </small>
+                      </div>
+                      <label className="group-active">
+                        <input
+                          type="checkbox"
+                          checked={group.active}
+                          onChange={(event) => updateGroup(index, { active: event.target.checked })}
+                        />
+                        <span>{group.active ? 'Ativo' : 'Pausado'}</span>
+                      </label>
+                      <div className="group-controls">
+                        <button
+                          type="button"
+                          disabled={index === 0}
+                          onClick={() => moveGroup(index, -1)}
+                          aria-label="Subir prioridade"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          disabled={index === groups.length - 1}
+                          onClick={() => moveGroup(index, 1)}
+                          aria-label="Descer prioridade"
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          className="danger"
+                          onClick={() =>
+                            setGroups((current) =>
+                              current.filter((_, itemIndex) => itemIndex !== index),
+                            )
+                          }
+                          aria-label="Excluir grupo"
+                        >
+                          <X />
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                  {!groups.length && (
+                    <div className="mini-empty">
+                      Nenhum grupo cadastrado. Adicione um grupo para começar.
+                    </div>
+                  )}
+                </div>
+              </div>
+              <label className="toggle-label publish-toggle">
+                <span>
+                  <span className="field-label">
+                    <strong>Publicar automaticamente</strong>
+                    <HelpTip
+                      tone="warning"
+                      text="Quando ligado, a extensão pressiona Publicar somente se todos os campos e grupos configurados forem confirmados. Deixe desligado para revisar manualmente."
+                    />
+                  </span>
+                  <small>
+                    {autoAdvance
+                      ? 'Desligue para manter o clique final manual'
+                      : 'Ative primeiro o avanço automático'}
+                  </small>
+                </span>
+                <input
+                  name="autoPublish"
+                  type="checkbox"
+                  checked={autoPublish}
+                  disabled={!autoAdvance}
+                  onChange={(event) => setAutoPublish(event.target.checked)}
+                />
+              </label>
+              <label className="toggle-label">
+                <span>
+                  <span className="field-label">
+                    <strong>Recuperação autônoma com backoff exponencial</strong>
+                    <HelpTip text="Reagenda automaticamente erros transitórios de preenchimento com intervalos exponenciais (2m, 4m, 8m...) e jitter anti-bot aleatório." />
+                  </span>
+                  <small>Sistema auto-recuperável sem intervenção manual imediata</small>
+                </span>
+                <input
+                  name="autoRetry"
+                  type="checkbox"
+                  checked={autoRetry}
+                  onChange={(event) => setAutoRetry(event.target.checked)}
+                />
+              </label>
+            </div>
+            <div className="settings-fields">
+              <label>
+                <FieldLabel help="Limite operacional interno por perfil. Use um valor compatível com a rotina da equipe e revise qualquer alerta do Facebook.">
+                  Limite diário por perfil
+                </FieldLabel>
+                <input
+                  name="dailyLimit"
+                  type="number"
+                  min="1"
+                  max="50"
+                  defaultValue={data.settings.dailyLimit}
+                />
+                <small>Entre 1 e 50 publicações</small>
+              </label>
+              <label>
+                <FieldLabel help="Quando um preenchimento ultrapassa esse tempo, o Watchdog recupera o trabalho travado automaticamente.">
+                  Detectar travamento após
+                </FieldLabel>
+                <input
+                  name="stuckTimeoutMinutes"
+                  type="number"
+                  min="1"
+                  max="120"
+                  defaultValue={data.settings.stuckTimeoutMinutes || 15}
+                />
+                <small>Entre 1 e 120 minutos</small>
+              </label>
+              {autoRetry && (
+                <label>
+                  <FieldLabel help="Número máximo de retentativas automáticas antes de marcar como erro permanente e disparar alerta crítico.">
+                    Tentativas máximas (retries)
+                  </FieldLabel>
+                  <input
+                    name="maxRetries"
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={maxRetries}
+                    onChange={(e) => setMaxRetries(Number(e.target.value))}
+                  />
+                  <small>Padrão: 3 tentativas</small>
+                </label>
+              )}
+            </div>
+            <label>
+              <FieldLabel help="Texto-base aplicado à descrição. As variáveis entre chaves são substituídas pelos dados do veículo.">
+                Modelo de descrição
+              </FieldLabel>
+              <textarea
+                name="descriptionTemplate"
+                rows={4}
+                defaultValue={data.settings.descriptionTemplate}
+              />
+              <small>Variáveis disponíveis: {'{ano} {marca} {modelo} {versao} {km}'}</small>
+            </label>
+          </div>
+        </article>
+        <article className="settings-card">
+          <div className="settings-icon">
+            <Bot />
+          </div>
+          <div className="settings-content">
+            <h2>Inteligência Artificial & Chaves de API</h2>
+            <p>
+              Configure suas chaves da API Gemini ou OpenAI para potencializar o gerador de
+              descrições e o leitor de anúncios.
+            </p>
+            <div className="settings-fields">
+              <label>
+                <FieldLabel help="Selecione qual provedor de IA terá prioridade nas operações da plataforma.">
+                  Provedor Preferencial
+                </FieldLabel>
+                <select
+                  name="aiProvider"
+                  value={aiProvider}
+                  onChange={(e) => setAiProvider(e.target.value)}
+                >
+                  <option value="auto">Automático (Gemini ➔ OpenAI ➔ Fallback Offline)</option>
+                  <option value="gemini">Google Gemini (Recomendado)</option>
+                  <option value="openai">OpenAI (ChatGPT / GPT-4o)</option>
+                  <option value="procedural">Offline / Procedural (Sem API externa)</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="settings-fields" style={{ marginTop: 12 }}>
+              <label>
+                <FieldLabel help="Chave de API do Google AI Studio. Gratuita e com alta velocidade para o modelo gemini-2.5-flash.">
+                  Google Gemini API Key
+                </FieldLabel>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <input
+                    name="geminiApiKey"
+                    type="password"
+                    value={geminiApiKey}
+                    onChange={(e) => setGeminiApiKey(e.target.value)}
+                    placeholder="AIzaSy..."
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => testKey('gemini')}
+                    disabled={testingKey === 'gemini'}
+                  >
+                    <Sparkles size={14} />
+                    {testingKey === 'gemini' ? 'Testando...' : 'Testar Gemini'}
+                  </button>
+                </div>
+                <small style={{ display: 'block', marginTop: 4, color: '#6b7c77' }}>
+                  Obtenha gratuitamente em{' '}
+                  <a
+                    href="https://aistudio.google.com/"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: '#059669', textDecoration: 'underline' }}
+                  >
+                    Google AI Studio
+                  </a>
+                </small>
+              </label>
+
+              <label>
+                <FieldLabel help="Opcional. Chave de API da OpenAI (compatível com modelos GPT-4o-mini).">
+                  OpenAI API Key (Opcional)
+                </FieldLabel>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <input
+                    name="openaiApiKey"
+                    type="password"
+                    value={openaiApiKey}
+                    onChange={(e) => setOpenaiApiKey(e.target.value)}
+                    placeholder="sk-proj-..."
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => testKey('openai')}
+                    disabled={testingKey === 'openai'}
+                  >
+                    <Sparkles size={14} />
+                    {testingKey === 'openai' ? 'Testando...' : 'Testar OpenAI'}
+                  </button>
+                </div>
+                <small style={{ display: 'block', marginTop: 4, color: '#6b7c77' }}>
+                  Obtenha em{' '}
+                  <a
+                    href="https://platform.openai.com/api-keys"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: '#059669', textDecoration: 'underline' }}
+                  >
+                    platform.openai.com
+                  </a>
+                </small>
+              </label>
+            </div>
+
+            {testKeyStatus && (
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  background: testKeyStatus.startsWith('✓') ? '#f0fdf4' : '#fef2f2',
+                  color: testKeyStatus.startsWith('✓') ? '#166534' : '#991b1b',
+                  border: '1px solid currentColor',
+                }}
+              >
+                {testKeyStatus}
+              </div>
+            )}
+          </div>
+        </article>
+        <article className="settings-card">
+          <div className="settings-icon">
+            <Bell />
+          </div>
+          <div className="settings-content">
+            <h2>Alertas Críticos e Notificações</h2>
+            <p>
+              Receba alertas em tempo real no Telegram ou Webhook quando ocorrerem falhas
+              definitivas, limites estourados ou travamentos.
+            </p>
+            <div className="settings-fields">
+              <label>
+                <FieldLabel help="Token do bot criado no BotFather do Telegram.">
+                  Telegram Bot Token
+                </FieldLabel>
+                <input
+                  name="alertTelegramToken"
+                  value={alertTelegramToken}
+                  onChange={(e) => setAlertTelegramToken(e.target.value)}
+                  placeholder="123456:ABC-DEF..."
+                />
+              </label>
+              <label>
+                <FieldLabel help="ID numérico do chat, grupo ou canal de destino no Telegram.">
+                  Telegram Chat ID
+                </FieldLabel>
+                <input
+                  name="alertTelegramChatId"
+                  value={alertTelegramChatId}
+                  onChange={(e) => setAlertTelegramChatId(e.target.value)}
+                  placeholder="-1001234567890"
+                />
+              </label>
+            </div>
+            <label style={{ marginTop: 10 }}>
+              <FieldLabel help="Endpoint HTTP POST para enviar JSON estruturado com alertas (compatível com Discord, Slack, n8n ou webhook customizado).">
+                Webhook URL (Opcional)
+              </FieldLabel>
+              <input
+                name="alertWebhookUrl"
+                value={alertWebhookUrl}
+                onChange={(e) => setAlertWebhookUrl(e.target.value)}
+                placeholder="https://webhook.site/... ou https://discord.com/api/webhooks/..."
+              />
+            </label>
+            <div style={{ marginTop: 14, display: 'flex', gap: 10, alignItems: 'center' }}>
+              <button
+                type="button"
+                className="secondary"
+                onClick={testAlert}
+                disabled={testingAlert || (!alertTelegramToken && !alertWebhookUrl)}
+              >
+                <Bell size={15} />
+                {testingAlert ? 'Enviando teste...' : 'Testar envio de alerta'}
+              </button>
+              <small style={{ color: '#81908c' }}>
+                {!alertTelegramToken && !alertWebhookUrl
+                  ? 'Configure Telegram ou Webhook para habilitar o teste'
+                  : 'Envia um alerta imediato de verificação'}
+              </small>
+            </div>
+          </div>
+        </article>
+        <article className="settings-card">
+          <div className="settings-icon">
+            <Palette />
+          </div>
+          <div className="settings-content">
+            <h2>Aparência</h2>
+            <p>O tema é salvo somente neste navegador.</p>
+            <div className="theme-options">
+              <button
+                type="button"
+                className={theme === 'light' ? 'selected' : ''}
+                onClick={() => onThemeChange('light')}
+              >
+                <span>
+                  <Sun />
+                </span>
+                <div>
+                  <strong>Tema claro</strong>
+                  <small>Maior luminosidade</small>
+                </div>
+                <Check />
+              </button>
+              <button
+                type="button"
+                className={theme === 'dark' ? 'selected' : ''}
+                onClick={() => onThemeChange('dark')}
+              >
+                <span>
+                  <Moon />
+                </span>
+                <div>
+                  <strong>Tema escuro</strong>
+                  <small>Conforto em ambientes escuros</small>
+                </div>
+                <Check />
+              </button>
+            </div>
+          </div>
+        </article>
+        <article className="settings-card security-settings">
+          <div className="settings-icon">
+            <ShieldCheck />
+          </div>
+          <div className="settings-content">
+            <h2>Segurança das contas</h2>
+            <p>
+              Credenciais do Facebook não são aceitas nem armazenadas. Cada sessão permanece no
+              perfil local do Brave utilizado pelo vendedor.
+            </p>
+            <div className="policy-row">
+              <Check />
+              <span>Cookies e senhas fora do servidor</span>
+            </div>
+            <div className="policy-row">
+              <Check />
+              <span>Interrupção automática quando campos ou grupos falham</span>
+            </div>
+          </div>
+        </article>
+        <div className="settings-save">
+          <button className="primary">
+            <Save size={17} />
+            Salvar configurações
+          </button>
+        </div>
+      </form>
+    </section>
+  )
 }
 // End of view modules.

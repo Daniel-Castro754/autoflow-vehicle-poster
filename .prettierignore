@@ -1,0 +1,6 @@
+dist/
+data/
+backups/
+coverage/
+.tmp-*/
+package-lock.json

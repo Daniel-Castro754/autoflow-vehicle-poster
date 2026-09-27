@@ -1,7 +1,18 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
-import { auditInventory, batchOptimizeDescriptions, executeAgentCommand, parseVehicleRawText, runAutopilotPipeline } from '../services/ai-agent.ts'
-import { generateVehicleDescription, resolveAIProviderSettings, type CopyTone, type VehicleInput } from '../services/description-generator.ts'
+import {
+  auditInventory,
+  batchOptimizeDescriptions,
+  executeAgentCommand,
+  parseVehicleRawText,
+  runAutopilotPipeline,
+} from '../services/ai-agent.ts'
+import {
+  generateVehicleDescription,
+  resolveAIProviderSettings,
+  type CopyTone,
+  type VehicleInput,
+} from '../services/description-generator.ts'
 import { generateVehicleHashtags } from '../services/trending-hashtags.ts'
 
 type AuthContext = { userId: number; organizationId: number }
@@ -20,117 +31,161 @@ export async function handleAIRoute(
   { db, send, jsonBody, isAdmin }: Dependencies,
 ): Promise<boolean> {
   if (url.pathname.startsWith('/api/ai/') && !isAdmin(auth)) {
-    send(res,403,{error:'Somente administradores podem operar a Central de IA.'})
+    send(res, 403, { error: 'Somente administradores podem operar a Central de IA.' })
     return true
   }
-  if(req.method==='POST'&&url.pathname==='/api/ai/generate-description'){
-    const b=await jsonBody(req) as Record<string,unknown>
-    const vehicle=(b.vehicle||b) as Record<string,unknown>
-    const input:VehicleInput={
-      year:Number(vehicle.year)||new Date().getFullYear(),
-      make:String(vehicle.make||'').trim(),
-      model:String(vehicle.model||'').trim(),
-      trim:String(vehicle.trim||vehicle.version||'').trim(),
-      km:Number(vehicle.km)||0,
-      price:Number(vehicle.price)||0,
-      transmission:String(vehicle.transmission||'Automático'),
-      fuelType:String(vehicle.fuelType||vehicle.fuel||'Flex'),
-      bodyType:String(vehicle.bodyType||'Sedã'),
-      exteriorColor:String(vehicle.exteriorColor||vehicle.color||''),
-      interiorColor:String(vehicle.interiorColor||''),
-      condition:String(vehicle.condition||'Muito bom'),
-      location:String(vehicle.location||'São Paulo, SP'),
+  if (req.method === 'POST' && url.pathname === '/api/ai/generate-description') {
+    const b = (await jsonBody(req)) as Record<string, unknown>
+    const vehicle = (b.vehicle || b) as Record<string, unknown>
+    const input: VehicleInput = {
+      year: Number(vehicle.year) || new Date().getFullYear(),
+      make: String(vehicle.make || '').trim(),
+      model: String(vehicle.model || '').trim(),
+      trim: String(vehicle.trim || vehicle.version || '').trim(),
+      km: Number(vehicle.km) || 0,
+      price: Number(vehicle.price) || 0,
+      transmission: String(vehicle.transmission || 'Automático'),
+      fuelType: String(vehicle.fuelType || vehicle.fuel || 'Flex'),
+      bodyType: String(vehicle.bodyType || 'Sedã'),
+      exteriorColor: String(vehicle.exteriorColor || vehicle.color || ''),
+      interiorColor: String(vehicle.interiorColor || ''),
+      condition: String(vehicle.condition || 'Muito bom'),
+      location: String(vehicle.location || 'São Paulo, SP'),
     }
-    if(!input.make||!input.model){
-      send(res,400,{error:'Marca e modelo do veículo são obrigatórios.'})
+    if (!input.make || !input.model) {
+      send(res, 400, { error: 'Marca e modelo do veículo são obrigatórios.' })
       return true
     }
-    const tone=String(b.tone||'vendedor') as CopyTone
-    const aiConf=db.prepare('SELECT gemini_api_key geminiApiKey, openai_api_key openaiApiKey, ai_provider aiProvider FROM organization_settings WHERE organization_id = ?')
-      .get(auth.organizationId) as {geminiApiKey?:string;openaiApiKey?:string;aiProvider?:string}|undefined
-    const result=await generateVehicleDescription(input,{tone,...resolveAIProviderSettings(aiConf)})
-    const hashtags=generateVehicleHashtags(input)
-    send(res,200,{ok:true,description:result.description,provider:result.provider,hashtags})
+    const tone = String(b.tone || 'vendedor') as CopyTone
+    const aiConf = db
+      .prepare(
+        'SELECT gemini_api_key geminiApiKey, openai_api_key openaiApiKey, ai_provider aiProvider FROM organization_settings WHERE organization_id = ?',
+      )
+      .get(auth.organizationId) as
+      { geminiApiKey?: string; openaiApiKey?: string; aiProvider?: string } | undefined
+    const result = await generateVehicleDescription(input, {
+      tone,
+      ...resolveAIProviderSettings(aiConf),
+    })
+    const hashtags = generateVehicleHashtags(input)
+    send(res, 200, {
+      ok: true,
+      description: result.description,
+      provider: result.provider,
+      hashtags,
+    })
     return true
   }
-  if(req.method==='POST'&&url.pathname==='/api/ai/parse-text'){
-    const b=await jsonBody(req) as Record<string,unknown>
-    const rawText=String(b.text||b.rawText||'').trim()
-    if(!rawText){
-      send(res,400,{error:'O texto para análise não pode estar vazio.'})
+  if (req.method === 'POST' && url.pathname === '/api/ai/parse-text') {
+    const b = (await jsonBody(req)) as Record<string, unknown>
+    const rawText = String(b.text || b.rawText || '').trim()
+    if (!rawText) {
+      send(res, 400, { error: 'O texto para análise não pode estar vazio.' })
       return true
     }
-    send(res,200,{ok:true,vehicle:parseVehicleRawText(rawText)})
+    send(res, 200, { ok: true, vehicle: parseVehicleRawText(rawText) })
     return true
   }
-  if(req.method==='GET'&&url.pathname==='/api/ai/audit'){
-    send(res,200,{ok:true,audit:auditInventory(db,auth.organizationId)})
+  if (req.method === 'GET' && url.pathname === '/api/ai/audit') {
+    send(res, 200, { ok: true, audit: auditInventory(db, auth.organizationId) })
     return true
   }
-  if(req.method==='POST'&&url.pathname==='/api/ai/autopilot/run'){
-    send(res,200,await runAutopilotPipeline(db,auth.organizationId,auth.userId))
+  if (req.method === 'POST' && url.pathname === '/api/ai/autopilot/run') {
+    send(res, 200, await runAutopilotPipeline(db, auth.organizationId, auth.userId))
     return true
   }
-  if(req.method==='POST'&&url.pathname==='/api/ai/command'){
-    const b=await jsonBody(req) as Record<string,unknown>
-    const prompt=String(b.prompt||b.command||'').trim()
-    if(!prompt){
-      send(res,400,{error:'O comando não pode estar vazio.'})
+  if (req.method === 'POST' && url.pathname === '/api/ai/command') {
+    const b = (await jsonBody(req)) as Record<string, unknown>
+    const prompt = String(b.prompt || b.command || '').trim()
+    if (!prompt) {
+      send(res, 400, { error: 'O comando não pode estar vazio.' })
       return true
     }
-    send(res,200,await executeAgentCommand(db,auth.organizationId,auth.userId,prompt))
+    send(res, 200, await executeAgentCommand(db, auth.organizationId, auth.userId, prompt))
     return true
   }
-  if(req.method==='POST'&&url.pathname==='/api/ai/batch-optimize'){
-    const b=await jsonBody(req) as Record<string,unknown>
-    const tone=String(b.tone||'vendedor') as CopyTone
-    send(res,200,await batchOptimizeDescriptions(db,auth.organizationId,tone))
+  if (req.method === 'POST' && url.pathname === '/api/ai/batch-optimize') {
+    const b = (await jsonBody(req)) as Record<string, unknown>
+    const tone = String(b.tone || 'vendedor') as CopyTone
+    send(res, 200, await batchOptimizeDescriptions(db, auth.organizationId, tone))
     return true
   }
-  if(req.method==='POST'&&url.pathname==='/api/ai/test-key'){
-    const b=await jsonBody(req) as Record<string,unknown>
-    const provider=String(b.provider||'gemini').toLowerCase()
-    const settings=db.prepare('SELECT gemini_api_key geminiApiKey, openai_api_key openaiApiKey FROM organization_settings WHERE organization_id = ?')
-      .get(auth.organizationId) as {geminiApiKey?:string;openaiApiKey?:string}|undefined
-    const key=String(b.apiKey||'').trim()||(provider==='gemini'?(settings?.geminiApiKey||process.env.GEMINI_API_KEY):(settings?.openaiApiKey||process.env.OPENAI_API_KEY))||''
-    if(!key){
-      send(res,400,{error:'Informe a chave de API para testar.'})
+  if (req.method === 'POST' && url.pathname === '/api/ai/test-key') {
+    const b = (await jsonBody(req)) as Record<string, unknown>
+    const provider = String(b.provider || 'gemini').toLowerCase()
+    const settings = db
+      .prepare(
+        'SELECT gemini_api_key geminiApiKey, openai_api_key openaiApiKey FROM organization_settings WHERE organization_id = ?',
+      )
+      .get(auth.organizationId) as { geminiApiKey?: string; openaiApiKey?: string } | undefined
+    const key =
+      String(b.apiKey || '').trim() ||
+      (provider === 'gemini'
+        ? settings?.geminiApiKey || process.env.GEMINI_API_KEY
+        : settings?.openaiApiKey || process.env.OPENAI_API_KEY) ||
+      ''
+    if (!key) {
+      send(res, 400, { error: 'Informe a chave de API para testar.' })
       return true
     }
-    if(provider==='gemini'){
-      try{
-        const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,{
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({contents:[{parts:[{text:'ping'}]}],generationConfig:{maxOutputTokens:5}}),
+    if (provider === 'gemini') {
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: 'ping' }] }],
+              generationConfig: { maxOutputTokens: 5 },
+            }),
+          },
+        )
+        if (!response.ok) {
+          const errData = (await response.json().catch(() => ({}))) as {
+            error?: { message?: string }
+          }
+          send(res, 400, {
+            ok: false,
+            error:
+              errData.error?.message ||
+              `Erro ${response.status} ao conectar com a API do Google Gemini.`,
+          })
+          return true
+        }
+        send(res, 200, {
+          ok: true,
+          message: '✓ Chave do Google Gemini validada com sucesso! Conexão estabelecida.',
         })
-        if(!response.ok){
-          const errData=await response.json().catch(()=>({})) as {error?:{message?:string}}
-          send(res,400,{ok:false,error:errData.error?.message||`Erro ${response.status} ao conectar com a API do Google Gemini.`})
-          return true
-        }
-        send(res,200,{ok:true,message:'✓ Chave do Google Gemini validada com sucesso! Conexão estabelecida.'})
         return true
-      }catch(err){
-        send(res,500,{ok:false,error:`Falha de rede ao conectar com Google Gemini: ${err instanceof Error?err.message:err}`})
+      } catch (err) {
+        send(res, 500, {
+          ok: false,
+          error: `Falha de rede ao conectar com Google Gemini: ${err instanceof Error ? err.message : err}`,
+        })
         return true
       }
     }
-    if(provider==='openai'){
-      try{
-        const response=await fetch('https://api.openai.com/v1/models',{headers:{Authorization:`Bearer ${key}`}})
-        if(!response.ok){
-          send(res,400,{ok:false,error:`Chave OpenAI inválida (status ${response.status}).`})
+    if (provider === 'openai') {
+      try {
+        const response = await fetch('https://api.openai.com/v1/models', {
+          headers: { Authorization: `Bearer ${key}` },
+        })
+        if (!response.ok) {
+          send(res, 400, { ok: false, error: `Chave OpenAI inválida (status ${response.status}).` })
           return true
         }
-        send(res,200,{ok:true,message:'✓ Chave OpenAI validada com sucesso!'})
+        send(res, 200, { ok: true, message: '✓ Chave OpenAI validada com sucesso!' })
         return true
-      }catch(err){
-        send(res,500,{ok:false,error:`Falha de rede com OpenAI: ${err instanceof Error?err.message:err}`})
+      } catch (err) {
+        send(res, 500, {
+          ok: false,
+          error: `Falha de rede com OpenAI: ${err instanceof Error ? err.message : err}`,
+        })
         return true
       }
     }
-    send(res,400,{error:'Provedor desconhecido.'})
+    send(res, 400, { error: 'Provedor desconhecido.' })
     return true
   }
   return false

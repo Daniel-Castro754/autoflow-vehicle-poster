@@ -1,3 +1,5 @@
+import { localParts, localInstant, SCHEDULE_TIMEZONE } from '../lib/timezone.ts'
+
 export interface HistoricalEngagement {
   dayOfWeek: number
   hour: number
@@ -9,6 +11,7 @@ export interface ScheduleOptions {
   existingTimestamps?: number[]
   historicalData?: HistoricalEngagement[]
   minDelayMinutes?: number
+  timezone?: string
   accountId?: number
 }
 
@@ -36,88 +39,82 @@ export const WEEKEND_PEAK_WINDOWS = [
 
 export function calculateOptimalSchedule(options: ScheduleOptions = {}): OptimalScheduleResult {
   const ref = options.referenceDate ? new Date(options.referenceDate) : new Date()
-  const minDelayMinutes = options.minDelayMinutes || 10
-  const earliestAllowed = new Date(ref.getTime() + minDelayMinutes * 60000)
-  const existing = options.existingTimestamps || []
-
-  // Se houver dados históricos expressivos (> 5 registros com sucesso)
-  const validHistory = (options.historicalData || []).filter(h => h.successCount > 0)
-  if (validHistory.length >= 5) {
-    const sorted = [...validHistory].sort((a, b) => b.successCount - a.successCount)
-    const best = sorted[0]
-
-    // Tentar agendar para o melhor dia/hora
-    const candidate = new Date(earliestAllowed)
-    const currentDay = candidate.getDay()
-    let daysUntil = (best.dayOfWeek - currentDay + 7) % 7
-    if (daysUntil === 0 && candidate.getHours() >= best.hour) {
-      daysUntil = 7
-    }
-
-    candidate.setDate(candidate.getDate() + daysUntil)
-    const jitter = Math.floor(Math.random() * 21) - 10 // -10 a +10 min
-    candidate.setHours(best.hour, Math.max(0, Math.min(59, 15 + jitter)), 0, 0)
-
-    // Verificar se não colide com agendamentos existentes (distância mínima de 25 min)
-    let finalTime = candidate.getTime()
-    while (existing.some(t => Math.abs(t - finalTime) < 25 * 60000)) {
-      finalTime += 35 * 60000
-    }
-
-    const scheduledAt = new Date(finalTime)
-    return {
-      scheduledAt,
-      isoString: scheduledAt.toISOString(),
-      confidence: 'historical',
-      window: `Dia ${best.dayOfWeek} às ${best.hour}h`,
-      jitterMinutes: jitter,
-    }
+  const delay = options.minDelayMinutes ?? 10
+  if (!Number.isFinite(ref.getTime()) || !Number.isFinite(delay) || delay < 0)
+    throw new Error('Referência de agendamento inválida.')
+  const earliest = ref.getTime() + delay * 60000
+  const timezone = options.timezone || SCHEDULE_TIMEZONE
+  const p = localParts(new Date(earliest), timezone)
+  const day = new Date(Date.UTC(p.year, p.month - 1, p.day))
+  const existing = (options.existingTimestamps || []).filter(Number.isFinite).sort((a, b) => a - b)
+  const spacing = 25 * 60000
+  const freeTime = (start: number) => {
+    let result = start
+    for (const occupied of existing)
+      if (Math.abs(occupied - result) < spacing) result = occupied + spacing
+    return result
   }
-
-  // Heurística de Janelas de Pico com Jitter Anti-Detecção
-  // Procuramos o próximo slot de pico disponível a partir de `earliestAllowed`
-  const candidateDay = new Date(earliestAllowed)
-
-  for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
-    const checkDate = new Date(candidateDay)
-    checkDate.setDate(checkDate.getDate() + dayOffset)
-    const isWeekend = checkDate.getDay() === 0 || checkDate.getDay() === 6
-    const windows = isWeekend ? WEEKEND_PEAK_WINDOWS : WEEKDAY_PEAK_WINDOWS
-
-    for (const win of windows) {
-      // Cria a data para esta janela
-      const slotTime = new Date(checkDate)
-      const jitter = Math.floor(Math.random() * 19) - 9 // -9 a +9 minutos de variação
-      const minutes = Math.max(0, Math.min(59, win.startMin + jitter))
-      slotTime.setHours(win.startHour, minutes, Math.floor(Math.random() * 50), 0)
-
-      if (slotTime.getTime() > earliestAllowed.getTime()) {
-        // Checa colisão com agendamentos existentes
-        const targetTimestamp = slotTime.getTime()
-        const hasCollision = existing.some(t => Math.abs(t - targetTimestamp) < 25 * 60000)
-
-        if (!hasCollision) {
-          const finalDate = new Date(targetTimestamp)
-          return {
-            scheduledAt: finalDate,
-            isoString: finalDate.toISOString(),
-            confidence: 'peak_heuristic',
-            window: win.label,
-            jitterMinutes: jitter,
-          }
-        }
+  const result = (
+    date: Date,
+    confidence: OptimalScheduleResult['confidence'],
+    window: string,
+    jitterMinutes: number,
+  ): OptimalScheduleResult => ({
+    scheduledAt: date,
+    isoString: date.toISOString(),
+    confidence,
+    window,
+    jitterMinutes,
+  })
+  const history = (options.historicalData || []).filter(
+    (h) =>
+      h.successCount > 0 &&
+      Number.isInteger(h.dayOfWeek) &&
+      h.dayOfWeek >= 0 &&
+      h.dayOfWeek < 7 &&
+      Number.isInteger(h.hour) &&
+      h.hour >= 0 &&
+      h.hour < 24,
+  )
+  if (history.length >= 5) {
+    const best = [...history].sort((a, b) => b.successCount - a.successCount)[0]
+    const targetDay = new Date(day)
+    targetDay.setUTCDate(targetDay.getUTCDate() + ((best.dayOfWeek - day.getUTCDay() + 7) % 7))
+    const jitter = Math.floor(Math.random() * 21) - 10
+    let candidate = localInstant(targetDay, best.hour * 60 + 15 + jitter, timezone)
+    if (candidate.getTime() < earliest) {
+      targetDay.setUTCDate(targetDay.getUTCDate() + 7)
+      candidate = localInstant(targetDay, best.hour * 60 + 15 + jitter, timezone)
+    }
+    return result(
+      new Date(freeTime(candidate.getTime())),
+      'historical',
+      `Dia ${best.dayOfWeek} às ${best.hour}h`,
+      jitter,
+    )
+  }
+  for (let offset = 0; offset < 7; offset++) {
+    const targetDay = new Date(day)
+    targetDay.setUTCDate(targetDay.getUTCDate() + offset)
+    const weekend = [0, 6].includes(targetDay.getUTCDay())
+    for (const win of weekend ? WEEKEND_PEAK_WINDOWS : WEEKDAY_PEAK_WINDOWS) {
+      const jitter = Math.floor(Math.random() * 19) - 9
+      const slot = localInstant(
+        targetDay,
+        win.startHour * 60 + win.startMin + jitter,
+        timezone,
+        Math.floor(Math.random() * 50),
+      )
+      if (slot.getTime() >= earliest && freeTime(slot.getTime()) === slot.getTime()) {
+        return result(slot, 'peak_heuristic', win.label, jitter)
       }
     }
   }
-
-  // Fallback: 35 minutos adiante com jitter
-  const fallbackJitter = Math.floor(Math.random() * 15)
-  const fallbackDate = new Date(earliestAllowed.getTime() + (25 + fallbackJitter) * 60000)
-  return {
-    scheduledAt: fallbackDate,
-    isoString: fallbackDate.toISOString(),
-    confidence: 'peak_heuristic',
-    window: 'Slot Adaptativo Livre',
-    jitterMinutes: fallbackJitter,
-  }
+  const jitter = Math.floor(Math.random() * 15)
+  return result(
+    new Date(freeTime(earliest + (25 + jitter) * 60000)),
+    'peak_heuristic',
+    'Slot Adaptativo Livre',
+    jitter,
+  )
 }

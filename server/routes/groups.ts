@@ -33,7 +33,10 @@ export function handleGroupsRoute(
   if (req.method === 'GET' && url.pathname === '/api/groups/curated') {
     const locationQuery = String(url.searchParams.get('location') || '')
     const rawGroups = marketplaceGroups(auth.organizationId)
-    const curated = curateMarketplaceGroups(rawGroups.map(group => ({ ...group, active: Boolean(group.active) })), locationQuery)
+    const curated = curateMarketplaceGroups(
+      rawGroups.map((group) => ({ ...group, active: Boolean(group.active) })),
+      locationQuery,
+    )
     send(res, 200, { ok: true, groups: curated })
     return true
   }

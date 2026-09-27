@@ -13,5 +13,7 @@ export function jpegBase64(value) {
   segment[1] = 0xfe
   segment.writeUInt16BE(comment.length + 2, 2)
   comment.copy(segment, 4)
-  return Buffer.concat([jpegFixture.subarray(0, 2), segment, jpegFixture.subarray(2)]).toString('base64')
+  return Buffer.concat([jpegFixture.subarray(0, 2), segment, jpegFixture.subarray(2)]).toString(
+    'base64',
+  )
 }

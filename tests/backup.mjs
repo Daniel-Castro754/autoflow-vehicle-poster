@@ -30,10 +30,19 @@ try {
   restoreBackup(backupDirectory, restored)
   const restoredDb = new DatabaseSync(join(restored, 'autoflow.db'), { readOnly: true })
   assert.equal(restoredDb.prepare('SELECT model FROM vehicles WHERE id=1').get().model, 'Corolla')
-  assert.equal(restoredDb.prepare('SELECT status FROM publication_jobs WHERE id=1').get().status, 'completed')
-  assert.equal(restoredDb.prepare('SELECT event_type FROM publication_job_events WHERE id=1').get().event_type, 'published')
+  assert.equal(
+    restoredDb.prepare('SELECT status FROM publication_jobs WHERE id=1').get().status,
+    'completed',
+  )
+  assert.equal(
+    restoredDb.prepare('SELECT event_type FROM publication_job_events WHERE id=1').get().event_type,
+    'published',
+  )
   restoredDb.close()
-  assert.deepEqual(readFileSync(join(restored, 'uploads', imageName)), Buffer.from('vehicle image bytes'))
+  assert.deepEqual(
+    readFileSync(join(restored, 'uploads', imageName)),
+    Buffer.from('vehicle image bytes'),
+  )
 
   writeFileSync(join(backupDirectory, 'uploads', imageName), 'tampered')
   assert.throws(() => verifyBackup(backupDirectory), /não correspondem ao manifesto/)

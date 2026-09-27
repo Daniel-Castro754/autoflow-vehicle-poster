@@ -1,46 +1,56 @@
 {
   "name": "vehicle-poster",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.14.0",
   "type": "module",
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.18.0"
   },
   "scripts": {
     "dev": "concurrently -k -n API,WEB -c green,cyan \"npm:dev:api\" \"npm:dev:web\"",
     "dev:web": "vite",
     "dev:api": "node --env-file-if-exists=.env --watch server/server.ts",
     "build": "tsc -b && vite build",
-    "test:queue": "node tests/queue-flow.mjs",
-    "test:stock": "node tests/stock-state.mjs",
-    "test:autonomous": "node tests/autonomous-flow.mjs",
-    "test:extension-consumer": "node tests/extension-consumer.mjs",
-    "test:publish-safety": "node tests/publish-safety.mjs",
-    "test:backup": "node tests/backup.mjs",
+    "test:queue": "node --import=./tests/helpers/offline.mjs tests/queue-flow.mjs",
+    "test:stock": "node --import=./tests/helpers/offline.mjs tests/stock-state.mjs",
+    "test:autonomous": "node --import=./tests/helpers/offline.mjs tests/autonomous-flow.mjs",
+    "test:extension-consumer": "node --import=./tests/helpers/offline.mjs tests/extension-consumer.mjs",
+    "test:publish-safety": "node --import=./tests/helpers/offline.mjs tests/publish-safety.mjs",
+    "test:backup": "node --import=./tests/helpers/offline.mjs tests/backup.mjs",
     "backup": "node scripts/backup.mjs",
-    "test": "npm run test:stock && npm run test:queue && npm run test:autonomous && npm run test:extension-consumer && npm run test:backup && npm run test:publish-safety",
+    "test": "npm run test:stock && npm run test:queue && npm run test:autonomous && npm run test:extension-consumer && npm run test:backup && npm run test:publish-safety && npm run test:audit && npm run test:fipe && npm run test:timezone && npm run test:sessions && npm run test:extension-resilience",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test:audit": "node --import=./tests/helpers/offline.mjs tests/audit-services.mjs",
+    "test:fipe": "node --import=./tests/helpers/offline.mjs tests/fipe-service.mjs",
+    "test:timezone": "node --import=./tests/helpers/offline.mjs tests/scheduler-timezone.mjs",
+    "test:sessions": "node --import=./tests/helpers/offline.mjs tests/session-expiry.mjs",
+    "test:extension-resilience": "node --import=./tests/helpers/offline.mjs tests/extension-resilience.mjs"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "6.0.5",
     "lucide-react": "1.31.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "sharp": "^0.35.4",
-    "typescript": "6.0.3",
-    "vite": "8.2.1"
+    "sharp": "^0.35.4"
   },
   "devDependencies": {
-    "@eslint/js": "10.0.1",
+    "@eslint/js": "^10.0.1",
     "@types/node": "26.2.0",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "concurrently": "10.0.4",
-    "eslint": "10.8.1",
+    "eslint": "^10.8.1",
     "eslint-plugin-react-hooks": "7.1.1",
     "eslint-plugin-react-refresh": "0.5.3",
     "globals": "17.9.0",
-    "typescript-eslint": "8.66.0"
-  }
+    "prettier": "^3.9.9",
+    "typescript-eslint": "8.66.0",
+    "@vitejs/plugin-react": "6.0.5",
+    "typescript": "6.0.3",
+    "vite": "8.2.1"
+  },
+  "license": "MIT"
 }

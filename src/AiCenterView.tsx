@@ -1,12 +1,30 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
-  Sparkles, Bot, Play, Check, CircleAlert, RotateCcw,
-  Clock, Gauge, Zap, Send, FileText, CheckCircle2,
-  Copy, Plus, Car
+  Sparkles,
+  Bot,
+  Play,
+  Check,
+  CircleAlert,
+  RotateCcw,
+  Clock,
+  Gauge,
+  Zap,
+  Send,
+  FileText,
+  CheckCircle2,
+  Copy,
+  Plus,
+  Car,
 } from 'lucide-react'
 import type { VehicleRecord } from './Vehicles'
 import {
-  BODY_TYPES, FUEL_TYPES, TRANSMISSIONS, VEHICLE_COLORS, VEHICLE_CONDITIONS, VEHICLE_MAKES, VEHICLE_TYPES,
+  BODY_TYPES,
+  FUEL_TYPES,
+  TRANSMISSIONS,
+  VEHICLE_COLORS,
+  VEHICLE_CONDITIONS,
+  VEHICLE_MAKES,
+  VEHICLE_TYPES,
 } from './vehicleOptions'
 
 type ApiFn = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
@@ -73,7 +91,11 @@ interface CommandLog {
   actionTaken?: string
 }
 
-const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
+const money = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+  maximumFractionDigits: 0,
+})
 
 export function AiCenterView({
   api,
@@ -99,7 +121,8 @@ export function AiCenterView({
       id: 'welcome',
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       prompt: 'Iniciar Assistente Autônomo',
-      reply: 'Olá! Sou o agente de operações de IA do AutoFlow. Posso ler anúncios crus, auditar estoque, otimizar textos em lote e agendar publicações nos horários de pico.',
+      reply:
+        'Olá! Sou o agente de operações de IA do AutoFlow. Posso ler anúncios crus, auditar estoque, otimizar textos em lote e agendar publicações nos horários de pico.',
       actionTaken: 'ready',
     },
   ])
@@ -129,7 +152,7 @@ export function AiCenterView({
   useEffect(() => {
     let active = true
     api<{ ok: boolean; audit: InventoryAudit }>('/ai/audit')
-      .then(res => {
+      .then((res) => {
         if (active && res.ok) setAudit(res.audit)
       })
       .catch(() => {})
@@ -164,18 +187,21 @@ export function AiCenterView({
     setCommandText('')
 
     try {
-      const res = await api<{ ok: boolean; intent: string; reply: string; actionTaken?: string }>('/ai/command', {
-        method: 'POST',
-        body: JSON.stringify({ prompt: text }),
-      })
+      const res = await api<{ ok: boolean; intent: string; reply: string; actionTaken?: string }>(
+        '/ai/command',
+        {
+          method: 'POST',
+          body: JSON.stringify({ prompt: text }),
+        },
+      )
       const logEntry: CommandLog = {
         id: String(Date.now()),
         timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         prompt: text,
         reply: res.reply,
-        actionTaken: res.actionTaken,
+        ...(res.actionTaken === undefined ? {} : { actionTaken: res.actionTaken }),
       }
-      setCommandLogs(prev => [logEntry, ...prev])
+      setCommandLogs((prev) => [logEntry, ...prev])
       await loadAudit()
       await reloadVehicles()
     } catch (err) {
@@ -185,7 +211,7 @@ export function AiCenterView({
         prompt: text,
         reply: `Erro ao processar: ${err instanceof Error ? err.message : 'Falha na comunicação.'}`,
       }
-      setCommandLogs(prev => [errEntry, ...prev])
+      setCommandLogs((prev) => [errEntry, ...prev])
     } finally {
       setCommandLoading(false)
     }
@@ -199,20 +225,29 @@ export function AiCenterView({
     setParsedVehicle(null)
 
     try {
-      const res = await api<{ ok: boolean; vehicle: Omit<ParsedVehicle, 'vehicleType' | 'bodyType' | 'condition' | 'interiorColor'> }>('/ai/parse-text', {
+      const res = await api<{
+        ok: boolean
+        vehicle: Omit<ParsedVehicle, 'vehicleType' | 'bodyType' | 'condition' | 'interiorColor'>
+      }>('/ai/parse-text', {
         method: 'POST',
         body: JSON.stringify({ text: rawText }),
       })
       if (res.ok) {
         setParsedVehicle({
           ...res.vehicle,
-          exteriorColor: VEHICLE_COLORS.includes(res.vehicle.exteriorColor as typeof VEHICLE_COLORS[number]) ? res.vehicle.exteriorColor : '',
+          exteriorColor: VEHICLE_COLORS.includes(
+            res.vehicle.exteriorColor as (typeof VEHICLE_COLORS)[number],
+          )
+            ? res.vehicle.exteriorColor
+            : '',
           vehicleType: '',
           bodyType: '',
           condition: '',
           interiorColor: '',
         })
-        setParseMessage(`Veículo extraído com ${Math.round(res.vehicle.confidence * 100)}% de confiança.`)
+        setParseMessage(
+          `Veículo extraído com ${Math.round(res.vehicle.confidence * 100)}% de confiança.`,
+        )
       }
     } catch (err) {
       setParseMessage(err instanceof Error ? err.message : 'Erro ao processar texto.')
@@ -221,21 +256,23 @@ export function AiCenterView({
     }
   }
 
-  const canSaveParsedVehicle = Boolean(parsedVehicle
-    && parsedVehicle.year >= 1900
-    && parsedVehicle.year <= new Date().getFullYear() + 1
-    && VEHICLE_MAKES.includes(parsedVehicle.make as typeof VEHICLE_MAKES[number])
-    && parsedVehicle.model.trim()
-    && parsedVehicle.price > 0
-    && parsedVehicle.location.trim()
-    && parsedVehicle.description.trim()
-    && parsedVehicle.vehicleType
-    && parsedVehicle.bodyType
-    && parsedVehicle.condition
-    && parsedVehicle.transmission
-    && parsedVehicle.fuelType
-    && parsedVehicle.exteriorColor
-    && parsedVehicle.interiorColor)
+  const canSaveParsedVehicle = Boolean(
+    parsedVehicle &&
+    parsedVehicle.year >= 1900 &&
+    parsedVehicle.year <= new Date().getFullYear() + 1 &&
+    VEHICLE_MAKES.includes(parsedVehicle.make as (typeof VEHICLE_MAKES)[number]) &&
+    parsedVehicle.model.trim() &&
+    parsedVehicle.price > 0 &&
+    parsedVehicle.location.trim() &&
+    parsedVehicle.description.trim() &&
+    parsedVehicle.vehicleType &&
+    parsedVehicle.bodyType &&
+    parsedVehicle.condition &&
+    parsedVehicle.transmission &&
+    parsedVehicle.fuelType &&
+    parsedVehicle.exteriorColor &&
+    parsedVehicle.interiorColor,
+  )
 
   async function handleSaveParsedToStock() {
     if (!parsedVehicle || !canSaveParsedVehicle) return
@@ -273,7 +310,6 @@ export function AiCenterView({
     } finally {
       setSavingParsed(false)
     }
-
   }
 
   async function handleBatchOptimize() {
@@ -330,8 +366,8 @@ export function AiCenterView({
           </div>
           <div className="ai-kpi-val">
             <strong>{audit?.healthScore ?? 100}%</strong>
-            <span className={`ai-badge ${((audit?.healthScore ?? 100) >= 80) ? 'good' : 'warning'}`}>
-              {((audit?.healthScore ?? 100) >= 80) ? 'Excelente' : 'Requer Atenção'}
+            <span className={`ai-badge ${(audit?.healthScore ?? 100) >= 80 ? 'good' : 'warning'}`}>
+              {(audit?.healthScore ?? 100) >= 80 ? 'Excelente' : 'Requer Atenção'}
             </span>
           </div>
           <small>{audit?.totalVehicles ?? vehicles.length} veículos cadastrados na base</small>
@@ -343,10 +379,10 @@ export function AiCenterView({
             <Check size={20} className="ai-icon-blue" />
           </div>
           <div className="ai-kpi-val">
-            <strong>{audit?.readyVehicles ?? vehicles.filter(v => v.status === 'Pronto').length}</strong>
-            <span className="ai-sub-info">
-              {audit?.readyUnscheduled ?? 0} fora da fila
-            </span>
+            <strong>
+              {audit?.readyVehicles ?? vehicles.filter((v) => v.status === 'Pronto').length}
+            </strong>
+            <span className="ai-sub-info">{audit?.readyUnscheduled ?? 0} fora da fila</span>
           </div>
           <small>Prontos para envio autônomo</small>
         </article>
@@ -357,7 +393,9 @@ export function AiCenterView({
             <Clock size={20} className="ai-icon-purple" />
           </div>
           <div className="ai-kpi-val">
-            <strong style={{ fontSize: '18px' }}>{audit?.peakWindowAvailable || 'Pico Automotivo'}</strong>
+            <strong style={{ fontSize: '18px' }}>
+              {audit?.peakWindowAvailable || 'Pico Automotivo'}
+            </strong>
           </div>
           <small>Tráfego máximo no Facebook Marketplace</small>
         </article>
@@ -393,7 +431,8 @@ export function AiCenterView({
             <p className="ai-desc-text">
               O piloto automático realiza 4 ações em sequência:
               <br />
-              <b>1.</b> Enriquece veículos prontos que estão sem descrição usando IA e hashtags de conversão.
+              <b>1.</b> Enriquece veículos prontos que estão sem descrição usando IA e hashtags de
+              conversão.
               <br />
               <b>2.</b> Seleciona todos os carros prontos que ainda não estão em publicação.
               <br />
@@ -434,11 +473,16 @@ export function AiCenterView({
                 <p>{autopilotResult.message}</p>
                 {autopilotResult.assignments.length > 0 && (
                   <ul className="ai-assignment-list">
-                    {autopilotResult.assignments.map(item => (
+                    {autopilotResult.assignments.map((item) => (
                       <li key={item.vehicleId}>
                         <span>{item.title}</span>
                         <small>
-                          {item.accountLabel} · {new Date(item.scheduledAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} ({item.window})
+                          {item.accountLabel} ·{' '}
+                          {new Date(item.scheduledAt).toLocaleTimeString('pt-BR', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}{' '}
+                          ({item.window})
                         </small>
                       </li>
                     ))}
@@ -512,23 +556,31 @@ export function AiCenterView({
 
             {/* Prompt suggestions */}
             <div className="ai-prompt-chips">
-              <button onClick={() => void handleSendCommand('Executar piloto automático no estoque pronto')}>
+              <button
+                onClick={() =>
+                  void handleSendCommand('Executar piloto automático no estoque pronto')
+                }
+              >
                 ⚡ Piloto Automático
               </button>
-              <button onClick={() => void handleSendCommand('Otimizar descrições de todos os veículos')}>
+              <button
+                onClick={() => void handleSendCommand('Otimizar descrições de todos os veículos')}
+              >
                 📝 Otimizar Textos
               </button>
               <button onClick={() => void handleSendCommand('Auditar saúde do estoque e gargalos')}>
                 🔍 Auditar Estoque
               </button>
-              <button onClick={() => void handleSendCommand('Reordenar grupos por taxa de conversão')}>
+              <button
+                onClick={() => void handleSendCommand('Reordenar grupos por taxa de conversão')}
+              >
                 🎯 Curar Grupos
               </button>
             </div>
 
             {/* Chat History */}
             <div className="ai-chat-history">
-              {commandLogs.map(log => (
+              {commandLogs.map((log) => (
                 <div key={log.id} className="ai-chat-item">
                   <div className="ai-chat-user">
                     <span>Você</span>
@@ -551,7 +603,7 @@ export function AiCenterView({
             {/* Input Bar */}
             <form
               className="ai-chat-input-form"
-              onSubmit={e => {
+              onSubmit={(e) => {
                 e.preventDefault()
                 void handleSendCommand()
               }}
@@ -560,11 +612,15 @@ export function AiCenterView({
                 type="text"
                 placeholder="Ex.: Agendar todo o estoque pronto nos horários de pico..."
                 value={commandText}
-                onChange={e => setCommandText(e.target.value)}
+                onChange={(e) => setCommandText(e.target.value)}
                 disabled={commandLoading}
                 aria-label="Comando para a IA"
               />
-              <button type="submit" className="primary" disabled={commandLoading || !commandText.trim()}>
+              <button
+                type="submit"
+                className="primary"
+                disabled={commandLoading || !commandText.trim()}
+              >
                 <Send size={16} />
                 {commandLoading ? 'Executando...' : 'Enviar'}
               </button>
@@ -581,7 +637,9 @@ export function AiCenterView({
               <Copy size={18} style={{ color: '#f59e0b', display: 'inline', marginRight: 6 }} />
               Leitor Inteligente de Veículos (Texto Cru ➔ Estoque)
             </h2>
-            <span>Cole textos de WhatsApp, notas de compra ou anúncios externos para cadastro automático</span>
+            <span>
+              Cole textos de WhatsApp, notas de compra ou anúncios externos para cadastro automático
+            </span>
           </div>
         </div>
 
@@ -592,7 +650,7 @@ export function AiCenterView({
               rows={3}
               placeholder="Ex.: Corolla XEi 2022 prata 42mil km revisado em concessionária flex automático R$ 119.900 único dono SP"
               value={rawText}
-              onChange={e => setRawText(e.target.value)}
+              onChange={(e) => setRawText(e.target.value)}
               disabled={parsing}
               required
             />
@@ -612,8 +670,14 @@ export function AiCenterView({
             <div className="ai-parsed-header">
               <Car size={20} />
               <div>
-                <strong>{parsedVehicle.year} {parsedVehicle.make} {parsedVehicle.model} {parsedVehicle.trim}</strong>
-                <small>{money.format(parsedVehicle.price)} · {parsedVehicle.km.toLocaleString('pt-BR')} km · {parsedVehicle.transmission}</small>
+                <strong>
+                  {parsedVehicle.year} {parsedVehicle.make} {parsedVehicle.model}{' '}
+                  {parsedVehicle.trim}
+                </strong>
+                <small>
+                  {money.format(parsedVehicle.price)} · {parsedVehicle.km.toLocaleString('pt-BR')}{' '}
+                  km · {parsedVehicle.transmission}
+                </small>
               </div>
               <button
                 type="button"
@@ -627,25 +691,186 @@ export function AiCenterView({
             </div>
 
             <div className="ai-parsed-details-grid">
-              <label><span>Ano</span><input type="number" min="1900" max={new Date().getFullYear()+1} value={parsedVehicle.year || ''} onChange={e=>setParsedVehicle({...parsedVehicle,year:Number(e.target.value)})}/></label>
-              <label><span>Marca</span><select value={parsedVehicle.make} onChange={e=>setParsedVehicle({...parsedVehicle,make:e.target.value})}><option value="">Selecione...</option>{VEHICLE_MAKES.map(value=><option key={value}>{value}</option>)}</select></label>
-              <label><span>Modelo</span><input value={parsedVehicle.model} onChange={e=>setParsedVehicle({...parsedVehicle,model:e.target.value})}/></label>
-              <label><span>Versão</span><input value={parsedVehicle.trim} onChange={e=>setParsedVehicle({...parsedVehicle,trim:e.target.value})}/></label>
-              <label><span>Quilometragem</span><input type="number" min="0" value={parsedVehicle.km} onChange={e=>setParsedVehicle({...parsedVehicle,km:Number(e.target.value)})}/></label>
-              <label><span>Preço</span><input type="number" min="1" value={parsedVehicle.price || ''} onChange={e=>setParsedVehicle({...parsedVehicle,price:Number(e.target.value)})}/></label>
+              <label>
+                <span>Ano</span>
+                <input
+                  type="number"
+                  min="1900"
+                  max={new Date().getFullYear() + 1}
+                  value={parsedVehicle.year || ''}
+                  onChange={(e) =>
+                    setParsedVehicle({ ...parsedVehicle, year: Number(e.target.value) })
+                  }
+                />
+              </label>
+              <label>
+                <span>Marca</span>
+                <select
+                  value={parsedVehicle.make}
+                  onChange={(e) => setParsedVehicle({ ...parsedVehicle, make: e.target.value })}
+                >
+                  <option value="">Selecione...</option>
+                  {VEHICLE_MAKES.map((value) => (
+                    <option key={value}>{value}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Modelo</span>
+                <input
+                  value={parsedVehicle.model}
+                  onChange={(e) => setParsedVehicle({ ...parsedVehicle, model: e.target.value })}
+                />
+              </label>
+              <label>
+                <span>Versão</span>
+                <input
+                  value={parsedVehicle.trim}
+                  onChange={(e) => setParsedVehicle({ ...parsedVehicle, trim: e.target.value })}
+                />
+              </label>
+              <label>
+                <span>Quilometragem</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={parsedVehicle.km}
+                  onChange={(e) =>
+                    setParsedVehicle({ ...parsedVehicle, km: Number(e.target.value) })
+                  }
+                />
+              </label>
+              <label>
+                <span>Preço</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={parsedVehicle.price || ''}
+                  onChange={(e) =>
+                    setParsedVehicle({ ...parsedVehicle, price: Number(e.target.value) })
+                  }
+                />
+              </label>
             </div>
             <div className="ai-parsed-details-grid">
-              <label><span>Tipo de veículo</span><select value={parsedVehicle.vehicleType} onChange={e=>setParsedVehicle({...parsedVehicle,vehicleType:e.target.value})}><option value="">Selecione...</option>{VEHICLE_TYPES.map(value=><option key={value}>{value}</option>)}</select></label>
-              <label><span>Carroceria</span><select value={parsedVehicle.bodyType} onChange={e=>setParsedVehicle({...parsedVehicle,bodyType:e.target.value})}><option value="">Selecione...</option>{BODY_TYPES.map(value=><option key={value}>{value}</option>)}</select></label>
-              <label><span>Condição</span><select value={parsedVehicle.condition} onChange={e=>setParsedVehicle({...parsedVehicle,condition:e.target.value})}><option value="">Selecione...</option>{VEHICLE_CONDITIONS.map(value=><option key={value}>{value}</option>)}</select></label>
-              <label><span>Câmbio</span><select value={parsedVehicle.transmission} onChange={e=>setParsedVehicle({...parsedVehicle,transmission:e.target.value})}><option value="">Selecione...</option>{TRANSMISSIONS.map(value=><option key={value}>{value}</option>)}</select></label>
-              <label><span>Combustível</span><select value={parsedVehicle.fuelType} onChange={e=>setParsedVehicle({...parsedVehicle,fuelType:e.target.value})}><option value="">Selecione...</option>{FUEL_TYPES.map(value=><option key={value}>{value}</option>)}</select></label>
-              <label><span>Cor externa</span><select value={parsedVehicle.exteriorColor} onChange={e=>setParsedVehicle({...parsedVehicle,exteriorColor:e.target.value})}><option value="">Selecione...</option>{VEHICLE_COLORS.map(value=><option key={value}>{value}</option>)}</select></label>
-              <label><span>Cor interna</span><select value={parsedVehicle.interiorColor} onChange={e=>setParsedVehicle({...parsedVehicle,interiorColor:e.target.value})}><option value="">Selecione...</option>{VEHICLE_COLORS.map(value=><option key={value}>{value}</option>)}</select></label>
-              <label><span>Localização</span><input value={parsedVehicle.location} onChange={e=>setParsedVehicle({...parsedVehicle,location:e.target.value})} /></label>
+              <label>
+                <span>Tipo de veículo</span>
+                <select
+                  value={parsedVehicle.vehicleType}
+                  onChange={(e) =>
+                    setParsedVehicle({ ...parsedVehicle, vehicleType: e.target.value })
+                  }
+                >
+                  <option value="">Selecione...</option>
+                  {VEHICLE_TYPES.map((value) => (
+                    <option key={value}>{value}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Carroceria</span>
+                <select
+                  value={parsedVehicle.bodyType}
+                  onChange={(e) => setParsedVehicle({ ...parsedVehicle, bodyType: e.target.value })}
+                >
+                  <option value="">Selecione...</option>
+                  {BODY_TYPES.map((value) => (
+                    <option key={value}>{value}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Condição</span>
+                <select
+                  value={parsedVehicle.condition}
+                  onChange={(e) =>
+                    setParsedVehicle({ ...parsedVehicle, condition: e.target.value })
+                  }
+                >
+                  <option value="">Selecione...</option>
+                  {VEHICLE_CONDITIONS.map((value) => (
+                    <option key={value}>{value}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Câmbio</span>
+                <select
+                  value={parsedVehicle.transmission}
+                  onChange={(e) =>
+                    setParsedVehicle({ ...parsedVehicle, transmission: e.target.value })
+                  }
+                >
+                  <option value="">Selecione...</option>
+                  {TRANSMISSIONS.map((value) => (
+                    <option key={value}>{value}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Combustível</span>
+                <select
+                  value={parsedVehicle.fuelType}
+                  onChange={(e) => setParsedVehicle({ ...parsedVehicle, fuelType: e.target.value })}
+                >
+                  <option value="">Selecione...</option>
+                  {FUEL_TYPES.map((value) => (
+                    <option key={value}>{value}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Cor externa</span>
+                <select
+                  value={parsedVehicle.exteriorColor}
+                  onChange={(e) =>
+                    setParsedVehicle({ ...parsedVehicle, exteriorColor: e.target.value })
+                  }
+                >
+                  <option value="">Selecione...</option>
+                  {VEHICLE_COLORS.map((value) => (
+                    <option key={value}>{value}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Cor interna</span>
+                <select
+                  value={parsedVehicle.interiorColor}
+                  onChange={(e) =>
+                    setParsedVehicle({ ...parsedVehicle, interiorColor: e.target.value })
+                  }
+                >
+                  <option value="">Selecione...</option>
+                  {VEHICLE_COLORS.map((value) => (
+                    <option key={value}>{value}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Localização</span>
+                <input
+                  value={parsedVehicle.location}
+                  onChange={(e) => setParsedVehicle({ ...parsedVehicle, location: e.target.value })}
+                />
+              </label>
             </div>
-            <label className="ai-parsed-description"><span>Descrição para o cadastro</span><textarea rows={3} value={parsedVehicle.description} onChange={e=>setParsedVehicle({...parsedVehicle,description:e.target.value})}/></label>
-            {!canSaveParsedVehicle && <small>Confira o texto extraído e preencha os campos obrigatórios antes de salvar. As informações não identificadas não são preenchidas automaticamente.</small>}
+            <label className="ai-parsed-description">
+              <span>Descrição para o cadastro</span>
+              <textarea
+                rows={3}
+                value={parsedVehicle.description}
+                onChange={(e) =>
+                  setParsedVehicle({ ...parsedVehicle, description: e.target.value })
+                }
+              />
+            </label>
+            {!canSaveParsedVehicle && (
+              <small>
+                Confira o texto extraído e preencha os campos obrigatórios antes de salvar. As
+                informações não identificadas não são preenchidas automaticamente.
+              </small>
+            )}
           </div>
         )}
       </article>

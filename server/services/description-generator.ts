@@ -32,20 +32,24 @@ export interface AIProviderSettings {
 
 export function resolveAIProviderSettings(settings?: AIProviderSettings) {
   const requestedProvider = settings?.aiProvider
-  const configuredProvider: AIProviderChoice = requestedProvider === 'gemini' || requestedProvider === 'openai' || requestedProvider === 'procedural'
-    ? requestedProvider
-    : 'auto'
+  const configuredProvider: AIProviderChoice =
+    requestedProvider === 'gemini' ||
+    requestedProvider === 'openai' ||
+    requestedProvider === 'procedural'
+      ? requestedProvider
+      : 'auto'
   const geminiApiKey = settings?.geminiApiKey?.trim() || process.env.GEMINI_API_KEY || ''
   const openaiApiKey = settings?.openaiApiKey?.trim() || process.env.OPENAI_API_KEY || ''
   return {
     provider: configuredProvider,
-    apiKeys: configuredProvider === 'gemini'
-      ? { gemini: geminiApiKey }
-      : configuredProvider === 'openai'
-        ? { openai: openaiApiKey }
-        : configuredProvider === 'auto'
-          ? { gemini: geminiApiKey, openai: openaiApiKey }
-          : {},
+    apiKeys:
+      configuredProvider === 'gemini'
+        ? { gemini: geminiApiKey }
+        : configuredProvider === 'openai'
+          ? { openai: openaiApiKey }
+          : configuredProvider === 'auto'
+            ? { gemini: geminiApiKey, openai: openaiApiKey }
+            : {},
   }
 }
 
@@ -60,7 +64,10 @@ const moneyFormatter = new Intl.NumberFormat('pt-BR', {
   maximumFractionDigits: 0,
 })
 
-export function generateProceduralDescription(vehicle: VehicleInput, tone: CopyTone = 'vendedor'): string {
+export function generateProceduralDescription(
+  vehicle: VehicleInput,
+  tone: CopyTone = 'vendedor',
+): string {
   const fullTitle = `${vehicle.year} ${vehicle.make} ${vehicle.model}${vehicle.trim ? ` ${vehicle.trim}` : ''}`
   const details = [
     vehicle.km > 0 ? `Quilometragem: ${new Intl.NumberFormat('pt-BR').format(vehicle.km)} km` : '',
@@ -72,16 +79,18 @@ export function generateProceduralDescription(vehicle: VehicleInput, tone: CopyT
     vehicle.price ? `Preço: ${moneyFormatter.format(vehicle.price)}` : '',
     vehicle.location ? `Localização: ${vehicle.location}` : '',
   ].filter(Boolean)
-  const fipeCallout = (vehicle.fipeDiff && vehicle.fipeDiff > 500)
-    ? `Diferença informada em relação à FIPE: R$ ${Math.round(vehicle.fipeDiff).toLocaleString('pt-BR')}${vehicle.fipeDiffPercent ? ` (${vehicle.fipeDiffPercent}%)` : ''}.`
-    : ''
-  const introduction = tone === 'amigável'
-    ? `Conheça: ${fullTitle}.`
-    : tone === 'direto'
-      ? fullTitle
-      : tone === 'profissional'
-        ? `Anúncio: ${fullTitle}.`
-        : `À venda: ${fullTitle}.`
+  const fipeCallout =
+    vehicle.fipeDiff && vehicle.fipeDiff > 500
+      ? `Diferença informada em relação à FIPE: R$ ${Math.round(vehicle.fipeDiff).toLocaleString('pt-BR')}${vehicle.fipeDiffPercent ? ` (${vehicle.fipeDiffPercent}%)` : ''}.`
+      : ''
+  const introduction =
+    tone === 'amigável'
+      ? `Conheça: ${fullTitle}.`
+      : tone === 'direto'
+        ? fullTitle
+        : tone === 'profissional'
+          ? `Anúncio: ${fullTitle}.`
+          : `À venda: ${fullTitle}.`
   return [
     introduction,
     ...details,
@@ -89,7 +98,9 @@ export function generateProceduralDescription(vehicle: VehicleInput, tone: CopyT
     tone === 'direto'
       ? 'Entre em contato para mais informações.'
       : 'Fale conosco para tirar dúvidas e combinar uma visita.',
-  ].filter(Boolean).join('\n')
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 export async function generateVehicleDescription(
@@ -99,21 +110,34 @@ export async function generateVehicleDescription(
     provider?: AIProviderChoice
     apiKey?: string
     apiKeys?: Partial<Record<'gemini' | 'openai', string>>
-  }
+  },
 ): Promise<GenerationResult> {
   const tone: CopyTone = options?.tone || 'vendedor'
   const provider = options?.provider || 'auto'
 
-  const geminiKey = (provider === 'gemini' ? options?.apiKey : undefined) || options?.apiKeys?.gemini || process.env.GEMINI_API_KEY || ''
-  const openaiKey = (provider === 'openai' ? options?.apiKey : undefined) || options?.apiKeys?.openai || process.env.OPENAI_API_KEY || ''
+  const geminiKey =
+    (provider === 'gemini' ? options?.apiKey : undefined) ||
+    options?.apiKeys?.gemini ||
+    process.env.GEMINI_API_KEY ||
+    ''
+  const openaiKey =
+    (provider === 'openai' ? options?.apiKey : undefined) ||
+    options?.apiKeys?.openai ||
+    process.env.OPENAI_API_KEY ||
+    ''
 
-  const fipeInfo = (vehicle.fipeDiff && vehicle.fipeDiff > 500 && vehicle.fipePrice)
-    ? `- Cotação Tabela FIPE informada: ${moneyFormatter.format(vehicle.fipePrice)}; diferença informada: R$ ${Math.round(vehicle.fipeDiff).toLocaleString('pt-BR')}${vehicle.fipeDiffPercent ? ` (${vehicle.fipeDiffPercent}%)` : ''}`
-    : ''
+  const fipeInfo =
+    vehicle.fipeDiff && vehicle.fipeDiff > 500 && vehicle.fipePrice
+      ? `- Cotação Tabela FIPE informada: ${moneyFormatter.format(vehicle.fipePrice)}; diferença informada: R$ ${Math.round(vehicle.fipeDiff).toLocaleString('pt-BR')}${vehicle.fipeDiffPercent ? ` (${vehicle.fipeDiffPercent}%)` : ''}`
+      : ''
 
   const providedFacts = [
-    vehicle.year && vehicle.make && vehicle.model ? `- Ano/Marca/Modelo: ${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim || ''}` : '',
-    vehicle.km > 0 ? `- Quilometragem: ${new Intl.NumberFormat('pt-BR').format(vehicle.km)} km` : '',
+    vehicle.year && vehicle.make && vehicle.model
+      ? `- Ano/Marca/Modelo: ${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim || ''}`
+      : '',
+    vehicle.km > 0
+      ? `- Quilometragem: ${new Intl.NumberFormat('pt-BR').format(vehicle.km)} km`
+      : '',
     vehicle.transmission ? `- Câmbio: ${vehicle.transmission}` : '',
     vehicle.fuelType ? `- Combustível: ${vehicle.fuelType}` : '',
     vehicle.exteriorColor ? `- Cor externa: ${vehicle.exteriorColor}` : '',
@@ -154,7 +178,7 @@ REGRAS:
               maxOutputTokens: 300,
             },
           }),
-        }
+        },
       )
 
       if (response.ok) {
@@ -169,7 +193,9 @@ REGRAS:
         logger.warn('AutoFlowAI', `Gemini API respondeu com status ${response.status}`)
       }
     } catch (err) {
-      logger.warn('AutoFlowAI', 'Falha na chamada ao Gemini API', { error: err instanceof Error ? err.message : err })
+      logger.warn('AutoFlowAI', 'Falha na chamada ao Gemini API', {
+        error: err instanceof Error ? err.message : err,
+      })
     }
   }
 
@@ -202,7 +228,9 @@ REGRAS:
         logger.warn('AutoFlowAI', `OpenAI API respondeu com status ${response.status}`)
       }
     } catch (err) {
-      logger.warn('AutoFlowAI', 'Falha na chamada à OpenAI API', { error: err instanceof Error ? err.message : err })
+      logger.warn('AutoFlowAI', 'Falha na chamada à OpenAI API', {
+        error: err instanceof Error ? err.message : err,
+      })
     }
   }
 

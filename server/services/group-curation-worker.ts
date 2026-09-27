@@ -8,12 +8,21 @@ function groupTarget(group: { name: string; url: string }) {
 
 function listGroups(db: DatabaseSync, organizationId: number, activeOnly = false) {
   return db
-    .prepare(`SELECT id,name,url,group_key groupKey,active,priority,success_count successCount,failure_count failureCount,last_found_at lastFoundAt
-      FROM marketplace_groups WHERE organization_id=?${activeOnly ? ' AND active=1' : ''} ORDER BY priority,id`)
+    .prepare(
+      `SELECT id,name,url,group_key groupKey,active,priority,success_count successCount,failure_count failureCount,last_found_at lastFoundAt
+      FROM marketplace_groups WHERE organization_id=?${activeOnly ? ' AND active=1' : ''} ORDER BY priority,id`,
+    )
     .all(organizationId) as Array<{
-      id: number; name: string; url: string; groupKey: string; active: number; priority: number
-      successCount: number; failureCount: number; lastFoundAt?: string
-    }>
+    id: number
+    name: string
+    url: string
+    groupKey: string
+    active: number
+    priority: number
+    successCount: number
+    failureCount: number
+    lastFoundAt?: string
+  }>
 }
 
 /**
@@ -25,20 +34,22 @@ function listGroups(db: DatabaseSync, organizationId: number, activeOnly = false
 export function applyGroupCuration(db: DatabaseSync, organizationId: number) {
   const rawGroups = listGroups(db, organizationId)
   const curated = curateMarketplaceGroups(
-    rawGroups.map(g => ({ ...g, active: Boolean(g.active) } as GroupRecord)),
+    rawGroups.map((g) => ({ ...g, active: Boolean(g.active) }) as GroupRecord),
     '',
-    10
+    10,
   )
   db.exec('BEGIN')
   try {
     for (let i = 0; i < curated.length; i++) {
       const item = curated[i]
-      db.prepare('UPDATE marketplace_groups SET priority=?,active=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?')
-        .run(i + 1, item.recommendedActive ? 1 : 0, item.group.id, organizationId)
+      db.prepare(
+        'UPDATE marketplace_groups SET priority=?,active=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?',
+      ).run(i + 1, item.recommendedActive ? 1 : 0, item.group.id, organizationId)
     }
     const activeTargets = listGroups(db, organizationId, true).map(groupTarget)
-    db.prepare('UPDATE organization_settings SET target_groups=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=?')
-      .run(JSON.stringify(activeTargets), organizationId)
+    db.prepare(
+      'UPDATE organization_settings SET target_groups=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=?',
+    ).run(JSON.stringify(activeTargets), organizationId)
     db.exec('COMMIT')
   } catch (err) {
     db.exec('ROLLBACK')
@@ -53,7 +64,9 @@ export function applyGroupCuration(db: DatabaseSync, organizationId: number) {
  */
 export function runGroupCurationSweep(db: DatabaseSync): { organizationsCurated: number } {
   const orgs = db
-    .prepare('SELECT organization_id organizationId FROM organization_settings WHERE auto_curate_groups=1')
+    .prepare(
+      'SELECT organization_id organizationId FROM organization_settings WHERE auto_curate_groups=1',
+    )
     .all() as Array<{ organizationId: number }>
 
   let organizationsCurated = 0
@@ -62,7 +75,11 @@ export function runGroupCurationSweep(db: DatabaseSync): { organizationsCurated:
       applyGroupCuration(db, org.organizationId)
       organizationsCurated++
     } catch (err) {
-      logger.warn('GroupCurationWorker', `Falha ao curar grupos da organização #${org.organizationId}`, { error: err })
+      logger.warn(
+        'GroupCurationWorker',
+        `Falha ao curar grupos da organização #${org.organizationId}`,
+        { error: err },
+      )
     }
   }
   return { organizationsCurated }

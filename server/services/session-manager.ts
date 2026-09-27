@@ -14,7 +14,7 @@ export interface AvailableAccount {
 export function findBestAccountForVehicle(
   db: DatabaseSync,
   organizationId: number,
-  vehicleId: number
+  vehicleId: number,
 ): AvailableAccount | null {
   const settings = db
     .prepare('SELECT daily_limit dailyLimit FROM organization_settings WHERE organization_id = ?')
@@ -23,26 +23,32 @@ export function findBestAccountForVehicle(
 
   // Seleciona todas as contas da organização
   const accounts = db
-    .prepare(`
+    .prepare(
+      `
       SELECT a.id, a.label, a.browser_profile browserProfile, a.status, a.last_seen_at lastSeenAt,
         COALESCE((
           SELECT COUNT(*) FROM publication_jobs j
           WHERE j.organization_id = a.organization_id AND j.social_account_id = a.id
-            AND date(j.created_at, 'localtime') = date('now', 'localtime')
+            AND autoflow_day(j.created_at) = autoflow_day(CURRENT_TIMESTAMP)
             AND j.status != 'canceled'
-        ), 0) todayCount
+        ), 0) todayCount,
+        EXISTS (SELECT 1 FROM publication_jobs busy WHERE busy.organization_id=a.organization_id
+          AND busy.social_account_id=a.id AND busy.vehicle_id=?
+          AND busy.status IN ('pending','filling','error','awaiting_confirmation')) busy
       FROM social_accounts a
-      WHERE a.organization_id = ?
+      WHERE a.organization_id = ? AND a.status = 'connected'
       ORDER BY a.label
-    `)
-    .all(organizationId) as Array<{
-      id: number
-      label: string
-      browserProfile?: string
-      status: string
-      lastSeenAt?: string
-      todayCount: number
-    }>
+    `,
+    )
+    .all(vehicleId, organizationId) as Array<{
+    id: number
+    label: string
+    browserProfile?: string
+    status: string
+    lastSeenAt?: string
+    todayCount: number
+    busy: number
+  }>
 
   if (!accounts.length) return null
 
@@ -52,23 +58,19 @@ export function findBestAccountForVehicle(
   for (const acc of accounts) {
     if (acc.todayCount >= dailyLimit) continue
 
-    // Checa se esta conta já possui trabalho ativo para o mesmo veículo
-    const existingJob = db
-      .prepare(`
-        SELECT id FROM publication_jobs
-        WHERE organization_id = ? AND social_account_id = ? AND vehicle_id = ?
-          AND status IN ('pending', 'filling', 'error', 'awaiting_confirmation')
-        LIMIT 1
-      `)
-      .get(organizationId, acc.id, vehicleId)
-
-    if (existingJob) continue
+    if (acc.busy) continue
 
     // Calcula score: menor volume hoje e maior recência ganham prioridade
     const capacityRemaining = dailyLimit - acc.todayCount
     let recencyScore = 0
     if (acc.lastSeenAt) {
-      const elapsed = Date.now() - new Date(acc.lastSeenAt.replace(' ', 'T') + 'Z').getTime()
+      const elapsed =
+        Date.now() -
+        Date.parse(
+          /(?:Z|[+-]\d\d:\d\d)$/.test(acc.lastSeenAt)
+            ? acc.lastSeenAt
+            : acc.lastSeenAt.replace(' ', 'T') + 'Z',
+        )
       if (elapsed < 15 * 60000) recencyScore = 20
       else if (elapsed < 60 * 60000) recencyScore = 10
     }
