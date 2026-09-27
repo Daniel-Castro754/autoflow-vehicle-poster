@@ -4,6 +4,31 @@
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   const randomDelay = (min, max) => sleep(min + Math.random() * (max - min))
+  const selectorConfig = globalThis.AUTOFLOW_SELECTOR_CONFIG || {
+    version: 'embedded',
+    fallbackLocale: 'pt-BR',
+    supportedLocales: ['pt-BR', 'en-US'],
+    aliases: {},
+    fields: {},
+  }
+  function detectPageLocale() {
+    const declared = String(document.documentElement?.lang || navigator?.language || '').toLowerCase()
+    if (declared.startsWith('es')) return 'es-ES'
+    if (declared.startsWith('en')) return 'en-US'
+    if (declared.startsWith('pt')) return 'pt-BR'
+    const sample = String(document.body?.innerText || '').slice(0, 6000).toLowerCase()
+    if (/\b(precio|ubicaci[oó]n|kilometraje|descripci[oó]n)\b/.test(sample)) return 'es-ES'
+    if (/\b(price|location|mileage|description)\b/.test(sample)) return 'en-US'
+    return selectorConfig.fallbackLocale || 'pt-BR'
+  }
+  const pageLocale = detectPageLocale()
+  function fieldLabels(fieldName, fallback = []) {
+    const spec = selectorConfig.fields?.[fieldName]
+    const localized = spec?.labels?.[pageLocale] || []
+    const fallbackLocalized = spec?.labels?.[selectorConfig.fallbackLocale] || []
+    const allKnown = Object.values(spec?.labels || {}).flat()
+    return [...new Set([...localized, ...fallbackLocalized, ...allKnown, ...fallback].filter(Boolean))]
+  }
   // Marcado por fillText/selectCustom quando o controle não é localizado no DOM (diferente
   // de "localizado, mas o valor não confirmou") — usado por step() para sinalizar possível
   // mudança de layout do Facebook em vez de um problema pontual de dados do veículo.
@@ -62,6 +87,7 @@
     perua: ['Perua/Station wagon', 'Perua'],
     automatico: ['Automático'],
     prateado: ['Prateado', 'Prata'],
+    ...(selectorConfig.aliases || {}),
   }
   function valuesFor(value) {
     const key = normalize(value)
@@ -81,6 +107,38 @@
     input.dispatchEvent(new Event('change', { bubbles: true }))
     input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Unidentified', bubbles: true }))
     input.dispatchEvent(new Event('blur', { bubbles: true }))
+  }
+
+  async function typeLikeHuman(input, value) {
+    const proto =
+      input instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+    if (!setter) return false
+    input.focus()
+    setter.call(input, '')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    let current = ''
+    for (const character of String(value)) {
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: character, bubbles: true, cancelable: true }),
+      )
+      current += character
+      setter.call(input, current)
+      input.dispatchEvent(
+        new InputEvent('input', {
+          bubbles: true,
+          inputType: 'insertText',
+          data: character,
+        }),
+      )
+      input.dispatchEvent(new KeyboardEvent('keyup', { key: character, bubbles: true }))
+      await randomDelay(18, 58)
+    }
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+    input.blur()
+    return true
   }
 
   function valueMatches(actual, expected) {
@@ -190,7 +248,7 @@
     return null
   }
 
-  async function fillText(labels, value) {
+  async function fillText(labels, value, { humanTyping = false } = {}) {
     if (value === undefined || value === null || value === '') return false
     const element = await waitField(
       labels,
@@ -203,6 +261,17 @@
     element.scrollIntoView({ block: 'center', behavior: 'auto' })
     await sleep(180)
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      if (humanTyping) {
+        await typeLikeHuman(element, value)
+        if (
+          await confirmField(
+            labels,
+            value,
+            'input:not([type="file"]),textarea,[contenteditable="true"],[role="textbox"]',
+          )
+        )
+          return true
+      }
       setNative(element, value)
       if (
         await confirmField(
@@ -891,75 +960,112 @@
     const automation = task.automation || {}
     const fieldSteps = [
       {
+        key: 'vehicleType',
         label: 'Tipo de veículo',
         run: () =>
-          selectCustom(['tipo de veiculo', 'vehicle type'], vehicle.vehicleType || 'Carro/picape'),
+          selectCustom(fieldLabels('vehicleType', ['tipo de veiculo', 'vehicle type']), vehicle.vehicleType || 'Carro/picape'),
         critical: true,
       },
       {
+        key: 'location',
         label: 'Localização',
-        run: () => selectOrFill(['localizacao', 'location'], vehicle.location),
+        run: () =>
+          selectOrFill(fieldLabels('location', ['localizacao', 'location']), vehicle.location),
         critical: true,
       },
       {
+        key: 'year',
         label: 'Ano',
-        run: () => selectCustom(['ano', 'year'], String(vehicle.year)),
+        run: () => selectCustom(fieldLabels('year', ['ano', 'year']), String(vehicle.year)),
         critical: true,
       },
       {
+        key: 'make',
         label: 'Fabricante',
-        run: () => selectOrFill(['fabricante', 'marca', 'make'], vehicle.make),
+        run: () => selectOrFill(fieldLabels('make', ['fabricante', 'marca', 'make']), vehicle.make),
         critical: true,
       },
       {
+        key: 'model',
         label: 'Modelo',
-        run: () => selectOrFill(['modelo', 'model'], vehicle.model),
+        run: () =>
+          selectOrFill(fieldLabels('model', ['modelo', 'model']), vehicle.model),
         critical: true,
       },
       {
+        key: 'mileage',
         label: 'Quilometragem',
-        run: () => fillText(['quilometragem', 'mileage', 'odometro'], vehicle.km),
+        run: () =>
+          fillText(
+            fieldLabels('mileage', ['quilometragem', 'mileage', 'odometro']),
+            vehicle.km,
+            { humanTyping: true },
+          ),
         critical: true,
       },
-      { label: 'Preço', run: () => fillText(['preco', 'price'], vehicle.price), critical: true },
       {
+        key: 'price',
+        label: 'Preço',
+        run: () =>
+          fillText(fieldLabels('price', ['preco', 'price']), vehicle.price, { humanTyping: true }),
+        critical: true,
+      },
+      {
+        key: 'transmission',
         label: 'Câmbio',
-        run: () => selectCustom(['cambio', 'transmissao', 'transmission'], vehicle.transmission),
+        run: () =>
+          selectCustom(
+            fieldLabels('transmission', ['cambio', 'transmissao', 'transmission']),
+            vehicle.transmission,
+          ),
         critical: true,
       },
       {
+        key: 'fuelType',
         label: 'Combustível',
-        run: () => selectCustom(['combustivel', 'fuel'], vehicle.fuelType),
+        run: () =>
+          selectCustom(fieldLabels('fuelType', ['combustivel', 'fuel']), vehicle.fuelType),
         critical: true,
       },
       {
+        key: 'bodyType',
         label: 'Carroceria',
         run: () =>
           selectCustom(
-            ['estilo da carroceria', 'carroceria', 'body style', 'body type'],
+            fieldLabels('bodyType', ['estilo da carroceria', 'carroceria', 'body style', 'body type']),
             vehicle.bodyType,
           ),
         critical: true,
       },
       {
+        key: 'condition',
         label: 'Condição do veículo',
         run: () =>
-          selectCustom(['condicao do veiculo', 'vehicle condition', 'condicao'], vehicle.condition),
+          selectCustom(
+            fieldLabels('condition', ['condicao do veiculo', 'vehicle condition', 'condicao']),
+            vehicle.condition,
+          ),
         critical: true,
       },
       {
+        key: 'exteriorColor',
         label: 'Cor externa',
-        run: () => selectCustom(['cor externa', 'exterior color'], vehicle.exteriorColor),
+        run: () =>
+          selectCustom(fieldLabels('exteriorColor', ['cor externa', 'exterior color']), vehicle.exteriorColor),
         critical: false,
       },
       {
+        key: 'interiorColor',
         label: 'Cor interna',
-        run: () => selectCustom(['cor interna', 'interior color'], vehicle.interiorColor),
+        run: () =>
+          selectCustom(fieldLabels('interiorColor', ['cor interna', 'interior color']), vehicle.interiorColor),
         critical: false,
       },
       {
+        key: 'description',
         label: 'Descrição',
-        run: () => fillText(['descricao', 'description'], vehicle.description),
+        run: () =>
+          fillText(fieldLabels('description', ['descricao', 'description']), vehicle.description),
         critical: true,
       },
     ]
@@ -1077,6 +1183,22 @@
     const notFoundFields = fieldSteps
       .filter((field) => field.critical && resultMap.get(field.label)?.[2])
       .map((field) => field.label)
+    const criticalFields = fieldSteps.filter((field) => field.critical)
+    const selectorHealth = {
+      configVersion: String(selectorConfig.version || 'unknown'),
+      pageLocale,
+      criticalTotal: criticalFields.length,
+      missingCount: notFoundFields.length,
+      successRate:
+        criticalFields.length > 0
+          ? (criticalFields.length - notFoundFields.length) / criticalFields.length
+          : 1,
+      severe:
+        notFoundFields.length >= 3 ||
+        (criticalFields.length > 0 &&
+          notFoundFields.length >= 2 &&
+          notFoundFields.length / criticalFields.length >= 0.3),
+    }
     const layoutDriftSuspected =
       notFoundFields.length >= 2 ||
       (automation.autoAdvance && !advanced && notFoundFields.length >= 1)
@@ -1109,6 +1231,9 @@
         resultUrl: published ? location.href : '',
         layoutDriftSuspected,
         notFoundFields,
+        selectorConfigVersion: selectorHealth.configVersion,
+        pageLocale: selectorHealth.pageLocale,
+        selectorHealth,
       },
     })
   }
