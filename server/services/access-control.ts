@@ -84,13 +84,15 @@ export function createAccessControl(db: DatabaseSync, userById: UserById) {
     return current?.role === 'admin'
       ? db
           .prepare(
-            `SELECT a.id,a.label,a.browser_profile browserProfile,a.status,a.user_id userId,u.name owner
+            `SELECT a.id,a.label,a.browser_profile browserProfile,a.status,a.user_id userId,
+            a.automation_paused automationPaused,a.automation_pause_reason automationPauseReason,a.automation_paused_at automationPausedAt,u.name owner
           FROM social_accounts a JOIN users u ON u.id=a.user_id WHERE a.id=? AND a.organization_id=?`,
           )
           .get(accountId, auth.organizationId)
       : db
           .prepare(
-            `SELECT a.id,a.label,a.browser_profile browserProfile,a.status,a.user_id userId,u.name owner
+            `SELECT a.id,a.label,a.browser_profile browserProfile,a.status,a.user_id userId,
+            a.automation_paused automationPaused,a.automation_pause_reason automationPauseReason,a.automation_paused_at automationPausedAt,u.name owner
           FROM social_accounts a JOIN users u ON u.id=a.user_id WHERE a.id=? AND a.organization_id=? AND a.user_id=?`,
           )
           .get(accountId, auth.organizationId, auth.userId)
