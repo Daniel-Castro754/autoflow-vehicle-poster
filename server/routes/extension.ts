@@ -6,6 +6,11 @@ import { findBestAccountForVehicle } from '../services/session-manager.ts'
 import { calculateBackoff } from '../lib/retry.ts'
 import { isRetryableExtensionFailureCode } from '../services/publication-policy.ts'
 import { sendCriticalAlert } from '../services/alerting.ts'
+import {
+  openSelectorCircuitBreaker,
+  recordSelectorHealth,
+  sanitizeSelectorHealth,
+} from '../services/selector-health.ts'
 
 type AuthContext = { userId: number; organizationId: number }
 type Group = { id: number; name: string; groupKey: string; url: string }
@@ -88,13 +93,15 @@ export async function handleExtensionRoute(
       current?.role === 'admin'
         ? db
             .prepare(
-              `SELECT a.id,a.label,a.browser_profile browserProfile,a.status,a.user_id userId,u.name owner
+              `SELECT a.id,a.label,a.browser_profile browserProfile,a.status,a.user_id userId,
+              a.automation_paused automationPaused,a.automation_pause_reason automationPauseReason,a.automation_paused_at automationPausedAt,u.name owner
             FROM social_accounts a JOIN users u ON u.id=a.user_id WHERE a.organization_id=? ORDER BY u.name,a.label`,
             )
             .all(auth.organizationId)
         : db
             .prepare(
-              `SELECT a.id,a.label,a.browser_profile browserProfile,a.status,a.user_id userId,u.name owner
+              `SELECT a.id,a.label,a.browser_profile browserProfile,a.status,a.user_id userId,
+              a.automation_paused automationPaused,a.automation_pause_reason automationPauseReason,a.automation_paused_at automationPausedAt,u.name owner
             FROM social_accounts a JOIN users u ON u.id=a.user_id WHERE a.organization_id=? AND a.user_id=? ORDER BY a.label`,
             )
             .all(auth.organizationId, auth.userId)
@@ -102,9 +109,25 @@ export async function handleExtensionRoute(
   }
   if (req.method === 'GET' && url.pathname === '/api/extension/queue') {
     const accountId = Number(url.searchParams.get('accountId'))
-    const account = allowedExtensionAccount(accountId, auth)
+    const account = allowedExtensionAccount(accountId, auth) as
+      | {
+          id: number
+          automationPaused?: number
+          automationPauseReason?: string
+          automationPausedAt?: string
+          [key: string]: unknown
+        }
+      | undefined
     if (!account)
       return send(res, 403, { error: 'Selecione um perfil do Brave associado a este usuário.' })
+    if (account.automationPaused)
+      return send(res, 423, {
+        error:
+          account.automationPauseReason ||
+          'A automação deste perfil foi pausada após falhas de seletores. Revise o Marketplace e retome pelo painel.',
+        accountPaused: true,
+        pausedAt: account.automationPausedAt || null,
+      })
     db.prepare(
       'UPDATE social_accounts SET last_seen_at=CURRENT_TIMESTAMP,status=? WHERE id=? AND organization_id=?',
     ).run('connected', accountId, auth.organizationId)
@@ -199,9 +222,24 @@ export async function handleExtensionRoute(
       return send(res, 400, {
         error: 'A aba de execução precisa estar no formulário de veículo do Marketplace.',
       })
-    if (!allowedExtensionAccount(accountId, auth))
+    const extensionAccount = allowedExtensionAccount(accountId, auth) as
+      | {
+          automationPaused?: number
+          automationPauseReason?: string
+          automationPausedAt?: string
+        }
+      | undefined
+    if (!extensionAccount)
       return send(res, 403, {
         error: 'Este perfil do Brave não está disponível para o usuário conectado.',
+      })
+    if (extensionAccount.automationPaused)
+      return send(res, 423, {
+        error:
+          extensionAccount.automationPauseReason ||
+          'A automação deste perfil foi pausada após falhas de seletores.',
+        accountPaused: true,
+        pausedAt: extensionAccount.automationPausedAt || null,
       })
     const job = db
       .prepare(
@@ -833,6 +871,10 @@ export async function handleExtensionRoute(
         retriesExhausted: retriesUsed >= maxRetries,
       })
     }
+    const incomingNotFoundFields = Array.isArray(b.notFoundFields)
+      ? b.notFoundFields.map(String).slice(0, 20)
+      : []
+    const selectorHealth = sanitizeSelectorHealth(b.selectorHealth, incomingNotFoundFields)
     const report = {
       ...(soldInterrupted ? { saleInterrupted: true } : {}),
       filledCount: Math.max(0, Number(b.filledCount) || 0),
@@ -851,10 +893,46 @@ export async function handleExtensionRoute(
       published: Boolean(b.published),
       publishAttempted: Boolean(b.publishAttempted) || publicationMayExist(job),
       layoutDriftSuspected: Boolean(b.layoutDriftSuspected),
-      notFoundFields: Array.isArray(b.notFoundFields)
-        ? b.notFoundFields.map(String).slice(0, 20)
-        : [],
+      notFoundFields: incomingNotFoundFields,
+      selectorConfigVersion: String(
+        b.selectorConfigVersion || selectorHealth.configVersion || '',
+      ).slice(0, 50),
+      pageLocale: String(b.pageLocale || selectorHealth.pageLocale || '').slice(0, 20),
+      selectorHealth,
+      accountAutomationPaused: false,
       ...(latePublished ? { lateConfirmation: true } : {}),
+    }
+    if (
+      selectorHealth.criticalTotal > 0 ||
+      selectorHealth.missingFields.length > 0 ||
+      selectorHealth.configVersion
+    )
+      recordSelectorHealth(
+        db,
+        auth.organizationId,
+        job.accountId,
+        job.id,
+        selectorHealth,
+      )
+
+    let selectorCircuit:
+      | { reason: string; pausedJobs: number }
+      | undefined
+    if (report.layoutDriftSuspected && selectorHealth.severe) {
+      selectorCircuit = openSelectorCircuitBreaker(
+        db,
+        auth.organizationId,
+        job.accountId,
+        job.id,
+        report.notFoundFields,
+      )
+      report.accountAutomationPaused = true
+      recordJobEvent(auth.organizationId, job.id, 'selector_circuit_breaker_opened', null, {
+        missingFields: report.notFoundFields,
+        selectorConfigVersion: report.selectorConfigVersion,
+        pageLocale: report.pageLocale,
+        pausedJobs: selectorCircuit.pausedJobs,
+      })
     }
     if (report.layoutDriftSuspected) {
       const alertSettings = db
@@ -869,8 +947,15 @@ export async function handleExtensionRoute(
           jobId: job.id,
           accountLabel: job.accountLabel,
           type: 'layout_drift_suspected',
-          message: `Possível mudança de layout do Facebook: campos não localizados (${report.notFoundFields.join(', ') || 'diversos'}). Verifique se o formulário do Marketplace mudou antes de repetir automaticamente.`,
-          details: { notFoundFields: report.notFoundFields },
+          message: selectorCircuit
+            ? `Possível mudança de layout do Facebook: campos não localizados (${report.notFoundFields.join(', ') || 'diversos'}). A automação deste perfil foi pausada para impedir novas tentativas até revisão.`
+            : `Possível mudança de layout do Facebook: campos não localizados (${report.notFoundFields.join(', ') || 'diversos'}). Verifique se o formulário do Marketplace mudou antes de repetir automaticamente.`,
+          details: {
+            notFoundFields: report.notFoundFields,
+            selectorConfigVersion: report.selectorConfigVersion,
+            pageLocale: report.pageLocale,
+            accountAutomationPaused: Boolean(selectorCircuit),
+          },
         },
         {
           telegramBotToken: alertSettings?.alertTelegramToken,
