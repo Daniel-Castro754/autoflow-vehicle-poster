@@ -43,6 +43,7 @@ import {
   X,
 } from 'lucide-react'
 import { FieldLabel, HelpTip } from './HelpTip'
+import { OperationalHealth } from './OperationalHealth'
 
 type ApiFn = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
 type Vehicle = {
@@ -94,6 +95,8 @@ type SettingsData = {
     autoAdvance?: boolean
     fillGroups?: boolean
     autoPublish?: boolean
+    autopilotEnabled?: boolean
+    autopilotIntervalMinutes?: number
     groups?: MarketplaceGroup[]
     autoRetry?: boolean
     maxRetries?: number
@@ -360,6 +363,7 @@ export function OverviewView({
           </div>
         </article>
       </div>
+      <OperationalHealth api={api} />
       <div className="overview-grid">
         <article className="module-card">
           <div className="module-head">
@@ -2991,6 +2995,8 @@ export function SettingsView({
   const [autoRetry, setAutoRetry] = useState(false),
     [maxRetries, setMaxRetries] = useState(3),
     [autoCurateGroups, setAutoCurateGroups] = useState(false)
+  const [autopilotEnabled, setAutopilotEnabled] = useState(false)
+  const [autopilotIntervalMinutes, setAutopilotIntervalMinutes] = useState(5)
   const [alertTelegramToken, setAlertTelegramToken] = useState(''),
     [alertTelegramChatId, setAlertTelegramChatId] = useState(''),
     [alertWebhookUrl, setAlertWebhookUrl] = useState('')
@@ -3008,6 +3014,8 @@ export function SettingsView({
       setAutoAdvance(Boolean(result.settings.autoAdvance))
       setFillGroups(Boolean(result.settings.fillGroups))
       setAutoPublish(Boolean(result.settings.autoPublish))
+      setAutopilotEnabled(Boolean(result.settings.autopilotEnabled))
+      setAutopilotIntervalMinutes(result.settings.autopilotIntervalMinutes ?? 5)
       setAutoRetry(Boolean(result.settings.autoRetry))
       setMaxRetries(Number(result.settings.maxRetries) || 3)
       setAutoCurateGroups(Boolean(result.settings.autoCurateGroups))
@@ -3125,6 +3133,8 @@ export function SettingsView({
             .filter((group) => group.active)
             .map((group) => (group.url ? `${group.name} | ${group.url}` : group.name)),
           autoPublish,
+          autopilotEnabled,
+          autopilotIntervalMinutes,
           descriptionTemplate: f.get('descriptionTemplate'),
           autoRetry,
           maxRetries,
@@ -3375,6 +3385,41 @@ export function SettingsView({
                   )}
                 </div>
               </div>
+              <label className="toggle-label">
+                <span>
+                  <span className="field-label">
+                    <strong>Agendar estoque automaticamente</strong>
+                    <HelpTip text="Cria jobs para veículos prontos, com cadastro completo e fotos, respeitando perfis conectados, limites e duplicidades. Usa a configuração de IA existente para descrições que precisam ser completadas." />
+                  </span>
+                  <small>
+                    Consulta o estoque periodicamente e adiciona até 20 veículos por rodada. A
+                    publicação segue a opção abaixo.
+                  </small>
+                </span>
+                <input
+                  name="autopilotEnabled"
+                  type="checkbox"
+                  checked={autopilotEnabled}
+                  onChange={(event) => setAutopilotEnabled(event.target.checked)}
+                />
+              </label>
+              {autopilotEnabled && (
+                <label>
+                  <FieldLabel help="Intervalo após cada rodada. A API verifica o estoque a cada 30 segundos quando não há rodada em andamento. Descrições geradas por IA podem consumir créditos do provedor configurado.">
+                    Consultar estoque a cada
+                  </FieldLabel>
+                  <input
+                    name="autopilotIntervalMinutes"
+                    type="number"
+                    min="1"
+                    max="1440"
+                    required
+                    value={autopilotIntervalMinutes}
+                    onChange={(event) => setAutopilotIntervalMinutes(Number(event.target.value))}
+                  />
+                  <small>Entre 1 e 1.440 minutos</small>
+                </label>
+              )}
               <label className="toggle-label publish-toggle">
                 <span>
                   <span className="field-label">

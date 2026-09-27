@@ -49,6 +49,7 @@ export async function handleOrganizationRoute(
         `SELECT default_location defaultLocation,daily_limit dailyLimit,stuck_timeout_minutes stuckTimeoutMinutes,execution_interval_minutes executionIntervalMinutes,
       require_confirmation requireConfirmation,description_template descriptionTemplate,auto_advance autoAdvance,
       fill_groups fillGroups,target_groups targetGroups,auto_publish autoPublish,
+      autopilot_enabled autopilotEnabled,autopilot_interval_minutes autopilotIntervalMinutes,
       auto_retry autoRetry,max_retries maxRetries,alert_telegram_token alertTelegramToken,alert_telegram_chat_id alertTelegramChatId,alert_webhook_url alertWebhookUrl,auto_curate_groups autoCurateGroups,
       gemini_api_key geminiApiKey,openai_api_key openaiApiKey,ai_provider aiProvider
       FROM organization_settings WHERE organization_id=?`,
@@ -87,13 +88,45 @@ export async function handleOrganizationRoute(
     }
     const limit = Math.max(1, Math.min(50, Number(body.dailyLimit) || 10))
     const stuckTimeoutMinutes = Math.max(1, Math.min(120, Number(body.stuckTimeoutMinutes) || 15))
-    const requestedInterval = Number(body.executionIntervalMinutes)
+    const currentAutopilot = db
+      .prepare(
+        'SELECT autopilot_enabled enabled,autopilot_interval_minutes intervalMinutes,execution_interval_minutes executionIntervalMinutes FROM organization_settings WHERE organization_id=?',
+      )
+      .get(auth.organizationId) as {
+      enabled: number
+      intervalMinutes: number
+      executionIntervalMinutes: number
+    }
+    const requestedInterval = Number(
+      body.executionIntervalMinutes ?? currentAutopilot.executionIntervalMinutes,
+    )
     const executionIntervalMinutes = Number.isFinite(requestedInterval)
       ? Math.max(0, Math.min(1440, requestedInterval))
       : 25
     const autoAdvance = body.autoAdvance === true
     const fillGroups = body.fillGroups === true
     const autoPublish = body.autoPublish === true
+    // Older clients omit these fields; saving unrelated settings must not disable the worker.
+    if (body.autopilotEnabled !== undefined && typeof body.autopilotEnabled !== 'boolean') {
+      send(res, 400, { error: 'Informe se o agendamento recorrente deve ficar ativo.' })
+      return true
+    }
+    const autopilotEnabled = body.autopilotEnabled ?? Boolean(currentAutopilot.enabled)
+    const autopilotIntervalMinutes =
+      body.autopilotIntervalMinutes === undefined
+        ? currentAutopilot.intervalMinutes
+        : body.autopilotIntervalMinutes
+    if (
+      typeof autopilotIntervalMinutes !== 'number' ||
+      !Number.isInteger(autopilotIntervalMinutes) ||
+      autopilotIntervalMinutes < 1 ||
+      autopilotIntervalMinutes > 1440
+    ) {
+      send(res, 400, {
+        error: 'O intervalo do agendamento recorrente deve ser um inteiro entre 1 e 1440 minutos.',
+      })
+      return true
+    }
     const autoRetry = body.autoRetry === true
     const maxRetries = Math.max(1, Math.min(10, Number(body.maxRetries) || 3))
     const descriptionTemplate = String(body.descriptionTemplate || '').trim()
@@ -181,6 +214,17 @@ export async function handleOrganizationRoute(
       auth.organizationId,
     )
     const groups = replaceMarketplaceGroups(auth.organizationId, groupRecords)
+    db.prepare(
+      'UPDATE organization_settings SET autopilot_enabled=?,autopilot_interval_minutes=? WHERE organization_id=?',
+    ).run(autopilotEnabled ? 1 : 0, autopilotIntervalMinutes, auth.organizationId)
+    if (
+      autopilotEnabled &&
+      (!currentAutopilot.enabled || autopilotIntervalMinutes !== currentAutopilot.intervalMinutes)
+    ) {
+      db.prepare(
+        'UPDATE autopilot_state SET next_run_at=CURRENT_TIMESTAMP WHERE organization_id=?',
+      ).run(auth.organizationId)
+    }
     send(res, 200, { ok: true, groups })
     return true
   }

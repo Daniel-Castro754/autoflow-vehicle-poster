@@ -18,7 +18,6 @@ type Dependencies = {
   verifyPassword: (password: string, stored: string) => Promise<boolean>
   dummyPasswordHash: string
   sign: (payload: object) => string
-  runHealthCheck: (db: DatabaseSync, options: { autoRecover: boolean }) => Promise<object>
 }
 
 type LoginBucket = { count: number; resetAt: number }
@@ -56,15 +55,9 @@ export async function handleAuthRoute(
   auth: AuthContext | undefined,
   dependencies: Dependencies,
 ): Promise<boolean> {
-  const { db, send, jsonBody, userById, verifyPassword, dummyPasswordHash, sign, runHealthCheck } =
-    dependencies
+  const { db, send, jsonBody, userById, verifyPassword, dummyPasswordHash, sign } = dependencies
   if (req.method === 'GET' && url.pathname === '/api/health') {
     send(res, 200, { ok: true })
-    return true
-  }
-  if (req.method === 'GET' && url.pathname === '/api/health/detailed') {
-    const report = await runHealthCheck(db, { autoRecover: false })
-    send(res, 200, { ok: true, ...report })
     return true
   }
   if (req.method === 'POST' && url.pathname === '/api/auth/login') {
