@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { randomBytes } from 'node:crypto'
+import { publicationMayExist, readPublicationReport } from '../services/publication-evidence.ts'
+import { findBestAccountForVehicle } from '../services/session-manager.ts'
 import { calculateBackoff } from '../lib/retry.ts'
 import { isRetryableExtensionFailureCode } from '../services/publication-policy.ts'
 import { sendCriticalAlert } from '../services/alerting.ts'
@@ -17,7 +19,7 @@ type Dependencies = {
   groupTarget: (group: Pick<Group, 'name' | 'url'>) => string
   jobsIncludeSoldVehicle: (ids: number[], organizationId: number) => boolean
   publicationDuplicateRisk: (organizationId: number, vehicleId: number, excludeJobId?: number) => (Record<string, unknown> & { message: string }) | null
-  recordJobEvent: (organizationId: number, jobId: number, eventType: string, createdBy?: number | null, details?: Record<string, unknown>) => void
+  recordJobEvent: (organizationId: number, jobId: number, eventType: string, createdBy?: number | null, details?: Record<string, unknown>, fromAccountId?: number | null, toAccountId?: number | null) => void
   refreshVehiclePublicationStatus: (vehicleId: number, organizationId: number) => void
   parseGroupTarget: (value: unknown) => { name: string; groupKey: string; url: string }
   imageBaseUrl: string
@@ -94,14 +96,15 @@ export async function handleExtensionRoute(
       if(!/^[a-zA-Z0-9_-]{12,100}$/.test(instanceId))return send(res,400,{error:'A extensão precisa atualizar sua identificação local antes de iniciar.'})
       if(!Number.isInteger(tabId)||tabId<1||!/^\/marketplace\/create\/vehicle\/?$/.test(document))return send(res,400,{error:'A aba de execução precisa estar no formulário de veículo do Marketplace.'})
       if (!allowedExtensionAccount(accountId,auth)) return send(res,403,{error:'Este perfil do Brave não está disponível para o usuário conectado.'})
-      const job = db.prepare(`SELECT j.id,j.vehicle_id vehicleId,j.status,j.paused,j.scheduled_at scheduledAt,j.lease_expires_at leaseExpiresAt,j.fill_report fillReport FROM publication_jobs j
-        WHERE j.id=? AND j.organization_id=? AND j.social_account_id=?`).get(Number(extensionPrepare[1]),auth.organizationId,accountId) as {id:number;vehicleId:number;status:string;paused:number;scheduledAt?:string;leaseExpiresAt?:string;fillReport?:string}|undefined
+      const job = db.prepare(`SELECT j.id,j.vehicle_id vehicleId,j.status,j.paused,j.scheduled_at scheduledAt,j.lease_expires_at leaseExpiresAt,j.fill_report fillReport,j.publish_attempt_at publishAttemptAt FROM publication_jobs j
+        WHERE j.id=? AND j.organization_id=? AND j.social_account_id=?`).get(Number(extensionPrepare[1]),auth.organizationId,accountId) as {id:number;vehicleId:number;status:string;paused:number;scheduledAt?:string;leaseExpiresAt?:string;fillReport?:string;publishAttemptAt?:string}|undefined
       if (!job) return send(res,404,{error:'Trabalho não encontrado para este perfil.'})
       if(jobsIncludeSoldVehicle([job.id],auth.organizationId))return send(res,409,{error:'Veículos vendidos não podem ser publicados.'})
       if (job.paused) return send(res,409,{error:'Este trabalho está pausado no painel.'})
       if (job.scheduledAt&&Date.parse(job.scheduledAt)>Date.now()) return send(res,409,{error:'Este trabalho ainda não chegou ao horário agendado.'})
       if (!['pending','filling','error','awaiting_confirmation'].includes(job.status)) return send(res,409,{error:'Este trabalho não está disponível para preenchimento.'})
       if(job.leaseExpiresAt&&Date.parse(job.leaseExpiresAt.replace(' ','T')+'Z')>Date.now())return send(res,409,{error:'Este trabalho já está aberto em outra aba ou instância da extensão.'})
+      if(publicationMayExist(job))return send(res,409,{error:'Esta execução pode já ter publicado o anúncio. Reconcilie o resultado antes de iniciar outra tentativa.'})
       const executionSettings=db.prepare(`SELECT daily_limit dailyLimit,execution_interval_minutes executionIntervalMinutes
         FROM organization_settings WHERE organization_id=?`).get(auth.organizationId) as {dailyLimit?:number;executionIntervalMinutes?:number}|undefined
       const dailyLimit=Math.max(1,Number(executionSettings?.dailyLimit||10))
@@ -138,7 +141,7 @@ export async function handleExtensionRoute(
       const leaseToken=randomBytes(24).toString('hex'),leaseSeconds=120
       const acquired=db.prepare(`UPDATE publication_jobs SET status='filling',attempt_count=attempt_count+1,error_code=NULL,started_at=CURRENT_TIMESTAMP,
         lease_token=?,lease_owner=?,execution_tab_id=?,execution_document=?,execution_document_id=NULL,lease_expires_at=datetime('now',?),updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?
-        AND social_account_id=? AND paused=0 AND status IN ('pending','filling','error','awaiting_confirmation')
+        AND social_account_id=? AND paused=0 AND publish_attempt_at IS NULL AND status IN ('pending','filling','error','awaiting_confirmation')
         AND (scheduled_at IS NULL OR datetime(scheduled_at)<=CURRENT_TIMESTAMP)
         AND (lease_expires_at IS NULL OR datetime(lease_expires_at)<=CURRENT_TIMESTAMP)
         AND NOT EXISTS (SELECT 1 FROM publication_jobs active WHERE active.organization_id=? AND active.id<>? AND active.status='filling'
@@ -187,7 +190,7 @@ export async function handleExtensionRoute(
       try{report=job.fillReport?JSON.parse(job.fillReport):{}}catch{/* relatório legado inválido */}
       const incoming=(b.report&&typeof b.report==='object'?b.report:{}) as Record<string,unknown>
       const nextReport={...report,...incoming,publishAttempted:true,publishNotClicked:false,publishPhase:'click_pending',published:false}
-      db.prepare('UPDATE publication_jobs SET fill_report=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?')
+      db.prepare('UPDATE publication_jobs SET fill_report=?,publish_attempt_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?')
         .run(JSON.stringify(nextReport),job.id,auth.organizationId)
       recordJobEvent(auth.organizationId,job.id,'publish_attempted',null,{publishAttempted:true})
       return send(res,200,{ok:true})
@@ -216,7 +219,7 @@ export async function handleExtensionRoute(
       try{report=job.fillReport?JSON.parse(job.fillReport):{}}catch{/* relatório legado inválido */}
       if(report.publishAttempted!==true)return send(res,409,{error:'Não há tentativa de publicação pendente para reconciliar.'})
       const nextReport={...report,publishAttempted:false,publishNotClicked:true,publishPhase:'not_clicked'}
-      db.prepare('UPDATE publication_jobs SET fill_report=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?')
+      db.prepare('UPDATE publication_jobs SET fill_report=?,publish_attempt_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?')
         .run(JSON.stringify(nextReport),job.id,auth.organizationId)
       recordJobEvent(auth.organizationId,job.id,'publish_not_clicked',null,{confirmedNotClicked:true})
       return send(res,200,{ok:true})
@@ -224,20 +227,19 @@ export async function handleExtensionRoute(
     const extensionFillResult = url.pathname.match(/^\/api\/extension\/jobs\/(\d+)\/fill-result$/)
     if (req.method === 'PATCH' && extensionFillResult) {
       const b=await jsonBody(req) as Record<string,unknown>
-      const job = db.prepare(`SELECT j.id,j.status,j.social_account_id accountId,j.lease_token leaseToken,j.last_lease_token lastLeaseToken,j.lease_expires_at leaseExpiresAt,j.execution_tab_id executionTabId,j.execution_document executionDocument,j.execution_document_id executionDocumentId,j.fill_report fillReport,
+      const job = db.prepare(`SELECT j.id,j.status,j.vehicle_id vehicleId,j.social_account_id accountId,j.publish_attempt_at publishAttemptAt,j.lease_token leaseToken,j.last_lease_token lastLeaseToken,j.lease_expires_at leaseExpiresAt,j.execution_tab_id executionTabId,j.execution_document executionDocument,j.execution_document_id executionDocumentId,j.fill_report fillReport,
         j.attempt_count attemptCount,COALESCE(j.max_retries,3) maxRetries,j.retry_count retryCount,COALESCE(a.label,'Perfil não definido') accountLabel
         FROM publication_jobs j LEFT JOIN social_accounts a ON a.id=j.social_account_id
-        WHERE j.id=? AND j.organization_id=?`).get(Number(extensionFillResult[1]),auth.organizationId) as {id:number;status:string;accountId:number;leaseToken?:string;lastLeaseToken?:string;leaseExpiresAt?:string;executionTabId?:number;executionDocument?:string;executionDocumentId?:string;fillReport?:string;attemptCount?:number;maxRetries?:number;retryCount?:number;accountLabel?:string}|undefined
+        WHERE j.id=? AND j.organization_id=?`).get(Number(extensionFillResult[1]),auth.organizationId) as {id:number;status:string;vehicleId:number;publishAttemptAt?:string;accountId:number;leaseToken?:string;lastLeaseToken?:string;leaseExpiresAt?:string;executionTabId?:number;executionDocument?:string;executionDocumentId?:string;fillReport?:string;attemptCount?:number;maxRetries?:number;retryCount?:number;accountLabel?:string}|undefined
       if (!job || !allowedExtensionAccount(job.accountId,auth)) return send(res,404,{error:'Trabalho não encontrado para este perfil.'})
-      let previousReport:Record<string,unknown>={}
-      try{previousReport=JSON.parse(job.fillReport||'{}')}catch{/* relatório legado */}
+      const previousReport=readPublicationReport(job.fillReport)
       const incomingLeaseToken=String(b.leaseToken||'')
       const identityMatches=Number(job.executionTabId)===Number(b.tabId)&&String(job.executionDocument)===String(b.document||'')
         &&String(job.executionDocumentId)===String(b.documentId||'')
-      const latePublished=Boolean(b.published)&&job.status==='awaiting_confirmation'&&previousReport.publishAttempted===true
+      const latePublished=Boolean(b.published)&&job.status==='awaiting_confirmation'&&publicationMayExist(job)
         &&job.lastLeaseToken===incomingLeaseToken&&identityMatches
-      if(job.status==='completed'&&Boolean(b.published)&&job.lastLeaseToken===incomingLeaseToken&&identityMatches){
-        return send(res,200,{ok:true,status:'completed',idempotent:true})
+      if(job.lastLeaseToken===incomingLeaseToken&&identityMatches&&!latePublished){
+        return send(res,200,{ok:true,status:job.status,idempotent:true})
       }
       // A venda interrompe a execução, mas conserva a identidade para reconciliar um resultado tardio.
       const soldInterrupted=job.status==='awaiting_confirmation'&&previousReport.saleInterrupted===true&&jobsIncludeSoldVehicle([job.id],auth.organizationId)
@@ -247,13 +249,13 @@ export async function handleExtensionRoute(
       if(!activeLease&&!soldInterrupted&&!latePublished)return send(res,409,{error:'A execução perdeu o bloqueio exclusivo. Reabra o trabalho pela extensão.'})
       const error=String(b.error||'').slice(0,240)
       if (error&&soldInterrupted) {
-        db.prepare('UPDATE publication_jobs SET error_code=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?').run(error,job.id,auth.organizationId)
+        db.prepare('UPDATE publication_jobs SET error_code=?,last_lease_token=lease_token,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?').run(error,job.id,auth.organizationId)
         recordJobEvent(auth.organizationId,job.id,'fill_error',null,{error,saleInterrupted:true})
         return send(res,200,{ok:true,status:'awaiting_confirmation'})
       }
       if (error) {
         const orgSettings = db.prepare('SELECT auto_retry autoRetry, max_retries maxRetries, alert_telegram_token alertTelegramToken, alert_telegram_chat_id alertTelegramChatId, alert_webhook_url alertWebhookUrl FROM organization_settings WHERE organization_id=?').get(auth.organizationId) as {autoRetry?:number;maxRetries?:number;alertTelegramToken?:string;alertTelegramChatId?:string;alertWebhookUrl?:string}|undefined
-        if(previousReport.publishAttempted===true&&previousReport.publishNotClicked!==true){
+        if(publicationMayExist(job)){
           const report={...previousReport,error,publishAttempted:true,published:false,publishPhase:'result_unknown'}
           db.prepare(`UPDATE publication_jobs SET status='awaiting_confirmation',fill_report=?,error_code=?,last_lease_token=lease_token,
             lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
@@ -264,32 +266,51 @@ export async function handleExtensionRoute(
         const autoRetryActive = Boolean(orgSettings?.autoRetry)
         const failureCode = isRetryableExtensionFailureCode(b.failureCode) ? String(b.failureCode) : ''
         const maxRetries = Math.max(1, Number(job.maxRetries || orgSettings?.maxRetries || 3))
-        const attempts = Number(job.attemptCount || 1)
+        const retriesUsed = Number(job.retryCount || 0)
 
-        if (autoRetryActive && failureCode && attempts < maxRetries) {
-          const delayMs = calculateBackoff(attempts, 60000, 600000, true)
+        if (autoRetryActive && failureCode && retriesUsed < maxRetries) {
+          const delayMs = calculateBackoff(retriesUsed + 1, 60000, 600000, true)
           const nextScheduledAt = new Date(Date.now() + delayMs).toISOString()
-          db.prepare(`UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,scheduled_at=?,error_code=?,retry_count=retry_count+1,extension_version=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
-            .run(nextScheduledAt,error,String(b.extensionVersion||'').slice(0,30),job.id,auth.organizationId)
-          recordJobEvent(auth.organizationId,job.id,'auto_retry_scheduled',null,{attempt:attempts,maxRetries,delaySeconds:Math.round(delayMs/1000),scheduledAt:nextScheduledAt,error,failureCode,extensionVersion:String(b.extensionVersion||'').slice(0,30)})
-          return send(res,200,{ok:true,status:'pending',autoRetry:true,scheduledAt:nextScheduledAt})
+          // A partir da 2ª falha consecutiva, considera mover para uma conta mais saudável em vez
+          // de insistir sempre na mesma — findBestAccountForVehicle já exclui a conta atual, pois
+          // este job ainda está ativo (status='error') para o mesmo veículo no momento da checagem.
+          let targetAccountId = job.accountId
+          let nextPriority: number | null = null
+          if (retriesUsed >= 1) {
+            const healthier = findBestAccountForVehicle(db, auth.organizationId, job.vehicleId)
+            if (healthier && healthier.id !== job.accountId) {
+              targetAccountId = healthier.id
+              nextPriority = ((db.prepare(`SELECT COALESCE(MAX(queue_priority),0)+1 value FROM publication_jobs WHERE organization_id=? AND social_account_id=?
+                AND status IN ('pending','filling','error','awaiting_confirmation')`).get(auth.organizationId, targetAccountId) as { value: number }).value) || 1
+            }
+          }
+          if (nextPriority !== null) {
+            db.prepare(`UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,scheduled_at=?,error_code=?,retry_count=retry_count+1,extension_version=?,last_lease_token=?,publish_attempt_at=NULL,social_account_id=?,queue_priority=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
+              .run(nextScheduledAt,error,String(b.extensionVersion||'').slice(0,30),incomingLeaseToken,targetAccountId,nextPriority,job.id,auth.organizationId)
+            recordJobEvent(auth.organizationId,job.id,'reassigned',null,{auto:true,reason:'repeated_failures',attempt:retriesUsed+1,queuePriority:nextPriority},job.accountId,targetAccountId)
+          } else {
+            db.prepare(`UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,scheduled_at=?,error_code=?,retry_count=retry_count+1,extension_version=?,last_lease_token=?,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
+              .run(nextScheduledAt,error,String(b.extensionVersion||'').slice(0,30),incomingLeaseToken,job.id,auth.organizationId)
+          }
+          recordJobEvent(auth.organizationId,job.id,'auto_retry_scheduled',null,{attempt:retriesUsed+1,maxRetries,delaySeconds:Math.round(delayMs/1000),scheduledAt:nextScheduledAt,error,failureCode,extensionVersion:String(b.extensionVersion||'').slice(0,30),rerouted:nextPriority!==null})
+          return send(res,200,{ok:true,status:'pending',autoRetry:true,scheduledAt:nextScheduledAt,accountId:targetAccountId})
         }
 
-        db.prepare(`UPDATE publication_jobs SET status='error',error_code=?,extension_version=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
+        db.prepare(`UPDATE publication_jobs SET status='error',error_code=?,extension_version=?,last_lease_token=lease_token,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
           .run(error,String(b.extensionVersion||'').slice(0,30),job.id,auth.organizationId)
-        recordJobEvent(auth.organizationId,job.id,'fill_error',null,{error,failureCode:failureCode||null,retryable:Boolean(failureCode),extensionVersion:String(b.extensionVersion||'').slice(0,30),retriesExhausted:attempts>=maxRetries})
+        recordJobEvent(auth.organizationId,job.id,'fill_error',null,{error,failureCode:failureCode||null,retryable:Boolean(failureCode),extensionVersion:String(b.extensionVersion||'').slice(0,30),retriesExhausted:retriesUsed>=maxRetries})
         void sendCriticalAlert({
           jobId: job.id,
           accountLabel: job.accountLabel,
           type: 'fill_error',
           message: error,
-          attemptCount: attempts,
+          attemptCount: Number(job.attemptCount || 1),
         }, {
           telegramBotToken: orgSettings?.alertTelegramToken,
           telegramChatId: orgSettings?.alertTelegramChatId,
           webhookUrl: orgSettings?.alertWebhookUrl,
         })
-        return send(res,200,{ok:true,status:'error',retriesExhausted:attempts>=maxRetries})
+        return send(res,200,{ok:true,status:'error',retriesExhausted:retriesUsed>=maxRetries})
       }
       const report={
         ...(soldInterrupted?{saleInterrupted:true}:{}),
@@ -299,15 +320,30 @@ export async function handleExtensionRoute(
         selectedGroups:Array.isArray(b.selectedGroups)?b.selectedGroups.map(String).slice(0,20):[],
         missingGroups:Array.isArray(b.missingGroups)?b.missingGroups.map(String).slice(0,20):[],
         flowIssues:Array.isArray(b.flowIssues)?b.flowIssues.map(value=>String(value).slice(0,240)).slice(0,10):[],published:Boolean(b.published),
-        publishAttempted:Boolean(b.publishAttempted)||(previousReport.publishAttempted===true&&previousReport.publishNotClicked!==true),
+        publishAttempted:Boolean(b.publishAttempted)||publicationMayExist(job),
+        layoutDriftSuspected:Boolean(b.layoutDriftSuspected),notFoundFields:Array.isArray(b.notFoundFields)?b.notFoundFields.map(String).slice(0,20):[],
         ...(latePublished?{lateConfirmation:true}:{})
       }
+      if(report.layoutDriftSuspected){
+        const alertSettings=db.prepare('SELECT alert_telegram_token alertTelegramToken, alert_telegram_chat_id alertTelegramChatId, alert_webhook_url alertWebhookUrl FROM organization_settings WHERE organization_id=?').get(auth.organizationId) as {alertTelegramToken?:string;alertTelegramChatId?:string;alertWebhookUrl?:string}|undefined
+        void sendCriticalAlert({
+          jobId: job.id,
+          accountLabel: job.accountLabel,
+          type: 'layout_drift_suspected',
+          message: `Possível mudança de layout do Facebook: campos não localizados (${report.notFoundFields.join(', ')||'diversos'}). Verifique se o formulário do Marketplace mudou antes de repetir automaticamente.`,
+          details: { notFoundFields: report.notFoundFields },
+        }, {
+          telegramBotToken: alertSettings?.alertTelegramToken,
+          telegramChatId: alertSettings?.alertTelegramChatId,
+          webhookUrl: alertSettings?.alertWebhookUrl,
+        })
+      }
       const registeredGroups=marketplaceGroups(auth.organizationId)
-      for(const target of report.selectedGroups){
+      for(const target of latePublished?[]:report.selectedGroups){
         const parsed=parseGroupTarget(target),group=registeredGroups.find(item=>(parsed.groupKey&&item.groupKey===parsed.groupKey)||item.name.toLocaleLowerCase('pt-BR')===parsed.name.toLocaleLowerCase('pt-BR'))
         if(group)db.prepare('UPDATE marketplace_groups SET success_count=success_count+1,last_found_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?').run(group.id,auth.organizationId)
       }
-      for(const target of report.missingGroups){
+      for(const target of latePublished?[]:report.missingGroups){
         const parsed=parseGroupTarget(target),group=registeredGroups.find(item=>(parsed.groupKey&&item.groupKey===parsed.groupKey)||item.name.toLocaleLowerCase('pt-BR')===parsed.name.toLocaleLowerCase('pt-BR'))
         if(group)db.prepare('UPDATE marketplace_groups SET failure_count=failure_count+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?').run(group.id,auth.organizationId)
       }
@@ -315,7 +351,7 @@ export async function handleExtensionRoute(
         const vehicleId=(db.prepare('SELECT vehicle_id vehicleId FROM publication_jobs WHERE id=? AND organization_id=?').get(job.id,auth.organizationId) as {vehicleId:number}).vehicleId
         db.exec('BEGIN')
         try{
-          db.prepare(`UPDATE publication_jobs SET status='completed',fill_report=?,extension_version=?,result_url=?,error_code=NULL,filled_at=CURRENT_TIMESTAMP,
+          db.prepare(`UPDATE publication_jobs SET status='completed',publish_attempt_at=NULL,fill_report=?,extension_version=?,result_url=?,error_code=NULL,filled_at=CURRENT_TIMESTAMP,
             last_lease_token=COALESCE(lease_token,last_lease_token),lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
             .run(JSON.stringify(report),String(b.extensionVersion||'').slice(0,30),String(b.resultUrl||'').slice(0,500),job.id,auth.organizationId)
           refreshVehiclePublicationStatus(vehicleId,auth.organizationId)

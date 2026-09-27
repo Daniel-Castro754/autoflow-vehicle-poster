@@ -4,8 +4,8 @@ import vm from 'node:vm'
 
 const source = await readFile(new URL('../extension-mv2/background.js', import.meta.url), 'utf8')
 
-async function runConsumer(queue) {
-  const listeners = {}
+async function runConsumer(queue, network = {}) {
+  const listeners = { alarms: [] }
   const stored = {
     autoRun: true,
     activeAccountId: 4,
@@ -25,7 +25,7 @@ async function runConsumer(queue) {
     alarms: {
       get: (_name, callback) => callback(undefined),
       create: () => {},
-      onAlarm: { addListener: fn => { listeners.alarm = fn } },
+      onAlarm: { addListener: fn => { listeners.alarms.push(fn); listeners.alarm = alarm => listeners.alarms.forEach(listener => listener(alarm)) } },
     },
     tabs: {
       create: async options => {
@@ -51,7 +51,7 @@ async function runConsumer(queue) {
           return Promise.resolve()
         },
         remove: (key, callback) => {
-          delete stored[key]
+          for (const item of Array.isArray(key) ? key : [key]) delete stored[item]
           callback?.()
           return Promise.resolve()
         },
@@ -79,9 +79,18 @@ async function runConsumer(queue) {
     if (String(url).includes('/heartbeat')) {
       return { ok: true, status: 200, json: async () => ({ ok: true }) }
     }
+    if (String(url).includes('/fill-result')) {
+      const outcome = network.fillResults?.shift()
+      if (outcome instanceof Error) throw outcome
+      return { ok: true, status: 200, json: async () => ({ ok: true, status: 'completed' }) }
+    }
+    if (String(url).includes('/publish-check')) {
+      const status = network.publishStatus || 200
+      return { ok: status === 200, status, json: async () => ({ error: 'Publicação não autorizada' }) }
+    }
     throw new Error(`Unexpected request ${url}`)
   }
-  vm.runInNewContext(source, { chrome, fetch, console, URL })
+  vm.runInNewContext(source, { chrome, fetch, console, URL, AbortController, setTimeout, clearTimeout })
   await new Promise(resolve => listeners.message({ type: 'AUTOFLOW_RUN_QUEUE' }, {}, resolve))
   return { requests, createdTabs, listeners, stored }
 }
@@ -124,3 +133,35 @@ async function runConsumer(queue) {
 }
 
 console.log('✓ Queue consumer ignores non-retryable errors and uncertain publications.')
+
+{
+  const result = await runConsumer({ jobs: [{ jobId: 22, jobStatus: 'pending' }] }, {
+    fillResults: [new Error('offline'), new Error('offline')], publishStatus: 409,
+  })
+  result.stored.autoRun = false
+  const execution = id => ({ jobId: id, leaseToken: `lease-${id}`, tabId: id, document: '/marketplace/create/vehicle', documentId: `document-${id}` })
+  const sender = id => ({ tab: { id }, frameId: 0, url: 'https://www.facebook.com/marketplace/create/vehicle', documentId: `document-${id}` })
+  const send = (message, id) => new Promise(resolve => result.listeners.message(message, sender(id), resolve))
+  for (const id of [22, 33]) {
+    result.stored.pendingJob = execution(id)
+    const response = await send({ type: 'AUTOFLOW_FILL_RESULT', jobId: id, document: '/marketplace/create/vehicle', report: { published: true, publishAttempted: true } }, id)
+    assert.equal(response.ok, false)
+    assert.equal(result.stored.pendingResults[`${id}:lease-${id}`].payload.documentId, `document-${id}`)
+  }
+  assert.equal(Object.keys(result.stored.pendingResults).length, 2, 'Different executions must not overwrite unsent results')
+  result.stored.pendingJob = execution(44)
+  result.stored.pendingPublishes = { 44: { ...execution(44), report: {} } }
+  for (const entry of Object.values(result.stored.pendingResults)) entry.lastAttemptAt = entry.queuedAt = 0
+  result.listeners.alarm({ name: 'autoflow-heartbeat' })
+  for (let attempt = 0; attempt < 40 && Object.keys(result.stored.pendingResults).length; attempt++) await new Promise(resolve => setImmediate(resolve))
+  assert.equal(Object.keys(result.stored.pendingResults).length, 0, 'The alarm must deliver the outbox without the original tabs')
+  assert.equal(result.stored.pendingJob.jobId, 44, 'Acknowledging old results must preserve the current execution')
+  assert.ok(result.stored.pendingPublishes[44])
+  const deliveries = result.requests.filter(request => request.url.includes('/fill-result'))
+  assert.equal(deliveries.length, 4)
+  assert.deepEqual(deliveries.map(request => JSON.parse(request.options.body).leaseToken), ['lease-22', 'lease-33', 'lease-22', 'lease-33'])
+  const denied = await send({ type: 'AUTOFLOW_PUBLISH_CHECK', jobId: 44 }, 44)
+  assert.equal(denied.ok, false)
+  assert.equal(result.requests.filter(request => request.url.includes('/publish-check')).length, 1, 'HTTP rejection must not be retried as a transport error')
+}
+console.log('✓ Durable results retain execution identity; stale acknowledgements preserve the next job.')

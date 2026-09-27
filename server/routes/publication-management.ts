@@ -1,3 +1,5 @@
+import { publicationMayExist } from '../services/publication-evidence.ts'
+import { organizationScheduleHistory } from '../services/schedule-history.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { calculateOptimalSchedule } from '../services/smart-scheduler.ts'
@@ -88,7 +90,7 @@ export async function handlePublicationManagementRoute(
       } else if (b.smartSchedule === true) {
         const existing = db.prepare(`SELECT scheduled_at scheduledAt FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND scheduled_at IS NOT NULL AND datetime(scheduled_at)>CURRENT_TIMESTAMP`).all(auth.organizationId, accountId) as Array<{scheduledAt:string}>
         const existingTimestamps = existing.map(s => Date.parse(s.scheduledAt)).filter(Number.isFinite)
-        const optimal = calculateOptimalSchedule({ existingTimestamps, accountId })
+        const optimal = calculateOptimalSchedule({ existingTimestamps, accountId, historicalData: organizationScheduleHistory(db,auth.organizationId) })
         scheduledAt = optimal.isoString
       }
       const maxRetries = Math.max(1, Math.min(10, Number(b.maxRetries) || Number(settings?.maxRetries) || 3))
@@ -246,18 +248,16 @@ export async function handlePublicationManagementRoute(
       const b = await jsonBody(req) as Record<string,unknown>
       const allowed = ['pending','filling','awaiting_confirmation','completed','error','canceled','removed']
       if (!allowed.includes(String(b.status))) return send(res,400,{error:'Status inválido.'})
-      const job=db.prepare('SELECT vehicle_id vehicleId,status,fill_report fillReport FROM publication_jobs WHERE id=? AND organization_id=?').get(Number(publication[1]),auth.organizationId) as {vehicleId:number;status:string;fillReport?:string}|undefined
+      const job=db.prepare('SELECT vehicle_id vehicleId,status,fill_report fillReport,publish_attempt_at publishAttemptAt FROM publication_jobs WHERE id=? AND organization_id=?').get(Number(publication[1]),auth.organizationId) as {vehicleId:number;status:string;fillReport?:string;publishAttemptAt?:string}|undefined
       if(!job)return send(res,404,{error:'Publicação não encontrada.'})
       if(!canManageJobs([Number(publication[1])],auth))return send(res,403,{error:'Você não pode alterar trabalhos de outro perfil.'})
       const nextStatus=String(b.status)
       if(nextStatus==='pending'&&jobsIncludeSoldVehicle([Number(publication[1])],auth.organizationId))return send(res,409,{error:'Veículos vendidos não podem voltar à fila.'})
       if(!manualPublicationTransitions[job.status]?.has(nextStatus))return send(res,409,{error:`A transição de ${job.status} para ${nextStatus} não é permitida por esta operação.`})
-      let previousReport:Record<string,unknown>={}
-      try{previousReport=job.fillReport?JSON.parse(job.fillReport):{}}catch{/* relatório antigo inválido */}
-      if(nextStatus==='pending'&&previousReport.publishAttempted&&b.confirmNoPublication!==true)return send(res,409,{error:'Antes de repetir, verifique em “Seus classificados” se o anúncio foi criado. Confirme no painel que ele NÃO foi publicado para liberar uma nova tentativa.'})
+      if(nextStatus==='pending'&&publicationMayExist(job)&&b.confirmNoPublication!==true)return send(res,409,{error:'Antes de repetir, verifique em “Seus classificados” se o anúncio foi criado. Confirme no painel que ele NÃO foi publicado para liberar uma nova tentativa.'})
       db.exec('BEGIN')
       try{
-        if(nextStatus==='pending')db.prepare("UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',started_at=NULL,filled_at=NULL,removed_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
+        if(nextStatus==='pending')db.prepare("UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',publish_attempt_at=NULL,last_lease_token=NULL,started_at=NULL,filled_at=NULL,removed_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
         else if(nextStatus==='removed')db.prepare("UPDATE publication_jobs SET status='removed',removed_at=CURRENT_TIMESTAMP,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(Number(publication[1]),auth.organizationId)
         else db.prepare('UPDATE publication_jobs SET status=?,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?').run(nextStatus,Number(publication[1]),auth.organizationId)
         if(nextStatus==='completed'||nextStatus==='removed')refreshVehiclePublicationStatus(job.vehicleId,auth.organizationId)

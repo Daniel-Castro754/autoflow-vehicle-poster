@@ -35,6 +35,13 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
     INSERT INTO publication_jobs VALUES (1, 1, 1, 1, 'filling', datetime('now','-40 minutes'), datetime('now','-35 minutes'), 0, 1, NULL, NULL, 'lease', 'worker', datetime('now','-40 minutes'));
     INSERT INTO vehicles VALUES (1, 2022, 'Toyota', 'Corolla');
     INSERT INTO social_accounts VALUES (1, 'Perfil da organização');
+    ALTER TABLE organization_settings ADD COLUMN max_retries INTEGER DEFAULT 3;
+    ALTER TABLE publication_jobs ADD COLUMN publish_attempt_at TEXT;
+    ALTER TABLE publication_jobs ADD COLUMN fill_report TEXT DEFAULT '';
+    ALTER TABLE publication_jobs ADD COLUMN attempt_count INTEGER DEFAULT 1;
+    ALTER TABLE publication_jobs ADD COLUMN retry_count INTEGER DEFAULT 0;
+    ALTER TABLE publication_jobs ADD COLUMN max_retries INTEGER DEFAULT 3;
+    ALTER TABLE publication_jobs ADD COLUMN last_lease_token TEXT;
   `)
   const originalFetch = globalThis.fetch
   const calls = []

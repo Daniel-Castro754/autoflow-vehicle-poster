@@ -15,9 +15,10 @@
     "test:stock": "node tests/stock-state.mjs",
     "test:autonomous": "node tests/autonomous-flow.mjs",
     "test:extension-consumer": "node tests/extension-consumer.mjs",
+    "test:publish-safety": "node tests/publish-safety.mjs",
     "test:backup": "node tests/backup.mjs",
     "backup": "node scripts/backup.mjs",
-    "test": "npm run test:stock && npm run test:queue && npm run test:autonomous && npm run test:extension-consumer && npm run test:backup",
+    "test": "npm run test:stock && npm run test:queue && npm run test:autonomous && npm run test:extension-consumer && npm run test:backup && npm run test:publish-safety",
     "lint": "eslint .",
     "preview": "vite preview"
   },

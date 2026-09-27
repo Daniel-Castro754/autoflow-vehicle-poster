@@ -1,3 +1,4 @@
+import { applyGroupCuration } from '../services/group-curation-worker.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { curateMarketplaceGroups } from '../services/group-curator.ts'
@@ -27,7 +28,7 @@ export function handleGroupsRoute(
   res: ServerResponse,
   url: URL,
   auth: AuthContext,
-  { db, send, isAdmin, marketplaceGroups, groupTarget }: Dependencies,
+  { db, send, isAdmin, marketplaceGroups }: Dependencies,
 ): boolean {
   if (req.method === 'GET' && url.pathname === '/api/groups/curated') {
     const locationQuery = String(url.searchParams.get('location') || '')
@@ -41,24 +42,8 @@ export function handleGroupsRoute(
       send(res, 403, { error: 'Somente administradores podem aplicar curadoria de grupos.' })
       return true
     }
-    const rawGroups = marketplaceGroups(auth.organizationId)
-    const curated = curateMarketplaceGroups(rawGroups.map(group => ({ ...group, active: Boolean(group.active) })), '', 10)
-    db.exec('BEGIN')
-    try {
-      for (let index = 0; index < curated.length; index++) {
-        const item = curated[index]
-        db.prepare('UPDATE marketplace_groups SET priority = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?')
-          .run(index + 1, item.recommendedActive ? 1 : 0, item.group.id, auth.organizationId)
-      }
-      const activeTargets = marketplaceGroups(auth.organizationId, true).map(groupTarget)
-      db.prepare('UPDATE organization_settings SET target_groups = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ?')
-        .run(JSON.stringify(activeTargets), auth.organizationId)
-      db.exec('COMMIT')
-    } catch (error) {
-      db.exec('ROLLBACK')
-      throw error
-    }
-    send(res, 200, { ok: true, curatedCount: curated.length, groups: marketplaceGroups(auth.organizationId) })
+    const result = applyGroupCuration(db, auth.organizationId)
+    send(res, 200, { ok: true, ...result })
     return true
   }
   return false

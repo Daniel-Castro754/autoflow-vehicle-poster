@@ -1,3 +1,4 @@
+import { publicationMayExist, ambiguousPublicationReport } from '../services/publication-evidence.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 
@@ -176,7 +177,7 @@ export async function handlePublicationReadRoute(
     if(req.method==='POST'&&recoverPublication){
       const currentUser=userById(auth.userId) as {role?:string}|undefined
       if(currentUser?.role!=='admin')return send(res,403,{error:'Somente administradores podem recuperar trabalhos em preenchimento.'})
-      const job=db.prepare(`SELECT id,status,started_at startedAt,lease_expires_at leaseExpiresAt FROM publication_jobs WHERE id=? AND organization_id=?`).get(Number(recoverPublication[1]),auth.organizationId) as {id:number;status:string;startedAt?:string;leaseExpiresAt?:string}|undefined
+      const job=db.prepare(`SELECT id,status,started_at startedAt,lease_expires_at leaseExpiresAt,publish_attempt_at publishAttemptAt,fill_report fillReport FROM publication_jobs WHERE id=? AND organization_id=?`).get(Number(recoverPublication[1]),auth.organizationId) as {id:number;status:string;startedAt?:string;leaseExpiresAt?:string;publishAttemptAt?:string;fillReport?:string}|undefined
       if(!job)return send(res,404,{error:'Trabalho não encontrado.'})
       if(job.status!=='filling')return send(res,409,{error:'Somente trabalhos em preenchimento podem ser recuperados.'})
       const elapsedMinutes=job.startedAt?Math.max(0,Math.floor((Date.now()-Date.parse(job.startedAt.replace(' ','T')+'Z'))/60000)):0
@@ -184,9 +185,21 @@ export async function handlePublicationReadRoute(
       if(elapsedMinutes<timeout)return send(res,409,{error:`Este trabalho ainda está dentro do tempo normal de preenchimento (${timeout} min).`})
       const leaseExpiresAt=job.leaseExpiresAt?Date.parse(job.leaseExpiresAt.replace(' ','T')+'Z'):0
       if(leaseExpiresAt>Date.now())return send(res,409,{error:'A extensao ainda esta trabalhando neste item. Aguarde o fim do bloqueio exclusivo.'})
+      if(publicationMayExist(job)){
+        db.exec('BEGIN')
+        try{
+          db.prepare(`UPDATE publication_jobs SET status='awaiting_confirmation',paused=1,extension_visible=0,
+            fill_report=?,error_code=NULL,last_lease_token=COALESCE(lease_token,last_lease_token),lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP
+            WHERE id=? AND organization_id=?`)
+            .run(JSON.stringify(ambiguousPublicationReport(job.fillReport)),job.id,auth.organizationId)
+          recordJobEvent(auth.organizationId,job.id,'stalled_publish_ambiguous',auth.userId,{elapsedMinutes})
+          db.exec('COMMIT')
+        }catch(error){db.exec('ROLLBACK');throw error}
+        return send(res,200,{ok:true,status:'awaiting_confirmation',ambiguous:true})
+      }
       db.exec('BEGIN')
       try{
-        db.prepare("UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,started_at=NULL,filled_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(job.id,auth.organizationId)
+        db.prepare("UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',last_lease_token=NULL,publish_attempt_at=NULL,started_at=NULL,filled_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(job.id,auth.organizationId)
         recordJobEvent(auth.organizationId,job.id,'stalled_recovered',auth.userId,{
           fromStatus:'filling',toStatus:'pending',elapsedMinutes,leaseExpired:true,
         })

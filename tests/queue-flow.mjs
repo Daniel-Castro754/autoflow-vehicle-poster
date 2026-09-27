@@ -58,7 +58,7 @@ try{
   const migrationDb=new DatabaseSync(join(dataDir,'autoflow.db'),{readOnly:true})
   const migrations=migrationDb.prepare('SELECT version,checksum FROM schema_migrations ORDER BY version').all()
   migrationDb.close()
-  if(migrations.length!==5||migrations.map(item=>item.version).join(',')!=='1,2,3,4,5'||migrations.some(item=>!/^[a-f0-9]{64}$/.test(item.checksum)))throw new Error('O banco não registrou as migrations versionadas com checksum.')
+  if(migrations.length!==6||migrations.map(item=>item.version).join(',')!=='1,2,3,4,5,6'||migrations.some(item=>!/^[a-f0-9]{64}$/.test(item.checksum)))throw new Error('O banco não registrou as migrations versionadas com checksum.')
   const malformedJson=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:'{'})
   if(malformedJson.status!==400)throw new Error('JSON inválido não retornou 400.')
   const oversizedBody=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:'x'.repeat(1024*1024),password:'x'})})

@@ -86,6 +86,9 @@ const migrations: Migration[] = [
     sql: `UPDATE organization_settings SET description_template='{ano} {marca} {modelo} {versao} com {km} km. Entre em contato para mais informações.'
     WHERE description_template='{ano} {marca} {modelo} {versao} com {km} km. Entre em contato para consultar disponibilidade.';`,
   },
+  // Keep migrations 1–5 immutable for databases already opened by this branch.
+  // Main added this checkpoint before schema versioning; ensureColumn handles both bases.
+  { version: 6, columns: [['publication_jobs', 'publish_attempt_at', 'TEXT']], sql: '' },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

@@ -1,3 +1,5 @@
+import { logger } from '../lib/logger.ts'
+
 export interface AlertConfig {
   telegramBotToken?: string
   telegramChatId?: string
@@ -53,10 +55,10 @@ export async function sendCriticalAlert(
       })
       telegramSuccess = response.ok
       if (!response.ok) {
-        console.warn(`[AutoFlow Alert] Telegram respondeu com status ${response.status}:`, await response.text())
+        logger.warn('AutoFlowAlert', `Telegram respondeu com status ${response.status}`, { body: await response.text() })
       }
     } catch (err) {
-      console.warn('[AutoFlow Alert] Erro ao enviar alerta para o Telegram:', err instanceof Error ? err.message : err)
+      logger.warn('AutoFlowAlert', 'Erro ao enviar alerta para o Telegram', { error: err instanceof Error ? err.message : err })
     }
   }
 
@@ -74,10 +76,10 @@ export async function sendCriticalAlert(
       })
       webhookSuccess = response.ok
       if (!response.ok) {
-        console.warn(`[AutoFlow Alert] Webhook respondeu com status ${response.status}`)
+        logger.warn('AutoFlowAlert', `Webhook respondeu com status ${response.status}`)
       }
     } catch (err) {
-      console.warn('[AutoFlow Alert] Erro ao enviar alerta para webhook:', err instanceof Error ? err.message : err)
+      logger.warn('AutoFlowAlert', 'Erro ao enviar alerta para webhook', { error: err instanceof Error ? err.message : err })
     }
   }
 

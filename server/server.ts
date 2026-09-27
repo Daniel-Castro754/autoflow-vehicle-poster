@@ -4,6 +4,8 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomBytes, scrypt, timingSafeEqual, createHmac, createHash } from 'node:crypto'
+import { logger } from './lib/logger.ts'
+import { startGroupCurationWorker } from './services/group-curation-worker.ts'
 import { startHealthMonitor, runHealthCheck } from './services/health-monitor.ts'
 import { vehicleOptions } from './services/vehicle-input.ts'
 import { publicationDuplicateRisk as findPublicationDuplicateRisk } from './services/publication-policy.ts'
@@ -172,6 +174,7 @@ db.prepare("UPDATE vehicles SET vehicle_type='Outro' WHERE vehicle_type='Outro v
 db.prepare("UPDATE vehicles SET exterior_color='Prateado' WHERE exterior_color='Prata'").run()
 db.prepare("UPDATE vehicles SET interior_color='Preto' WHERE interior_color='' AND exterior_color!=''").run()
 startHealthMonitor(db, 60000)
+startGroupCurationWorker(db)
 
 createServer(async (req, res) => {
   const originAllowed=applyCors(req,res)
@@ -216,6 +219,6 @@ createServer(async (req, res) => {
     return send(res,404,{error:'Rota não encontrada.'})
   } catch (error) {
     if(error instanceof HttpError)return send(res,error.status,{error:error.message})
-    console.error(error); return send(res,500,{error:'Erro interno da aplicação.'})
+    logger.error('Server','Erro não tratado na requisição',{error}); return send(res,500,{error:'Erro interno da aplicação.'})
   }
 }).listen(port,host,() => console.log(`API AutoFlow em ${publicOrigin}`))

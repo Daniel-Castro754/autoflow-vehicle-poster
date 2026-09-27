@@ -1,3 +1,4 @@
+import { organizationScheduleHistory } from '../services/schedule-history.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { calculateOptimalSchedule } from '../services/smart-scheduler.ts'
@@ -47,7 +48,7 @@ export async function handlePublicationSchedulingRoute(
       WHERE organization_id = ? AND social_account_id = ? AND id != ? AND scheduled_at IS NOT NULL
         AND datetime(scheduled_at) > CURRENT_TIMESTAMP`).all(auth.organizationId, job.accountId, job.id) as Array<{ scheduledAt: string }>
     const existingTimestamps = existing.map(item => Date.parse(item.scheduledAt)).filter(Number.isFinite)
-    const optimal = calculateOptimalSchedule({ existingTimestamps, accountId: job.accountId })
+    const optimal = calculateOptimalSchedule({ existingTimestamps, accountId: job.accountId, historicalData: organizationScheduleHistory(db,auth.organizationId) })
 
     db.prepare('UPDATE publication_jobs SET scheduled_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?')
       .run(optimal.isoString, job.id, auth.organizationId)
@@ -110,7 +111,7 @@ async function scheduleBatch(
   const assignments = ids.map(id => {
     const job = byId.get(id)!
     const profileTimes = occupied.get(job.accountId) || []
-    const optimal = calculateOptimalSchedule({ existingTimestamps: profileTimes, accountId: job.accountId })
+    const optimal = calculateOptimalSchedule({ existingTimestamps: profileTimes, accountId: job.accountId, historicalData: organizationScheduleHistory(db,auth.organizationId) })
     profileTimes.push(optimal.scheduledAt.getTime())
     occupied.set(job.accountId, profileTimes)
     return { id, accountId: job.accountId, scheduledAt: optimal.isoString, window: optimal.window }
