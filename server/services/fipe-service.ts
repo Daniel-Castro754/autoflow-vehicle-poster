@@ -21,19 +21,40 @@ export interface FipeComparison {
 const BASE_URL = 'https://parallelum.com.br/fipe/api/v1/carros/marcas'
 const CACHE_TTL_MS = 30 * 86400_000
 const fipeMemoryCache = new Map<string, FipeResult>()
-let brandCache: { entries: Array<{codigo: string; nome: string}>; fetchedAt: number } | undefined
+let brandCache: { entries: Array<{ codigo: string; nome: string }>; fetchedAt: number } | undefined
 
 function normalize(value: string) {
-  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  return String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
 }
 function brandKey(value: string) {
   const key = normalize(value)
-  return ({ gm:'chevrolet', 'gm chevrolet':'chevrolet', 'chevrolet gm':'chevrolet', vw:'volkswagen',
-    'vw volkswagen':'volkswagen', mercedes:'mercedes benz', caoa:'chery', 'caoa chery':'chery' } as Record<string,string>)[key] || key
+  return (
+    (
+      {
+        gm: 'chevrolet',
+        'gm chevrolet': 'chevrolet',
+        'chevrolet gm': 'chevrolet',
+        vw: 'volkswagen',
+        'vw volkswagen': 'volkswagen',
+        mercedes: 'mercedes benz',
+        caoa: 'chery',
+        'caoa chery': 'chery',
+      } as Record<string, string>
+    )[key] || key
+  )
 }
 function fresh(timestamp: number) {
   const now = Date.now()
-  return now >= timestamp && now - timestamp < CACHE_TTL_MS && new Date(now).toISOString().slice(0,7) === new Date(timestamp).toISOString().slice(0,7)
+  return (
+    now >= timestamp &&
+    now - timestamp < CACHE_TTL_MS &&
+    new Date(now).toISOString().slice(0, 7) === new Date(timestamp).toISOString().slice(0, 7)
+  )
 }
 export function clearFipeCache() {
   fipeMemoryCache.clear()
@@ -64,18 +85,18 @@ export async function lookupFipePrice(params: {
     if (!brandCache || !fresh(brandCache.fetchedAt)) {
       const response = await fetch(BASE_URL, { signal: controller.signal })
       if (!response.ok) return null
-      const entries = await response.json() as Array<{codigo: string; nome: string}>
+      const entries = (await response.json()) as Array<{ codigo: string; nome: string }>
       if (!Array.isArray(entries)) return null
       brandCache = { entries, fetchedAt: Date.now() }
     }
-    const brand = brandCache.entries.find(b => brandKey(b.nome) === brandKey(make))
+    const brand = brandCache.entries.find((b) => brandKey(b.nome) === brandKey(make))
     if (!brand || !/^\d+$/.test(brand.codigo)) return null
     const brandCode = brand.codigo
 
     // Busca os modelos da marca
     const modelsRes = await fetch(
       `https://parallelum.com.br/fipe/api/v1/carros/marcas/${brandCode}/modelos`,
-      { signal: controller.signal }
+      { signal: controller.signal },
     )
     if (!modelsRes.ok) return null
     const modelsData = (await modelsRes.json()) as {
@@ -100,22 +121,21 @@ export async function lookupFipePrice(params: {
     // Busca os anos disponíveis para o modelo
     const yearsRes = await fetch(
       `https://parallelum.com.br/fipe/api/v1/carros/marcas/${brandCode}/modelos/${matchedModel.codigo}/anos`,
-      { signal: controller.signal }
+      { signal: controller.signal },
     )
     if (!yearsRes.ok) return null
     const years = (await yearsRes.json()) as Array<{ codigo: string; nome: string }>
 
     // Encontra o ano desejado (código começa com o ano, ex: '2024-1' ou '2024-6')
     const targetYearStr = String(year)
-    const matchedYear =
-      years.find((y) => y.codigo.split('-')[0] === targetYearStr)
+    const matchedYear = years.find((y) => y.codigo.split('-')[0] === targetYearStr)
 
     if (!matchedYear) return null
 
     // Busca o preço final
     const priceRes = await fetch(
       `https://parallelum.com.br/fipe/api/v1/carros/marcas/${brandCode}/modelos/${matchedModel.codigo}/anos/${matchedYear.codigo}`,
-      { signal: controller.signal }
+      { signal: controller.signal },
     )
     if (!priceRes.ok) return null
     const priceData = (await priceRes.json()) as {
@@ -127,8 +147,13 @@ export async function lookupFipePrice(params: {
       MesReferencia?: string
     }
 
-    if (!priceData.Valor || brandKey(priceData.Marca || '') !== brandKey(make) || Number(priceData.AnoModelo) !== year) return null
-    if (!modelTerms.every(term => normalize(priceData.Modelo || '').includes(term))) return null
+    if (
+      !priceData.Valor ||
+      brandKey(priceData.Marca || '') !== brandKey(make) ||
+      Number(priceData.AnoModelo) !== year
+    )
+      return null
+    if (!modelTerms.every((term) => normalize(priceData.Modelo || '').includes(term))) return null
 
     // Converte 'R$ 156.728,00' para 156728
     const rawNumber = priceData.Valor.replace(/[^\d]/g, '')
@@ -146,7 +171,8 @@ export async function lookupFipePrice(params: {
       fetchedAt: new Date(Date.now()).toISOString(),
     }
 
-    for (const [key, value] of fipeMemoryCache) if (!fresh(Date.parse(value.fetchedAt))) fipeMemoryCache.delete(key)
+    for (const [key, value] of fipeMemoryCache)
+      if (!fresh(Date.parse(value.fetchedAt))) fipeMemoryCache.delete(key)
     if (fipeMemoryCache.size >= 500) fipeMemoryCache.delete(fipeMemoryCache.keys().next().value!)
     fipeMemoryCache.set(cacheKey, result)
     return { ...result }

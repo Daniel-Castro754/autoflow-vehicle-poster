@@ -20,7 +20,7 @@ export interface CuratedGroupResult {
 
 export function evaluateGroupScore(group: GroupRecord, locationQuery = ''): CuratedGroupResult {
   const totalAttempts = (group.successCount || 0) + (group.failureCount || 0)
-  const successRate = totalAttempts > 0 ? (group.successCount / totalAttempts) : 0.8 // default otimista se novo
+  const successRate = totalAttempts > 0 ? group.successCount / totalAttempts : 0.8 // default otimista se novo
 
   // Pontuação por taxa de sucesso (0 a 60 pontos)
   let score = successRate * 60
@@ -35,7 +35,8 @@ export function evaluateGroupScore(group: GroupRecord, locationQuery = ''): Cura
 
   // Recência (últimos 7 dias ganha bônus de 10 pontos)
   if (group.lastFoundAt) {
-    const elapsedDays = (Date.now() - new Date(group.lastFoundAt.replace(' ', 'T') + 'Z').getTime()) / (1000 * 86400)
+    const elapsedDays =
+      (Date.now() - new Date(group.lastFoundAt.replace(' ', 'T') + 'Z').getTime()) / (1000 * 86400)
     if (elapsedDays <= 7) score += 10
     else if (elapsedDays <= 30) score += 5
   }
@@ -44,8 +45,11 @@ export function evaluateGroupScore(group: GroupRecord, locationQuery = ''): Cura
   if (locationQuery) {
     const locLower = locationQuery.toLowerCase()
     const nameLower = group.name.toLowerCase()
-    const parts = locLower.split(/[, -]+/).map(p => p.trim()).filter(p => p.length >= 3)
-    const match = parts.some(p => nameLower.includes(p))
+    const parts = locLower
+      .split(/[, -]+/)
+      .map((p) => p.trim())
+      .filter((p) => p.length >= 3)
+    const match = parts.some((p) => nameLower.includes(p))
     if (match) score += 15
   }
 
@@ -69,9 +73,9 @@ export function evaluateGroupScore(group: GroupRecord, locationQuery = ''): Cura
 export function curateMarketplaceGroups(
   groups: GroupRecord[],
   locationQuery = '',
-  maxActive = 10
+  maxActive = 10,
 ): CuratedGroupResult[] {
-  const evaluated = groups.map(g => evaluateGroupScore(g, locationQuery))
+  const evaluated = groups.map((g) => evaluateGroupScore(g, locationQuery))
   evaluated.sort((a, b) => b.score - a.score)
 
   // Marca os top `maxActive` como recomendados

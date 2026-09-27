@@ -3,14 +3,17 @@ import { businessDate } from '../lib/timezone.ts'
 import type { DatabaseSync } from 'node:sqlite'
 
 export function initializeBaseSchema(db: DatabaseSync) {
-  db.function('autoflow_day', {deterministic:true}, (value) => value === null ? null : businessDate(String(value)))
+  db.function('autoflow_day', { deterministic: true }, (value) =>
+    value === null ? null : businessDate(String(value)),
+  )
   db.exec(`
     PRAGMA foreign_keys = ON;
     PRAGMA busy_timeout = 5000;
     PRAGMA synchronous = NORMAL;
   `)
-  const mode = db.prepare('PRAGMA journal_mode = WAL').get() as {journal_mode: string}
-  if (mode.journal_mode !== 'wal' && mode.journal_mode !== 'memory') logger.warn('Schema','WAL indisponível',{mode:mode.journal_mode})
+  const mode = db.prepare('PRAGMA journal_mode = WAL').get() as { journal_mode: string }
+  if (mode.journal_mode !== 'wal' && mode.journal_mode !== 'memory')
+    logger.warn('Schema', 'WAL indisponível', { mode: mode.journal_mode })
   db.exec('BEGIN')
   try {
     db.exec(`

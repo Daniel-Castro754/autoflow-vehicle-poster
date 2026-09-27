@@ -31,7 +31,7 @@ export function generateVehicleHashtags(vehicle: {
   }
 
   if (vehicle.location) {
-    const locParts = vehicle.location.split(',').map(s => s.trim())
+    const locParts = vehicle.location.split(',').map((s) => s.trim())
     const state = locParts[1] ? sanitize(locParts[1]) : ''
     const city = locParts[0] ? sanitize(locParts[0]) : ''
     if (state) tags.add(`#Carros${state}`)

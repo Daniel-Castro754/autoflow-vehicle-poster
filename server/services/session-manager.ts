@@ -14,7 +14,7 @@ export interface AvailableAccount {
 export function findBestAccountForVehicle(
   db: DatabaseSync,
   organizationId: number,
-  vehicleId: number
+  vehicleId: number,
 ): AvailableAccount | null {
   const settings = db
     .prepare('SELECT daily_limit dailyLimit FROM organization_settings WHERE organization_id = ?')
@@ -23,7 +23,8 @@ export function findBestAccountForVehicle(
 
   // Seleciona todas as contas da organização
   const accounts = db
-    .prepare(`
+    .prepare(
+      `
       SELECT a.id, a.label, a.browser_profile browserProfile, a.status, a.last_seen_at lastSeenAt,
         COALESCE((
           SELECT COUNT(*) FROM publication_jobs j
@@ -37,16 +38,17 @@ export function findBestAccountForVehicle(
       FROM social_accounts a
       WHERE a.organization_id = ? AND a.status = 'connected'
       ORDER BY a.label
-    `)
+    `,
+    )
     .all(vehicleId, organizationId) as Array<{
-      id: number
-      label: string
-      browserProfile?: string
-      status: string
-      lastSeenAt?: string
-      todayCount: number
-      busy: number
-    }>
+    id: number
+    label: string
+    browserProfile?: string
+    status: string
+    lastSeenAt?: string
+    todayCount: number
+    busy: number
+  }>
 
   if (!accounts.length) return null
 
@@ -62,7 +64,13 @@ export function findBestAccountForVehicle(
     const capacityRemaining = dailyLimit - acc.todayCount
     let recencyScore = 0
     if (acc.lastSeenAt) {
-      const elapsed = Date.now() - Date.parse(/(?:Z|[+-]\d\d:\d\d)$/.test(acc.lastSeenAt) ? acc.lastSeenAt : acc.lastSeenAt.replace(' ', 'T') + 'Z')
+      const elapsed =
+        Date.now() -
+        Date.parse(
+          /(?:Z|[+-]\d\d:\d\d)$/.test(acc.lastSeenAt)
+            ? acc.lastSeenAt
+            : acc.lastSeenAt.replace(' ', 'T') + 'Z',
+        )
       if (elapsed < 15 * 60000) recencyScore = 20
       else if (elapsed < 60 * 60000) recencyScore = 10
     }

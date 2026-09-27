@@ -8,7 +8,11 @@ import assert from 'node:assert/strict'
 
 // 1. Testes unitários dos algoritmos autônomos
 import { calculateBackoff, withRetry } from '../server/lib/retry.ts'
-import { generateProceduralDescription, generateVehicleDescription, resolveAIProviderSettings } from '../server/services/description-generator.ts'
+import {
+  generateProceduralDescription,
+  generateVehicleDescription,
+  resolveAIProviderSettings,
+} from '../server/services/description-generator.ts'
 import { generateVehicleHashtags } from '../server/services/trending-hashtags.ts'
 import { calculateOptimalSchedule } from '../server/services/smart-scheduler.ts'
 import { DatabaseSync } from 'node:sqlite'
@@ -47,14 +51,14 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
   `)
   const originalFetch = globalThis.fetch
   const calls = []
-  globalThis.fetch = async input => {
+  globalThis.fetch = async (input) => {
     calls.push(String(input))
     return new Response('{}', { status: 200 })
   }
   try {
     const report = await runHealthCheck(db)
     assert.equal(report.recoveredCount, 1)
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
     assert(calls.includes('https://api.telegram.org/botorg-bot-token/sendMessage'))
     assert(calls.includes('https://org.example/hook'))
   } finally {
@@ -73,11 +77,19 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
   assert(backoff2 >= 240000 && backoff2 <= 260000, `Backoff attempt 2 inesperado: ${backoff2}`)
 
   let attemptCount = 0
-  const retryResult = await withRetry(async () => {
-    attemptCount++
-    if (attemptCount < 2) throw new Error('Falha simulada transitória')
-    return 'sucesso'
-  }, { maxAttempts: 3, baseDelayMs: 10, maxDelayMs: 50, shouldRetry: error=>error.message==='Falha simulada transitória' })
+  const retryResult = await withRetry(
+    async () => {
+      attemptCount++
+      if (attemptCount < 2) throw new Error('Falha simulada transitória')
+      return 'sucesso'
+    },
+    {
+      maxAttempts: 3,
+      baseDelayMs: 10,
+      maxDelayMs: 50,
+      shouldRetry: (error) => error.message === 'Falha simulada transitória',
+    },
+  )
 
   assert.equal(retryResult, 'sucesso')
   assert.equal(attemptCount, 2)
@@ -106,20 +118,45 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
   const hashtags = generateVehicleHashtags(vehicleData)
 
   assert(descResult.description.includes('Toyota Corolla'), 'Descrição deve conter marca e modelo')
-  assert(descResult.description.includes('45.000 km'), 'Descrição deve conter quilometragem formatada')
-  assert(!/revisado|documentos em dia|impecável|excelente estado/i.test(descResult.description), 'Fallback não deve inventar estado, manutenção ou documentação')
+  assert(
+    descResult.description.includes('45.000 km'),
+    'Descrição deve conter quilometragem formatada',
+  )
+  assert(
+    !/revisado|documentos em dia|impecável|excelente estado/i.test(descResult.description),
+    'Fallback não deve inventar estado, manutenção ou documentação',
+  )
   assert(hashtags.length > 0, 'Deve gerar hashtags')
-  assert(hashtags.some(t => t.toLowerCase() === '#toyota'), 'Deve conter tag da marca')
-  assert(hashtags.some(t => t.toLowerCase() === '#corolla'), 'Deve conter tag do modelo')
-  const autoSettings = resolveAIProviderSettings({ aiProvider: 'auto', geminiApiKey: 'org-gemini', openaiApiKey: 'org-openai' })
-  assert.deepEqual(autoSettings, { provider: 'auto', apiKeys: { gemini: 'org-gemini', openai: 'org-openai' } })
+  assert(
+    hashtags.some((t) => t.toLowerCase() === '#toyota'),
+    'Deve conter tag da marca',
+  )
+  assert(
+    hashtags.some((t) => t.toLowerCase() === '#corolla'),
+    'Deve conter tag do modelo',
+  )
+  const autoSettings = resolveAIProviderSettings({
+    aiProvider: 'auto',
+    geminiApiKey: 'org-gemini',
+    openaiApiKey: 'org-openai',
+  })
+  assert.deepEqual(autoSettings, {
+    provider: 'auto',
+    apiKeys: { gemini: 'org-gemini', openai: 'org-openai' },
+  })
   const originalFetch = globalThis.fetch
   const providerCalls = []
   globalThis.fetch = async (input, init) => {
-    providerCalls.push({ url: String(input), authorization: new Headers(init?.headers).get('Authorization') })
+    providerCalls.push({
+      url: String(input),
+      authorization: new Headers(init?.headers).get('Authorization'),
+    })
     return String(input).includes('generativelanguage.googleapis.com')
       ? new Response('{}', { status: 503 })
-      : new Response(JSON.stringify({ choices: [{ message: { content: 'Toyota Corolla para conhecer.' } }] }), { status: 200 })
+      : new Response(
+          JSON.stringify({ choices: [{ message: { content: 'Toyota Corolla para conhecer.' } }] }),
+          { status: 200 },
+        )
   }
   try {
     const fallbackResult = await generateVehicleDescription(vehicleData, { ...autoSettings })
@@ -153,7 +190,10 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
     existingTimestamps: [collisionTarget],
     accountId: 1,
   })
-  assert(Math.abs(withCollision.scheduledAt.getTime() - collisionTarget) >= 20 * 60000, 'Não deve colidir com agendamento existente')
+  assert(
+    Math.abs(withCollision.scheduledAt.getTime() - collisionTarget) >= 20 * 60000,
+    'Não deve colidir com agendamento existente',
+  )
   console.log('✓ Smart Scheduler de janelas de pico com anti-colisão validado.')
 }
 
@@ -184,7 +224,10 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
   const scoreHigh = evaluateGroupScore(testGroupReliable, 'São Paulo').score
   const scoreLow = evaluateGroupScore(testGroupFailing, 'São Paulo').score
 
-  assert(scoreHigh > scoreLow, `Grupo confiável (${scoreHigh}) deve ter score maior que grupo falho (${scoreLow})`)
+  assert(
+    scoreHigh > scoreLow,
+    `Grupo confiável (${scoreHigh}) deve ter score maior que grupo falho (${scoreLow})`,
+  )
 
   const curated = curateMarketplaceGroups([testGroupFailing, testGroupReliable], 'São Paulo', 5)
   assert.equal(curated[0].group.id, 1, 'Grupo mais confiável deve ser o primeiro colocado')
@@ -194,7 +237,7 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
 // 1.5 Roteamento Autônomo de Sessões e Load Balancing
 {
   const memDb = new DatabaseSync(':memory:')
-  memDb.function('autoflow_day',value=>businessDate(String(value)))
+  memDb.function('autoflow_day', (value) => businessDate(String(value)))
   memDb.exec(`
     CREATE TABLE organization_settings (organization_id INTEGER PRIMARY KEY, daily_limit INTEGER);
     CREATE TABLE social_accounts (id INTEGER PRIMARY KEY, organization_id INTEGER, label TEXT, browser_profile TEXT, status TEXT, last_seen_at TEXT);
@@ -217,7 +260,9 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
 
 // 1.6 Leitor Inteligente de Veículos (Parser de Texto Cru)
 {
-  const parsed = parseVehicleRawText('Vendo urgente Corolla XEi 2022 prata flex automatico com 42.500 km revisado na css R$ 119.900 SP')
+  const parsed = parseVehicleRawText(
+    'Vendo urgente Corolla XEi 2022 prata flex automatico com 42.500 km revisado na css R$ 119.900 SP',
+  )
   assert.equal(parsed.year, 2022)
   assert.equal(parsed.make, 'Toyota')
   assert.equal(parsed.model, 'Corolla')
@@ -238,8 +283,18 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
   assert.equal(incomplete.exteriorColor, '')
   assert.equal(incomplete.location, '')
   assert.equal(incomplete.confidence, 0)
-  const conservativeDescription = generateProceduralDescription({ year: 2022, make: 'Toyota', model: 'Corolla', km: 0 })
-  assert(!/automático|flex|preto|brasil|revisado|impecável|documentos em dia/i.test(conservativeDescription), 'Fallback deve omitir atributos não informados')
+  const conservativeDescription = generateProceduralDescription({
+    year: 2022,
+    make: 'Toyota',
+    model: 'Corolla',
+    km: 0,
+  })
+  assert(
+    !/automático|flex|preto|brasil|revisado|impecável|documentos em dia/i.test(
+      conservativeDescription,
+    ),
+    'Fallback deve omitir atributos não informados',
+  )
   console.log('✓ Parser inteligente de texto cru de veículos validado.')
 }
 
@@ -269,8 +324,8 @@ const server = spawn(process.execPath, ['server/server.ts'], {
 })
 
 let serverOutput = ''
-server.stdout.on('data', chunk => serverOutput += chunk)
-server.stderr.on('data', chunk => serverOutput += chunk)
+server.stdout.on('data', (chunk) => (serverOutput += chunk))
+server.stderr.on('data', (chunk) => (serverOutput += chunk))
 
 async function waitForServer() {
   for (let attempt = 0; attempt < 40; attempt++) {
@@ -280,7 +335,7 @@ async function waitForServer() {
     } catch {
       // aguardando inicialização
     }
-    await new Promise(resolve => setTimeout(resolve, 100))
+    await new Promise((resolve) => setTimeout(resolve, 100))
   }
   throw new Error(`A API de teste não iniciou: ${serverOutput}`)
 }
@@ -295,7 +350,11 @@ async function call(path, token, options = {}) {
     },
   })
   const data = await response.json()
-  if (!response.ok) throw Object.assign(new Error(`${response.status} ${path}: ${data.error}`), { status: response.status, body: data })
+  if (!response.ok)
+    throw Object.assign(new Error(`${response.status} ${path}: ${data.error}`), {
+      status: response.status,
+      body: data,
+    })
   return data
 }
 
@@ -339,7 +398,7 @@ try {
   })
   assert(aiDesc.ok)
   assert(aiDesc.description.includes('Honda Civic'))
-  assert(aiDesc.hashtags.some(t => t.toLowerCase() === '#honda'))
+  assert(aiDesc.hashtags.some((t) => t.toLowerCase() === '#honda'))
   console.log('✓ Endpoint POST /api/ai/generate-description validado.')
 
   // 2.3 Atualização e Leitura de Configurações Autônomas
@@ -361,8 +420,16 @@ try {
       alertWebhookUrl: 'http://127.0.0.1:3444/api/health', // URL válida local para o teste
       autoCurateGroups: true,
       groups: [
-        { name: 'Feirão de Automóveis Curitiba', url: 'https://facebook.com/groups/curitibacarros', active: true },
-        { name: 'Classificados Paraná Veículos', url: 'https://facebook.com/groups/prveiculos', active: true },
+        {
+          name: 'Feirão de Automóveis Curitiba',
+          url: 'https://facebook.com/groups/curitibacarros',
+          active: true,
+        },
+        {
+          name: 'Classificados Paraná Veículos',
+          url: 'https://facebook.com/groups/prveiculos',
+          active: true,
+        },
       ],
     }),
   })
@@ -374,7 +441,9 @@ try {
   assert.equal(settings.settings.maxRetries, 4)
   assert.equal(settings.settings.autoCurateGroups, 1)
   assert.equal(settings.settings.alertTelegramToken, 'test_telegram_bot_token_123456')
-  console.log('✓ Persistência de configurações autônomas (autoRetry, maxRetries, Telegram, Webhook) validada.')
+  console.log(
+    '✓ Persistência de configurações autônomas (autoRetry, maxRetries, Telegram, Webhook) validada.',
+  )
 
   // 2.4 Teste de Disparo de Alerta Crítico
   const alertTest = await call('/alerts/test', token, { method: 'POST' })
@@ -401,7 +470,7 @@ try {
     }),
   })
   const accountId = accountRes.id
-  await call(`/extension/queue?accountId=${accountId}`,token)
+  await call(`/extension/queue?accountId=${accountId}`, token)
 
   const vehicleRes = await call('/vehicles', token, {
     method: 'POST',
@@ -449,7 +518,9 @@ try {
   console.log(`✓ Criação autônoma de publicação com smartSchedule (Job #${jobId}) validada.`)
 
   // 2.8 Endpoint Individual de Smart Schedule
-  const singleSchedule = await call(`/publications/${jobId}/smart-schedule`, token, { method: 'POST' })
+  const singleSchedule = await call(`/publications/${jobId}/smart-schedule`, token, {
+    method: 'POST',
+  })
   assert.equal(singleSchedule.ok, true)
   assert(singleSchedule.scheduledAt)
   assert(singleSchedule.window)
@@ -483,10 +554,15 @@ try {
   })
   assert(prepared.leaseToken, 'Deve gerar leaseToken exclusivo para a execução')
   await call(`/extension/jobs/${jobId}/bind-document`, token, {
-    method:'POST',
-    body:JSON.stringify({leaseToken:prepared.leaseToken,tabId:prepared.tabId,document:prepared.document,documentId:'autonomous_test_document'}),
+    method: 'POST',
+    body: JSON.stringify({
+      leaseToken: prepared.leaseToken,
+      tabId: prepared.tabId,
+      document: prepared.document,
+      documentId: 'autonomous_test_document',
+    }),
   })
-  prepared.documentId='autonomous_test_document'
+  prepared.documentId = 'autonomous_test_document'
 
   // Reportar erro transitório acionando auto-retry
   const fillFailRes = await call(`/extension/jobs/${jobId}/fill-result`, token, {
@@ -509,7 +585,7 @@ try {
 
   // Verificar na listagem de publicações se retryCount e novo agendamento foram refletidos
   const pubDetails = await call('/publications', token)
-  const myJob = pubDetails.jobs.find(j => j.id === jobId)
+  const myJob = pubDetails.jobs.find((j) => j.id === jobId)
   assert(myJob, 'Trabalho deve constar na listagem')
   assert.equal(myJob.retryCount, 1, 'retryCount deve ser 1 na API')
   assert.equal(myJob.status, 'pending', 'Status deve permanecer pendente para reexecução futura')
@@ -520,7 +596,9 @@ try {
   // 1. Parser de Texto Cru via API
   const parseRes = await call('/ai/parse-text', token, {
     method: 'POST',
-    body: JSON.stringify({ text: 'Jeep Compass Longitude 2021 preto flex automatico 51800 km R$ 134.500 São Paulo - SP' }),
+    body: JSON.stringify({
+      text: 'Jeep Compass Longitude 2021 preto flex automatico 51800 km R$ 134.500 São Paulo - SP',
+    }),
   })
   assert.equal(parseRes.ok, true)
   assert.equal(parseRes.vehicle.make, 'Jeep')
@@ -537,7 +615,10 @@ try {
       interiorColor: 'Preto',
     }),
   })
-  assert(importedVehicle.id > 0, 'O cadastro estruturado pela Central de IA deve ser aceito pelo estoque')
+  assert(
+    importedVehicle.id > 0,
+    'O cadastro estruturado pela Central de IA deve ser aceito pelo estoque',
+  )
   console.log('✓ Endpoint POST /api/ai/parse-text validado.')
 
   // 2. Auditoria do Estoque
@@ -566,7 +647,7 @@ try {
   assert(cmdAuditRes.reply.length > 0)
 
   const jobsBeforeQuestion = (await call('/publications', token)).jobs
-    .map(job => ({ id: job.id, status: job.status, scheduledAt: job.scheduledAt }))
+    .map((job) => ({ id: job.id, status: job.status, scheduledAt: job.scheduledAt }))
     .sort((a, b) => a.id - b.id)
   const cmdQuestionRes = await call('/ai/command', token, {
     method: 'POST',
@@ -576,18 +657,29 @@ try {
   assert.equal(cmdQuestionRes.intent, 'general_assistance')
   assert.equal(cmdQuestionRes.actionTaken, 'help')
   const jobsAfterQuestion = (await call('/publications', token)).jobs
-    .map(job => ({ id: job.id, status: job.status, scheduledAt: job.scheduledAt }))
+    .map((job) => ({ id: job.id, status: job.status, scheduledAt: job.scheduledAt }))
     .sort((a, b) => a.id - b.id)
-  assert.deepEqual(jobsAfterQuestion, jobsBeforeQuestion, 'Uma pergunta sobre publicação não pode modificar trabalhos nem agendamentos')
+  assert.deepEqual(
+    jobsAfterQuestion,
+    jobsBeforeQuestion,
+    'Uma pergunta sobre publicação não pode modificar trabalhos nem agendamentos',
+  )
   const noPunctuationQuestion = await call('/ai/command', token, {
     method: 'POST',
     body: JSON.stringify({ prompt: 'Me diga como executar o piloto automático no estoque pronto' }),
   })
-  assert(['general_assistance', 'audit'].includes(noPunctuationQuestion.intent), 'Uma pergunta sem pontuação pode ser ajuda ou auditoria, mas não uma ação de publicação')
+  assert(
+    ['general_assistance', 'audit'].includes(noPunctuationQuestion.intent),
+    'Uma pergunta sem pontuação pode ser ajuda ou auditoria, mas não uma ação de publicação',
+  )
   assert.notEqual(noPunctuationQuestion.actionTaken, 'run_autopilot')
-  assert.deepEqual((await call('/publications', token)).jobs
-    .map(job => ({ id: job.id, status: job.status, scheduledAt: job.scheduledAt }))
-    .sort((a, b) => a.id - b.id), jobsBeforeQuestion, 'Perguntas sem ponto de interrogação também devem ser somente leitura')
+  assert.deepEqual(
+    (await call('/publications', token)).jobs
+      .map((job) => ({ id: job.id, status: job.status, scheduledAt: job.scheduledAt }))
+      .sort((a, b) => a.id - b.id),
+    jobsBeforeQuestion,
+    'Perguntas sem ponto de interrogação também devem ser somente leitura',
+  )
 
   const cmdOptRes = await call('/ai/command', token, {
     method: 'POST',
@@ -686,17 +778,40 @@ try {
     }),
   })
   const testDb = new DatabaseSync(join(dataDir, 'autoflow.db'))
-  testDb.prepare("UPDATE vehicles SET vehicle_type='' WHERE id=?").run(incompleteAutopilotVehicle.id)
+  testDb
+    .prepare("UPDATE vehicles SET vehicle_type='' WHERE id=?")
+    .run(incompleteAutopilotVehicle.id)
 
   const autopilotRes = await call('/ai/autopilot/run', token, { method: 'POST' })
   assert.equal(autopilotRes.ok, true)
-  assert.equal(autopilotRes.jobsCreated, 1, 'O piloto deve agendar somente o veículo elegível sem risco de duplicidade')
+  assert.equal(
+    autopilotRes.jobsCreated,
+    1,
+    'O piloto deve agendar somente o veículo elegível sem risco de duplicidade',
+  )
   assert.equal(autopilotRes.assignments[0].vehicleId, autopilotVehicle.id)
-  assert.equal(testDb.prepare('SELECT COUNT(*) count FROM publication_jobs WHERE vehicle_id=?').get(incompleteAutopilotVehicle.id).count, 0)
-  assert.equal(testDb.prepare('SELECT COUNT(*) count FROM publication_jobs WHERE vehicle_id=?').get(duplicatePhotoVehicle.id).count, 0)
-  assert(testDb.prepare('SELECT description FROM vehicles WHERE id=?').get(autopilotVehicle.id).description.trim().length > 0)
+  assert.equal(
+    testDb
+      .prepare('SELECT COUNT(*) count FROM publication_jobs WHERE vehicle_id=?')
+      .get(incompleteAutopilotVehicle.id).count,
+    0,
+  )
+  assert.equal(
+    testDb
+      .prepare('SELECT COUNT(*) count FROM publication_jobs WHERE vehicle_id=?')
+      .get(duplicatePhotoVehicle.id).count,
+    0,
+  )
+  assert(
+    testDb
+      .prepare('SELECT description FROM vehicles WHERE id=?')
+      .get(autopilotVehicle.id)
+      .description.trim().length > 0,
+  )
   testDb.close()
-  console.log('✓ Piloto automático aplica os mesmos campos obrigatórios, fotos e proteção contra duplicidade da fila manual.')
+  console.log(
+    '✓ Piloto automático aplica os mesmos campos obrigatórios, fotos e proteção contra duplicidade da fila manual.',
+  )
 
   console.log('\n======================================================')
   console.log(' TODOS OS TESTES DA ARQUITETURA AUTÔNOMA PASSARAM! (100%)')

@@ -40,7 +40,8 @@ export const WEEKEND_PEAK_WINDOWS = [
 export function calculateOptimalSchedule(options: ScheduleOptions = {}): OptimalScheduleResult {
   const ref = options.referenceDate ? new Date(options.referenceDate) : new Date()
   const delay = options.minDelayMinutes ?? 10
-  if (!Number.isFinite(ref.getTime()) || !Number.isFinite(delay) || delay < 0) throw new Error('Referência de agendamento inválida.')
+  if (!Number.isFinite(ref.getTime()) || !Number.isFinite(delay) || delay < 0)
+    throw new Error('Referência de agendamento inválida.')
   const earliest = ref.getTime() + delay * 60000
   const timezone = options.timezone || SCHEDULE_TIMEZONE
   const p = localParts(new Date(earliest), timezone)
@@ -49,23 +50,48 @@ export function calculateOptimalSchedule(options: ScheduleOptions = {}): Optimal
   const spacing = 25 * 60000
   const freeTime = (start: number) => {
     let result = start
-    for (const occupied of existing) if (Math.abs(occupied - result) < spacing) result = occupied + spacing
+    for (const occupied of existing)
+      if (Math.abs(occupied - result) < spacing) result = occupied + spacing
     return result
   }
-  const result = (date: Date, confidence: OptimalScheduleResult['confidence'], window: string, jitterMinutes: number): OptimalScheduleResult =>
-    ({ scheduledAt: date, isoString: date.toISOString(), confidence, window, jitterMinutes })
-  const history = (options.historicalData || []).filter(h => h.successCount > 0 && Number.isInteger(h.dayOfWeek) && h.dayOfWeek >= 0 && h.dayOfWeek < 7 && Number.isInteger(h.hour) && h.hour >= 0 && h.hour < 24)
+  const result = (
+    date: Date,
+    confidence: OptimalScheduleResult['confidence'],
+    window: string,
+    jitterMinutes: number,
+  ): OptimalScheduleResult => ({
+    scheduledAt: date,
+    isoString: date.toISOString(),
+    confidence,
+    window,
+    jitterMinutes,
+  })
+  const history = (options.historicalData || []).filter(
+    (h) =>
+      h.successCount > 0 &&
+      Number.isInteger(h.dayOfWeek) &&
+      h.dayOfWeek >= 0 &&
+      h.dayOfWeek < 7 &&
+      Number.isInteger(h.hour) &&
+      h.hour >= 0 &&
+      h.hour < 24,
+  )
   if (history.length >= 5) {
     const best = [...history].sort((a, b) => b.successCount - a.successCount)[0]
     const targetDay = new Date(day)
-    targetDay.setUTCDate(targetDay.getUTCDate() + (best.dayOfWeek - day.getUTCDay() + 7) % 7)
+    targetDay.setUTCDate(targetDay.getUTCDate() + ((best.dayOfWeek - day.getUTCDay() + 7) % 7))
     const jitter = Math.floor(Math.random() * 21) - 10
     let candidate = localInstant(targetDay, best.hour * 60 + 15 + jitter, timezone)
     if (candidate.getTime() < earliest) {
       targetDay.setUTCDate(targetDay.getUTCDate() + 7)
       candidate = localInstant(targetDay, best.hour * 60 + 15 + jitter, timezone)
     }
-    return result(new Date(freeTime(candidate.getTime())), 'historical', `Dia ${best.dayOfWeek} às ${best.hour}h`, jitter)
+    return result(
+      new Date(freeTime(candidate.getTime())),
+      'historical',
+      `Dia ${best.dayOfWeek} às ${best.hour}h`,
+      jitter,
+    )
   }
   for (let offset = 0; offset < 7; offset++) {
     const targetDay = new Date(day)
@@ -73,12 +99,22 @@ export function calculateOptimalSchedule(options: ScheduleOptions = {}): Optimal
     const weekend = [0, 6].includes(targetDay.getUTCDay())
     for (const win of weekend ? WEEKEND_PEAK_WINDOWS : WEEKDAY_PEAK_WINDOWS) {
       const jitter = Math.floor(Math.random() * 19) - 9
-      const slot = localInstant(targetDay, win.startHour * 60 + win.startMin + jitter, timezone, Math.floor(Math.random() * 50))
+      const slot = localInstant(
+        targetDay,
+        win.startHour * 60 + win.startMin + jitter,
+        timezone,
+        Math.floor(Math.random() * 50),
+      )
       if (slot.getTime() >= earliest && freeTime(slot.getTime()) === slot.getTime()) {
         return result(slot, 'peak_heuristic', win.label, jitter)
       }
     }
   }
   const jitter = Math.floor(Math.random() * 15)
-  return result(new Date(freeTime(earliest + (25 + jitter) * 60000)), 'peak_heuristic', 'Slot Adaptativo Livre', jitter)
+  return result(
+    new Date(freeTime(earliest + (25 + jitter) * 60000)),
+    'peak_heuristic',
+    'Slot Adaptativo Livre',
+    jitter,
+  )
 }

@@ -1,5 +1,10 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { generateVehicleDescription, resolveAIProviderSettings, type VehicleInput, type CopyTone } from './description-generator.ts'
+import {
+  generateVehicleDescription,
+  resolveAIProviderSettings,
+  type VehicleInput,
+  type CopyTone,
+} from './description-generator.ts'
 import { generateVehicleHashtags } from './trending-hashtags.ts'
 import { calculateOptimalSchedule } from './smart-scheduler.ts'
 import { findBestAccountForVehicle } from './session-manager.ts'
@@ -65,17 +70,53 @@ export interface AgentCommandResult {
 }
 
 const BRAZILIAN_MAKES = [
-  'Chevrolet', 'Volkswagen', 'Fiat', 'Ford', 'Toyota', 'Honda', 'Hyundai',
-  'Jeep', 'Renault', 'Nissan', 'BMW', 'Mercedes-Benz', 'Mercedes', 'Audi',
-  'Peugeot', 'Citroën', 'Citroen', 'Mitsubishi', 'Caoa Chery', 'Chery',
-  'Kia', 'Volvo', 'Land Rover', 'RAM', 'Porsche', 'BYD', 'GWM', 'JAC'
+  'Chevrolet',
+  'Volkswagen',
+  'Fiat',
+  'Ford',
+  'Toyota',
+  'Honda',
+  'Hyundai',
+  'Jeep',
+  'Renault',
+  'Nissan',
+  'BMW',
+  'Mercedes-Benz',
+  'Mercedes',
+  'Audi',
+  'Peugeot',
+  'Citroën',
+  'Citroen',
+  'Mitsubishi',
+  'Caoa Chery',
+  'Chery',
+  'Kia',
+  'Volvo',
+  'Land Rover',
+  'RAM',
+  'Porsche',
+  'BYD',
+  'GWM',
+  'JAC',
 ]
 
 const POPULAR_MODELS: Record<string, string[]> = {
   Toyota: ['Corolla', 'Hilux', 'Yaris', 'Etios', 'RAV4', 'Corolla Cross', 'SW4'],
   Honda: ['Civic', 'Fit', 'HR-V', 'City', 'WR-V', 'CR-V'],
   Jeep: ['Compass', 'Renegade', 'Commander'],
-  Volkswagen: ['Gol', 'Polo', 'T-Cross', 'Nivus', 'Virtus', 'Taos', 'Jetta', 'Fox', 'Saveiro', 'Amarok', 'Up'],
+  Volkswagen: [
+    'Gol',
+    'Polo',
+    'T-Cross',
+    'Nivus',
+    'Virtus',
+    'Taos',
+    'Jetta',
+    'Fox',
+    'Saveiro',
+    'Amarok',
+    'Up',
+  ],
   Chevrolet: ['Onix', 'Tracker', 'Prisma', 'Cruze', 'Spin', 'S10', 'Montana', 'Cobalt'],
   Fiat: ['Strada', 'Toro', 'Mobi', 'Argo', 'Cronos', 'Pulse', 'Fastback', 'Uno', 'Palio', 'Siena'],
   Hyundai: ['HB20', 'Creta', 'Tucson', 'i30'],
@@ -84,7 +125,7 @@ const POPULAR_MODELS: Record<string, string[]> = {
   Ford: ['Ka', 'EcoSport', 'Ranger', 'Fiesta', 'Focus', 'Fusion'],
   BMW: ['320i', 'X1', 'X3', '328i', '118i'],
   'Mercedes-Benz': ['C180', 'C200', 'C300', 'GLA', 'GLC', 'GLE', 'A200'],
-  'Citroën': ['C3', 'C4 Cactus', 'C4', 'Berlingo'],
+  Citroën: ['C3', 'C4 Cactus', 'C4', 'Berlingo'],
   Peugeot: ['208', '2008', '3008', '408'],
   Mitsubishi: ['L200', 'Outlander', 'ASX', 'Eclipse Cross'],
   Kia: ['Sportage', 'Seltos', 'Cerato', 'Stonic'],
@@ -131,7 +172,7 @@ export function parseVehicleRawText(rawText: string): ParsedVehicle {
 
   // If make found, search for its specific models first
   if (detectedMake && POPULAR_MODELS[detectedMake]) {
-    for (const model of [...POPULAR_MODELS[detectedMake]].sort((a,b)=>b.length-a.length)) {
+    for (const model of [...POPULAR_MODELS[detectedMake]].sort((a, b) => b.length - a.length)) {
       const modelRegex = new RegExp(`\\b${model.replace('-', '[- ]?')}\\b`, 'i')
       if (modelRegex.test(text)) {
         detectedModel = model
@@ -143,7 +184,7 @@ export function parseVehicleRawText(rawText: string): ParsedVehicle {
   // Fallback: search all known models
   if (!detectedModel && !detectedMake) {
     for (const [make, models] of Object.entries(POPULAR_MODELS)) {
-      for (const model of [...models].sort((a,b)=>b.length-a.length)) {
+      for (const model of [...models].sort((a, b) => b.length - a.length)) {
         const modelRegex = new RegExp(`\\b${model.replace('-', '[- ]?')}\\b`, 'i')
         if (modelRegex.test(text)) {
           detectedModel = model
@@ -156,7 +197,29 @@ export function parseVehicleRawText(rawText: string): ParsedVehicle {
   }
 
   // 3. Detect Trim / Version
-  const trims = ['Touring', 'Comfortline', 'Highline', 'Longitude', 'Limited', 'Trailhawk', 'XEi', 'Altis', 'GLi', 'EXL', 'EX', 'LX', 'Premier', 'LTZ', 'LT', 'Sport', 'Sense', 'Evolution', 'Iconic', 'Diamond', 'Prestige']
+  const trims = [
+    'Touring',
+    'Comfortline',
+    'Highline',
+    'Longitude',
+    'Limited',
+    'Trailhawk',
+    'XEi',
+    'Altis',
+    'GLi',
+    'EXL',
+    'EX',
+    'LX',
+    'Premier',
+    'LTZ',
+    'LT',
+    'Sport',
+    'Sense',
+    'Evolution',
+    'Iconic',
+    'Diamond',
+    'Prestige',
+  ]
   let detectedTrim = ''
   for (const trim of trims) {
     const trimRegex = new RegExp(`\\b${trim}\\b`, 'i')
@@ -173,7 +236,8 @@ export function parseVehicleRawText(rawText: string): ParsedVehicle {
 
   // 4. Detect KM
   let km = 0
-  const kmMatch = text.match(/\b([\d.]+)\s*(?:mil\s*)?km\b/i) || text.match(/\b([\d]+)\s*mil\s*(?:km)?\b/i)
+  const kmMatch =
+    text.match(/\b([\d.]+)\s*(?:mil\s*)?km\b/i) || text.match(/\b([\d]+)\s*mil\s*(?:km)?\b/i)
   if (kmMatch) {
     const rawKm = kmMatch[1].replace(/\./g, '')
     const num = Number.parseInt(rawKm, 10)
@@ -182,7 +246,9 @@ export function parseVehicleRawText(rawText: string): ParsedVehicle {
 
   // 5. Detect Price
   let price = 0
-  const priceMatch = text.match(/(?:r\$\s*|valor:?\s*|preço:?\s*)([\d.]+)(?:,\d{2})?/i) || text.match(/\b(\d{2,3}\.?\d{3})\b/)
+  const priceMatch =
+    text.match(/(?:r\$\s*|valor:?\s*|preço:?\s*)([\d.]+)(?:,\d{2})?/i) ||
+    text.match(/\b(\d{2,3}\.?\d{3})\b/)
   if (priceMatch) {
     const rawVal = priceMatch[1].replace(/\./g, '')
     const num = Number.parseInt(rawVal, 10)
@@ -256,9 +322,13 @@ export function parseVehicleRawText(rawText: string): ParsedVehicle {
  * Audits complete inventory and returns health metrics, issues, and AI recommendations.
  */
 export function auditInventory(db: DatabaseSync, organizationId: number): InventoryAudit {
-  const vehicles = db.prepare(`SELECT v.id, v.year, v.make, v.model, v.trim, v.price, v.km, v.status, v.description,
+  const vehicles = db
+    .prepare(
+      `SELECT v.id, v.year, v.make, v.model, v.trim, v.price, v.km, v.status, v.description,
     (SELECT COUNT(*) FROM vehicle_images WHERE vehicle_id = v.id) imageCount
-    FROM vehicles v WHERE v.organization_id = ?`).all(organizationId) as Array<{
+    FROM vehicles v WHERE v.organization_id = ?`,
+    )
+    .all(organizationId) as Array<{
     id: number
     year: number
     make: string
@@ -271,26 +341,36 @@ export function auditInventory(db: DatabaseSync, organizationId: number): Invent
     imageCount: number
   }>
 
-  const accounts = db.prepare('SELECT id, label, status FROM social_accounts WHERE organization_id = ?')
+  const accounts = db
+    .prepare('SELECT id, label, status FROM social_accounts WHERE organization_id = ?')
     .all(organizationId) as Array<{ id: number; label: string; status: string }>
 
-  const activeJobs = db.prepare(`SELECT vehicle_id FROM publication_jobs
-    WHERE organization_id = ? AND status IN ('pending', 'filling', 'awaiting_confirmation')`).all(organizationId) as Array<{ vehicle_id: number }>
-  const activeVehicleIds = new Set(activeJobs.map(j => j.vehicle_id))
+  const activeJobs = db
+    .prepare(
+      `SELECT vehicle_id FROM publication_jobs
+    WHERE organization_id = ? AND status IN ('pending', 'filling', 'awaiting_confirmation')`,
+    )
+    .all(organizationId) as Array<{ vehicle_id: number }>
+  const activeVehicleIds = new Set(activeJobs.map((j) => j.vehicle_id))
 
   const total = vehicles.length
-  const ready = vehicles.filter(v => v.status === 'Pronto').length
-  const published = vehicles.filter(v => v.status === 'Publicado').length
+  const ready = vehicles.filter((v) => v.status === 'Pronto').length
+  const published = vehicles.filter((v) => v.status === 'Publicado').length
 
-  const unoptimizedDescriptions = vehicles.filter(v => !v.description || v.description.length < 50 || v.description.includes('{ano}')).length
-  const missingPhotos = vehicles.filter(v => v.imageCount === 0).length
-  const readyUnscheduled = vehicles.filter(v => v.status === 'Pronto' && !activeVehicleIds.has(v.id)).length
+  const unoptimizedDescriptions = vehicles.filter(
+    (v) => !v.description || v.description.length < 50 || v.description.includes('{ano}'),
+  ).length
+  const missingPhotos = vehicles.filter((v) => v.imageCount === 0).length
+  const readyUnscheduled = vehicles.filter(
+    (v) => v.status === 'Pronto' && !activeVehicleIds.has(v.id),
+  ).length
 
   // Calculate Health Score (0-100)
   let score = 100
   if (total === 0) score = 50
   else {
-    if (unoptimizedDescriptions > 0) score -= Math.min(25, Math.round((unoptimizedDescriptions / total) * 30))
+    if (unoptimizedDescriptions > 0)
+      score -= Math.min(25, Math.round((unoptimizedDescriptions / total) * 30))
     if (missingPhotos > 0) score -= Math.min(30, Math.round((missingPhotos / total) * 40))
     if (accounts.length === 0) score -= 30
     if (readyUnscheduled > 0) score -= Math.min(15, readyUnscheduled * 3)
@@ -303,7 +383,8 @@ export function auditInventory(db: DatabaseSync, organizationId: number): Invent
     recommendations.push({
       severity: 'critical',
       title: 'Nenhum perfil de publicação associado',
-      description: 'Adicione ao menos um perfil local do Brave na aba "Equipe e contas" para habilitar as publicações.',
+      description:
+        'Adicione ao menos um perfil local do Brave na aba "Equipe e contas" para habilitar as publicações.',
       actionText: 'Associar Perfil',
       actionIntent: 'navigate_team',
     })
@@ -313,7 +394,8 @@ export function auditInventory(db: DatabaseSync, organizationId: number): Invent
     recommendations.push({
       severity: 'warning',
       title: `${readyUnscheduled} veículo${readyUnscheduled === 1 ? '' : 's'} pronto${readyUnscheduled === 1 ? '' : 's'} fora da fila`,
-      description: 'Veículos marcados como "Pronto" estão parados sem agendamento nas melhores janelas de tráfego.',
+      description:
+        'Veículos marcados como "Pronto" estão parados sem agendamento nas melhores janelas de tráfego.',
       actionText: 'Executar Piloto Automático',
       actionIntent: 'run_autopilot',
     })
@@ -323,7 +405,8 @@ export function auditInventory(db: DatabaseSync, organizationId: number): Invent
     recommendations.push({
       severity: 'info',
       title: `${unoptimizedDescriptions} veículo${unoptimizedDescriptions === 1 ? '' : 's'} com descrição padrão ou curta`,
-      description: 'Descrições enriquecidas com IA aumentam o engajamento no Marketplace em até 3,4x.',
+      description:
+        'Descrições enriquecidas com IA aumentam o engajamento no Marketplace em até 3,4x.',
       actionText: 'Otimizar com IA',
       actionIntent: 'optimize_descriptions',
     })
@@ -333,7 +416,8 @@ export function auditInventory(db: DatabaseSync, organizationId: number): Invent
     recommendations.push({
       severity: 'warning',
       title: `${missingPhotos} veículo${missingPhotos === 1 ? '' : 's'} sem fotos cadastradas`,
-      description: 'O Facebook Marketplace não permite publicação de veículos sem pelo menos uma foto de capa.',
+      description:
+        'O Facebook Marketplace não permite publicação de veículos sem pelo menos uma foto de capa.',
       actionText: 'Ver Veículos',
       actionIntent: 'navigate_vehicles',
     })
@@ -359,21 +443,46 @@ export function auditInventory(db: DatabaseSync, organizationId: number): Invent
  * Autopilot: Automatically enriches unoptimized descriptions, selects ready vehicles,
  * pairs them with best available accounts and schedules them in peak automotive hours.
  */
-export async function runAutopilotPipeline(db: DatabaseSync, organizationId: number, userId: number): Promise<AutopilotResult> {
-  const settings = db.prepare(`SELECT daily_limit dailyLimit, execution_interval_minutes executionIntervalMinutes
-    FROM organization_settings WHERE organization_id = ?`)
+export async function runAutopilotPipeline(
+  db: DatabaseSync,
+  organizationId: number,
+  userId: number,
+): Promise<AutopilotResult> {
+  const settings = db
+    .prepare(
+      `SELECT daily_limit dailyLimit, execution_interval_minutes executionIntervalMinutes
+    FROM organization_settings WHERE organization_id = ?`,
+    )
     .get(organizationId) as { dailyLimit?: number; executionIntervalMinutes?: number } | undefined
   const dailyLimit = Math.max(1, Number(settings?.dailyLimit) || 10)
-  const executionIntervalMinutes = Math.max(0, Math.min(1440, Number(settings?.executionIntervalMinutes ?? 25)))
-  const accountCapacity = db.prepare(`SELECT a.id,MAX(0,?-COALESCE(SUM(CASE WHEN autoflow_day(j.created_at)=autoflow_day(CURRENT_TIMESTAMP) AND j.status!='canceled' THEN 1 ELSE 0 END),0)) remaining
+  const executionIntervalMinutes = Math.max(
+    0,
+    Math.min(1440, Number(settings?.executionIntervalMinutes ?? 25)),
+  )
+  const accountCapacity = db
+    .prepare(
+      `SELECT a.id,MAX(0,?-COALESCE(SUM(CASE WHEN autoflow_day(j.created_at)=autoflow_day(CURRENT_TIMESTAMP) AND j.status!='canceled' THEN 1 ELSE 0 END),0)) remaining
     FROM social_accounts a LEFT JOIN publication_jobs j ON j.organization_id=a.organization_id AND j.social_account_id=a.id
-    WHERE a.organization_id=? AND a.status='connected' GROUP BY a.id`).all(dailyLimit, organizationId) as Array<{ id: number; remaining: number }>
-  const remainingCapacity = accountCapacity.reduce((total, account) => total + Math.max(0, Number(account.remaining) || 0), 0)
+    WHERE a.organization_id=? AND a.status='connected' GROUP BY a.id`,
+    )
+    .all(dailyLimit, organizationId) as Array<{ id: number; remaining: number }>
+  const remainingCapacity = accountCapacity.reduce(
+    (total, account) => total + Math.max(0, Number(account.remaining) || 0),
+    0,
+  )
 
   // 1. Fetch available accounts
-  const accounts = db.prepare(`SELECT id, label, browser_profile browserProfile, status FROM social_accounts
-    WHERE organization_id = ? AND status='connected'`)
-    .all(organizationId) as Array<{ id: number; label: string; browserProfile: string; status: string }>
+  const accounts = db
+    .prepare(
+      `SELECT id, label, browser_profile browserProfile, status FROM social_accounts
+    WHERE organization_id = ? AND status='connected'`,
+    )
+    .all(organizationId) as Array<{
+    id: number
+    label: string
+    browserProfile: string
+    status: string
+  }>
 
   if (!accounts.length) {
     return {
@@ -382,12 +491,15 @@ export async function runAutopilotPipeline(db: DatabaseSync, organizationId: num
       jobsCreated: 0,
       descriptionsOptimized: 0,
       assignments: [],
-      message: 'Não há perfis de publicação cadastrados. Associe um perfil do Brave antes de rodar o piloto automático.',
+      message:
+        'Não há perfis de publicação cadastrados. Associe um perfil do Brave antes de rodar o piloto automático.',
     }
   }
 
   // 2. Fetch ready vehicles not in active jobs
-  const vehicles = db.prepare(`SELECT v.id, v.year, v.make, v.model, v.trim, v.price, v.km, v.status, v.description,
+  const vehicles = db
+    .prepare(
+      `SELECT v.id, v.year, v.make, v.model, v.trim, v.price, v.km, v.status, v.description,
     v.exterior_color exteriorColor, v.interior_color interiorColor, v.transmission, v.fuel_type fuelType,
     v.vehicle_condition condition, v.vehicle_type vehicleType, v.body_type bodyType, v.location, v.sold_at soldAt,
     (SELECT COUNT(*) FROM vehicle_images WHERE vehicle_id = v.id AND organization_id = v.organization_id) imageCount
@@ -396,7 +508,9 @@ export async function runAutopilotPipeline(db: DatabaseSync, organizationId: num
       AND v.id NOT IN (
         SELECT vehicle_id FROM publication_jobs
         WHERE organization_id = ? AND status IN ('pending', 'filling', 'error', 'awaiting_confirmation', 'completed')
-      )`).all(organizationId, organizationId) as Array<{
+      )`,
+    )
+    .all(organizationId, organizationId) as Array<{
     id: number
     year: number
     make: string
@@ -425,21 +539,29 @@ export async function runAutopilotPipeline(db: DatabaseSync, organizationId: num
       jobsCreated: 0,
       descriptionsOptimized: 0,
       assignments: [],
-      message: remainingCapacity === 0
-        ? 'A capacidade diária de publicações já foi atingida; nenhum novo trabalho foi agendado.'
-        : 'Todos os veículos prontos já estão agendados ou em publicação.',
+      message:
+        remainingCapacity === 0
+          ? 'A capacidade diária de publicações já foi atingida; nenhum novo trabalho foi agendado.'
+          : 'Todos os veículos prontos já estão agendados ou em publicação.',
     }
   }
 
   const eligibleVehicles = vehicles
-    .filter(vehicle => publicationReadinessIssues(vehicle, vehicle.imageCount, false).length === 0)
-    .filter(vehicle => !publicationDuplicateRisk(db, organizationId, vehicle.id))
-    .filter(vehicle=>findBestAccountForVehicle(db,organizationId,vehicle.id)!==null)
-    .slice(0,remainingCapacity)
-  if(!eligibleVehicles.length){
+    .filter(
+      (vehicle) => publicationReadinessIssues(vehicle, vehicle.imageCount, false).length === 0,
+    )
+    .filter((vehicle) => !publicationDuplicateRisk(db, organizationId, vehicle.id))
+    .filter((vehicle) => findBestAccountForVehicle(db, organizationId, vehicle.id) !== null)
+    .slice(0, remainingCapacity)
+  if (!eligibleVehicles.length) {
     return {
-      ok:true,processedCount:0,jobsCreated:0,descriptionsOptimized:0,assignments:[],
-      message:'Nenhum veículo pronto tem cadastro completo, fotos e perfil elegível para publicação.',
+      ok: true,
+      processedCount: 0,
+      jobsCreated: 0,
+      descriptionsOptimized: 0,
+      assignments: [],
+      message:
+        'Nenhum veículo pronto tem cadastro completo, fotos e perfil elegível para publicação.',
     }
   }
 
@@ -447,9 +569,13 @@ export async function runAutopilotPipeline(db: DatabaseSync, organizationId: num
   let descriptionsOptimized = 0
 
   // Existing upcoming jobs to avoid schedule collision
-  const existingJobs = db.prepare(`SELECT social_account_id accountId, scheduled_at scheduledAt FROM publication_jobs
+  const existingJobs = db
+    .prepare(
+      `SELECT social_account_id accountId, scheduled_at scheduledAt FROM publication_jobs
     WHERE organization_id = ? AND scheduled_at IS NOT NULL AND datetime(scheduled_at) > CURRENT_TIMESTAMP
-    AND status IN ('pending', 'filling', 'error', 'awaiting_confirmation')`).all(organizationId) as Array<{ accountId: number; scheduledAt: string }>
+    AND status IN ('pending', 'filling', 'error', 'awaiting_confirmation')`,
+    )
+    .all(organizationId) as Array<{ accountId: number; scheduledAt: string }>
 
   const accountSchedules = new Map<number, number[]>()
   const accountNextAllowedAt = new Map<number, number>()
@@ -457,27 +583,44 @@ export async function runAutopilotPipeline(db: DatabaseSync, organizationId: num
     const ts = Date.parse(item.scheduledAt)
     if (Number.isFinite(ts)) {
       accountSchedules.set(item.accountId, [...(accountSchedules.get(item.accountId) || []), ts])
-      accountNextAllowedAt.set(item.accountId, Math.max(accountNextAllowedAt.get(item.accountId) || 0, ts))
+      accountNextAllowedAt.set(
+        item.accountId,
+        Math.max(accountNextAllowedAt.get(item.accountId) || 0, ts),
+      )
     }
   }
-  const completedJobs = db.prepare(`SELECT social_account_id accountId,MAX(updated_at) completedAt FROM publication_jobs
-    WHERE organization_id=? AND status IN ('completed','removed') GROUP BY social_account_id`)
+  const completedJobs = db
+    .prepare(
+      `SELECT social_account_id accountId,MAX(updated_at) completedAt FROM publication_jobs
+    WHERE organization_id=? AND status IN ('completed','removed') GROUP BY social_account_id`,
+    )
     .all(organizationId) as Array<{ accountId: number; completedAt: string }>
   for (const item of completedJobs) {
     const completedAt = Date.parse(`${item.completedAt.replace(' ', 'T')}Z`)
     if (Number.isFinite(completedAt)) {
       const nextAllowedAt = completedAt + executionIntervalMinutes * 60000
-      accountNextAllowedAt.set(item.accountId, Math.max(accountNextAllowedAt.get(item.accountId) || 0, nextAllowedAt))
+      accountNextAllowedAt.set(
+        item.accountId,
+        Math.max(accountNextAllowedAt.get(item.accountId) || 0, nextAllowedAt),
+      )
     }
   }
 
-  const aiConf = db.prepare('SELECT gemini_api_key geminiApiKey, openai_api_key openaiApiKey, ai_provider aiProvider FROM organization_settings WHERE organization_id = ?')
-    .get(organizationId) as { geminiApiKey?: string; openaiApiKey?: string; aiProvider?: string } | undefined
+  const aiConf = db
+    .prepare(
+      'SELECT gemini_api_key geminiApiKey, openai_api_key openaiApiKey, ai_provider aiProvider FROM organization_settings WHERE organization_id = ?',
+    )
+    .get(organizationId) as
+    { geminiApiKey?: string; openaiApiKey?: string; aiProvider?: string } | undefined
   const aiProviderSettings = resolveAIProviderSettings(aiConf)
 
   const optimizedDescriptions = new Map<number, string>()
   for (const vehicle of eligibleVehicles) {
-    if (!vehicle.description || vehicle.description.length < 60 || vehicle.description.includes('{ano}')) {
+    if (
+      !vehicle.description ||
+      vehicle.description.length < 60 ||
+      vehicle.description.includes('{ano}')
+    ) {
       const input: VehicleInput = {
         year: vehicle.year,
         make: vehicle.make,
@@ -491,7 +634,10 @@ export async function runAutopilotPipeline(db: DatabaseSync, organizationId: num
         condition: vehicle.condition,
         location: vehicle.location,
       }
-      const generated = await generateVehicleDescription(input, { tone: 'vendedor', ...aiProviderSettings })
+      const generated = await generateVehicleDescription(input, {
+        tone: 'vendedor',
+        ...aiProviderSettings,
+      })
       const tags = generateVehicleHashtags(input)
       optimizedDescriptions.set(vehicle.id, `${generated.description}\n\n${tags.join(' ')}`)
     }
@@ -501,14 +647,18 @@ export async function runAutopilotPipeline(db: DatabaseSync, organizationId: num
   try {
     for (const vehicle of eligibleVehicles) {
       const optimizedDescription = optimizedDescriptions.get(vehicle.id)
-      const effectiveVehicle = { ...vehicle, description: optimizedDescription || vehicle.description }
+      const effectiveVehicle = {
+        ...vehicle,
+        description: optimizedDescription || vehicle.description,
+      }
       if (publicationReadinessIssues(effectiveVehicle, vehicle.imageCount).length) continue
       if (publicationDuplicateRisk(db, organizationId, vehicle.id)) continue
       const best = findBestAccountForVehicle(db, organizationId, vehicle.id)
       if (!best) continue
       if (optimizedDescription) {
-        db.prepare('UPDATE vehicles SET description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?')
-          .run(optimizedDescription, vehicle.id, organizationId)
+        db.prepare(
+          'UPDATE vehicles SET description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?',
+        ).run(optimizedDescription, vehicle.id, organizationId)
         descriptionsOptimized++
       }
 
@@ -518,29 +668,51 @@ export async function runAutopilotPipeline(db: DatabaseSync, organizationId: num
       // Step C: Calculate optimal schedule
       const existingTimestamps = accountSchedules.get(targetAccountId) || []
       const referenceTime = Math.max(Date.now(), accountNextAllowedAt.get(targetAccountId) || 0)
-      const optimal = calculateOptimalSchedule({ existingTimestamps, accountId: targetAccountId, referenceDate: new Date(referenceTime) })
+      const optimal = calculateOptimalSchedule({
+        existingTimestamps,
+        accountId: targetAccountId,
+        referenceDate: new Date(referenceTime),
+      })
       accountSchedules.set(targetAccountId, [...existingTimestamps, optimal.scheduledAt.getTime()])
-      accountNextAllowedAt.set(targetAccountId, optimal.scheduledAt.getTime() + executionIntervalMinutes * 60000)
+      accountNextAllowedAt.set(
+        targetAccountId,
+        optimal.scheduledAt.getTime() + executionIntervalMinutes * 60000,
+      )
 
       // Step D: Insert into publication jobs
-      const priorityRow = db.prepare(`SELECT COALESCE(MAX(queue_priority), 0) + 1 val FROM publication_jobs
-        WHERE organization_id = ? AND social_account_id = ? AND status IN ('pending', 'filling', 'error', 'awaiting_confirmation')`)
+      const priorityRow = db
+        .prepare(
+          `SELECT COALESCE(MAX(queue_priority), 0) + 1 val FROM publication_jobs
+        WHERE organization_id = ? AND social_account_id = ? AND status IN ('pending', 'filling', 'error', 'awaiting_confirmation')`,
+        )
         .get(organizationId, targetAccountId) as { val: number }
 
-      const insert = db.prepare(`INSERT INTO publication_jobs (
+      const insert = db
+        .prepare(
+          `INSERT INTO publication_jobs (
         organization_id, vehicle_id, social_account_id, status, scheduled_at, queue_priority, retry_count, max_retries
-      ) VALUES (?, ?, ?, 'pending', ?, ?, 0, MAX(1,MIN(10,COALESCE((SELECT max_retries FROM organization_settings WHERE organization_id=?),3))))`)
-        .run(organizationId, vehicle.id, targetAccountId, optimal.isoString, priorityRow.val, organizationId)
+      ) VALUES (?, ?, ?, 'pending', ?, ?, 0, MAX(1,MIN(10,COALESCE((SELECT max_retries FROM organization_settings WHERE organization_id=?),3))))`,
+        )
+        .run(
+          organizationId,
+          vehicle.id,
+          targetAccountId,
+          optimal.isoString,
+          priorityRow.val,
+          organizationId,
+        )
 
       const jobId = Number(insert.lastInsertRowid)
 
       // Record event
-      db.prepare(`INSERT INTO publication_job_events (organization_id, publication_job_id, created_by, event_type, details)
-        VALUES (?, ?, ?, 'autopilot_scheduled', ?)`).run(
+      db.prepare(
+        `INSERT INTO publication_job_events (organization_id, publication_job_id, created_by, event_type, details)
+        VALUES (?, ?, ?, 'autopilot_scheduled', ?)`,
+      ).run(
         organizationId,
         jobId,
         userId,
-        JSON.stringify({ scheduledAt: optimal.isoString, window: optimal.window, automated: true })
+        JSON.stringify({ scheduledAt: optimal.isoString, window: optimal.window, automated: true }),
       )
 
       assignments.push({
@@ -571,10 +743,18 @@ export async function runAutopilotPipeline(db: DatabaseSync, organizationId: num
 /**
  * Optimizes descriptions for all vehicles in inventory that have weak or missing text.
  */
-export async function batchOptimizeDescriptions(db: DatabaseSync, organizationId: number, tone: CopyTone = 'vendedor') {
-  const vehicles = db.prepare(`SELECT id, year, make, model, trim, price, km, description,
+export async function batchOptimizeDescriptions(
+  db: DatabaseSync,
+  organizationId: number,
+  tone: CopyTone = 'vendedor',
+) {
+  const vehicles = db
+    .prepare(
+      `SELECT id, year, make, model, trim, price, km, description,
     exterior_color exteriorColor, transmission, fuel_type fuelType, vehicle_condition condition, location
-    FROM vehicles WHERE organization_id = ?`).all(organizationId) as Array<{
+    FROM vehicles WHERE organization_id = ?`,
+    )
+    .all(organizationId) as Array<{
     id: number
     year: number
     make: string
@@ -590,8 +770,12 @@ export async function batchOptimizeDescriptions(db: DatabaseSync, organizationId
     location: string
   }>
 
-  const aiConf = db.prepare('SELECT gemini_api_key geminiApiKey, openai_api_key openaiApiKey, ai_provider aiProvider FROM organization_settings WHERE organization_id = ?')
-    .get(organizationId) as { geminiApiKey?: string; openaiApiKey?: string; aiProvider?: string } | undefined
+  const aiConf = db
+    .prepare(
+      'SELECT gemini_api_key geminiApiKey, openai_api_key openaiApiKey, ai_provider aiProvider FROM organization_settings WHERE organization_id = ?',
+    )
+    .get(organizationId) as
+    { geminiApiKey?: string; openaiApiKey?: string; aiProvider?: string } | undefined
   const aiProviderSettings = resolveAIProviderSettings(aiConf)
 
   let updated = 0
@@ -613,8 +797,9 @@ export async function batchOptimizeDescriptions(db: DatabaseSync, organizationId
       const generated = await generateVehicleDescription(input, { tone, ...aiProviderSettings })
       const tags = generateVehicleHashtags(input)
       const fullDesc = `${generated.description}\n\n${tags.join(' ')}`
-      db.prepare('UPDATE vehicles SET description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?')
-        .run(fullDesc, v.id, organizationId)
+      db.prepare(
+        'UPDATE vehicles SET description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?',
+      ).run(fullDesc, v.id, organizationId)
       updated++
     }
   }
@@ -624,17 +809,35 @@ export async function batchOptimizeDescriptions(db: DatabaseSync, organizationId
 /**
  * Natural language command dispatcher for conversational operations.
  */
-export async function executeAgentCommand(db: DatabaseSync, organizationId: number, userId: number, prompt: string): Promise<AgentCommandResult> {
+export async function executeAgentCommand(
+  db: DatabaseSync,
+  organizationId: number,
+  userId: number,
+  prompt: string,
+): Promise<AgentCommandResult> {
   const p = prompt.toLowerCase().trim()
-  const isQuestion = p.includes('?')
-    || /^(como|qual|quais|o que|por que|porque|quando|onde|quem)\b/.test(p)
-    || /\b(me explique|me diga|explique como|pode explicar|poderia explicar|gostaria de saber|gostaria de entender|quero saber|quero entender|pode me dizer)\b/.test(p)
-    || /\bcomo (posso|poderia|devo|funciona)\b/.test(p)
-  const hasExplicitCommand = /\b(executar|execute|rodar|rode|iniciar|inicie|agendar|agende|publicar|publique|colocar|coloque|adicionar|adicione|otimizar|otimize|melhorar|melhore|gerar|gere|reescrever|reescreva|reordenar|reordene|curar|cure|reorganizar|reorganize)\b/.test(p)
+  const isQuestion =
+    p.includes('?') ||
+    /^(como|qual|quais|o que|por que|porque|quando|onde|quem)\b/.test(p) ||
+    /\b(me explique|me diga|explique como|pode explicar|poderia explicar|gostaria de saber|gostaria de entender|quero saber|quero entender|pode me dizer)\b/.test(
+      p,
+    ) ||
+    /\bcomo (posso|poderia|devo|funciona)\b/.test(p)
+  const hasExplicitCommand =
+    /\b(executar|execute|rodar|rode|iniciar|inicie|agendar|agende|publicar|publique|colocar|coloque|adicionar|adicione|otimizar|otimize|melhorar|melhore|gerar|gere|reescrever|reescreva|reordenar|reordene|curar|cure|reorganizar|reorganize)\b/.test(
+      p,
+    )
 
   // Intent 1: Autopilot / Schedule
-  if (!isQuestion && hasExplicitCommand
-    && (p.includes('agendar') || p.includes('publicar') || p.includes('piloto') || p.includes('autopilot') || p.includes('fila'))) {
+  if (
+    !isQuestion &&
+    hasExplicitCommand &&
+    (p.includes('agendar') ||
+      p.includes('publicar') ||
+      p.includes('piloto') ||
+      p.includes('autopilot') ||
+      p.includes('fila'))
+  ) {
     const result = await runAutopilotPipeline(db, organizationId, userId)
     return {
       ok: true,
@@ -646,8 +849,15 @@ export async function executeAgentCommand(db: DatabaseSync, organizationId: numb
   }
 
   // Intent 2: Optimize Descriptions
-  if (!isQuestion && hasExplicitCommand
-    && (p.includes('otimiz') || p.includes('descriç') || p.includes('texto') || p.includes('copy') || p.includes('hashtag'))) {
+  if (
+    !isQuestion &&
+    hasExplicitCommand &&
+    (p.includes('otimiz') ||
+      p.includes('descriç') ||
+      p.includes('texto') ||
+      p.includes('copy') ||
+      p.includes('hashtag'))
+  ) {
     let tone: CopyTone = 'vendedor'
     if (p.includes('profissional')) tone = 'profissional'
     if (p.includes('amig') || p.includes('amigável')) tone = 'amigável'
@@ -664,7 +874,13 @@ export async function executeAgentCommand(db: DatabaseSync, organizationId: numb
   }
 
   // Intent 3: Audit Inventory
-  if (p.includes('audit') || p.includes('saúde') || p.includes('diagnóst') || p.includes('status') || p.includes('estoque')) {
+  if (
+    p.includes('audit') ||
+    p.includes('saúde') ||
+    p.includes('diagnóst') ||
+    p.includes('status') ||
+    p.includes('estoque')
+  ) {
     const audit = auditInventory(db, organizationId)
     return {
       ok: true,
@@ -676,18 +892,39 @@ export async function executeAgentCommand(db: DatabaseSync, organizationId: numb
   }
 
   // Intent 4: Curate Groups
-  if (!isQuestion && hasExplicitCommand && (p.includes('grupo') || p.includes('curador') || p.includes('reordenar'))) {
-    const rawGroups = db.prepare(`SELECT id, name, url, group_key groupKey, active, priority, success_count successCount, failure_count failureCount, last_found_at lastFoundAt
-      FROM marketplace_groups WHERE organization_id = ? ORDER BY priority, id`).all(organizationId) as Array<{
-      id: number; name: string; url: string; groupKey: string; active: number; priority: number; successCount: number; failureCount: number; lastFoundAt?: string
+  if (
+    !isQuestion &&
+    hasExplicitCommand &&
+    (p.includes('grupo') || p.includes('curador') || p.includes('reordenar'))
+  ) {
+    const rawGroups = db
+      .prepare(
+        `SELECT id, name, url, group_key groupKey, active, priority, success_count successCount, failure_count failureCount, last_found_at lastFoundAt
+      FROM marketplace_groups WHERE organization_id = ? ORDER BY priority, id`,
+      )
+      .all(organizationId) as Array<{
+      id: number
+      name: string
+      url: string
+      groupKey: string
+      active: number
+      priority: number
+      successCount: number
+      failureCount: number
+      lastFoundAt?: string
     }>
-    const curated = curateMarketplaceGroups(rawGroups.map(g => ({ ...g, active: Boolean(g.active) })), '', 10)
+    const curated = curateMarketplaceGroups(
+      rawGroups.map((g) => ({ ...g, active: Boolean(g.active) })),
+      '',
+      10,
+    )
     db.exec('BEGIN')
     try {
       for (let i = 0; i < curated.length; i++) {
         const item = curated[i]
-        db.prepare('UPDATE marketplace_groups SET priority = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?')
-          .run(i + 1, item.recommendedActive ? 1 : 0, item.group.id, organizationId)
+        db.prepare(
+          'UPDATE marketplace_groups SET priority = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?',
+        ).run(i + 1, item.recommendedActive ? 1 : 0, item.group.id, organizationId)
       }
       db.exec('COMMIT')
     } catch (err) {

@@ -1,137 +1,286 @@
-const API='http://127.0.0.1:3333/api'
-const $=id=>document.getElementById(id)
-let token='',activeAccountId=0,availableAccounts=[]
-let instanceId=''
-let loadAccountsSeq=0,loadQueueSeq=0,openingJob=false
-async function request(path,options={}){
-  const response=await fetch(API+path,{...options,signal:options.signal||AbortSignal.timeout(15000),headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,...options.headers}})
-  const text=await response.text()
+const API = 'http://127.0.0.1:3333/api'
+const $ = (id) => document.getElementById(id)
+let token = '',
+  activeAccountId = 0,
+  availableAccounts = []
+let instanceId = ''
+let loadAccountsSeq = 0,
+  loadQueueSeq = 0,
+  openingJob = false
+async function request(path, options = {}) {
+  const response = await fetch(API + path, {
+    ...options,
+    signal: options.signal || AbortSignal.timeout(15000),
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer ' + token,
+      ...options.headers,
+    },
+  })
+  const text = await response.text()
   let data
-  try{data=text?JSON.parse(text):{}}catch{throw new Error(`Resposta inválida (HTTP ${response.status})`)}
-  if(!response.ok)throw new Error(data.error||`Falha (HTTP ${response.status})`)
+  try {
+    data = text ? JSON.parse(text) : {}
+  } catch {
+    throw new Error(`Resposta inválida (HTTP ${response.status})`)
+  }
+  if (!response.ok) throw new Error(data.error || `Falha (HTTP ${response.status})`)
   return data
 }
-function setConnected(connected,user){$('loginView').hidden=connected;$('queueView').hidden=!connected;$('apiState').className=connected?'online':'';if(user)$('userName').textContent=user.name}
-function statusLabel(status){return({pending:'Pendente',filling:'Preenchendo',error:'Revisar erro',awaiting_confirmation:'Preenchido'})[status]||status}
-async function loadAccounts(){
-  const seq=++loadAccountsSeq
-  $('queue').innerHTML='<div class="empty">Carregando perfis...</div>'
-  try{
-    const {accounts}=await request('/extension/accounts')
-    if(seq!==loadAccountsSeq)return
-    const {activeAccountId:saved}=await chrome.storage.local.get('activeAccountId')
-    if(seq!==loadAccountsSeq)return
-    availableAccounts=accounts
-    const selected=accounts.find(account=>account.id===Number(saved))||accounts[0]
-    $('accountSelect').innerHTML=''
-    accounts.forEach(account=>{const option=document.createElement('option');option.value=String(account.id);option.textContent=`${account.label} · ${account.owner}`;$('accountSelect').appendChild(option)})
-    if(!selected){activeAccountId=0;$('profileMeta').textContent='Nenhum perfil associado. Cadastre um em Equipe e contas.';$('accountSelect').disabled=true;$('autoRun').disabled=true;$('queue').innerHTML='<div class="empty">Associe um perfil do Brave antes de usar a fila.</div>';return}
-    activeAccountId=selected.id;$('accountSelect').disabled=false;$('accountSelect').value=String(selected.id);$('autoRun').disabled=false;updateProfileMeta(selected)
-    await chrome.storage.local.set({activeAccountId})
-    if(seq!==loadAccountsSeq)return
-    updateAutoRunButton();loadQueue()
-  }catch(error){if(seq===loadAccountsSeq)$('queue').innerHTML=`<div class="empty">${escapeHtml(error.message)}</div>`}
+function setConnected(connected, user) {
+  $('loginView').hidden = connected
+  $('queueView').hidden = !connected
+  $('apiState').className = connected ? 'online' : ''
+  if (user) $('userName').textContent = user.name
 }
-function updateProfileMeta(account){$('profileMeta').textContent=`Perfil local: ${account.browserProfile||'não informado'} · ${account.status==='connected'?'conectado':'aguardando conexão'}`}
-function loadQueue(){
-  const seq=++loadQueueSeq
-  if(!activeAccountId)return
-  $('queue').innerHTML='<div class="empty">Carregando...</div>'
-  request('/extension/queue?accountId='+encodeURIComponent(activeAccountId)).then(({jobs,account,automation})=>{
-    if(seq!==loadQueueSeq)return
-    if(account)updateProfileMeta({...account,status:'connected'})
-    const steps=['Preencher dados']
-    if(automation?.autoAdvance)steps.push('Avançar')
-    if(automation?.fillGroups)steps.push(`${automation.targetGroups?.length||0} grupos`)
-    if(automation?.autoPublish)steps.push('Publicar')
-    $('automationTitle').textContent=automation?.autoPublish?'Publicação automática ativa':'Confirmação final manual'
-    $('automationSummary').textContent=steps.join(' → ')+(automation?.autoPublish?'':' → revisar e publicar manualmente')
-    $('queue').innerHTML=jobs.length?'':'<div class="empty">Nenhum trabalho pendente para este perfil.<br><small>No painel, use ⋯ → Adicionar à fila e escolha este perfil.</small></div>'
-    jobs.forEach(job=>{const card=document.createElement('div');const locked=Boolean(job.locked||job.publishUncertain);card.className=`vehicle ${locked?'locked-job':job.jobStatus==='error'?'error-job':job.jobStatus==='filling'?'filling-job':job.jobStatus==='awaiting_confirmation'?'filled-job':''}`;const action=job.publishUncertain?'Resultado de publicação a confirmar':locked?'Em uso em outra aba':job.jobStatus==='pending'?'Abrir e preencher':job.jobStatus==='awaiting_confirmation'?'Preencher novamente':'Retomar preenchimento';card.innerHTML=`<div class="vehicle-top"><strong>${Number(job.year)} ${escapeHtml(job.make)} ${escapeHtml(job.model)}</strong><span class="status ${locked?'locked':escapeHtml(job.jobStatus)}">${job.publishUncertain?'Resultado incerto':locked?'Em execução':statusLabel(job.jobStatus)}</span></div><small>${Number(job.km).toLocaleString('pt-BR')} km · ${Number(job.price).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0})} · ${Number(job.imageCount||0)} fotos</small><div class="job-meta">Trabalho #${Number(job.jobId)} · ${escapeHtml(job.accountLabel)}${job.errorCode?' · '+escapeHtml(job.errorCode):''}</div><button data-id="${Number(job.jobId)}" ${locked?'disabled title="Resolva a pendência no painel antes de repetir."':''}>${action}</button>`;if(!locked)card.querySelector('button').onclick=()=>prepare(job.jobId);$('queue').appendChild(card)})
-  }).catch(error=>{if(seq===loadQueueSeq)$('queue').innerHTML=`<div class="empty">${escapeHtml(error.message)}</div>`})
+function statusLabel(status) {
+  return (
+    {
+      pending: 'Pendente',
+      filling: 'Preenchendo',
+      error: 'Revisar erro',
+      awaiting_confirmation: 'Preenchido',
+    }[status] || status
+  )
 }
-function prepare(jobId){
-  if(!instanceId){alert('A identificação local da extensão ainda está carregando. Tente novamente.');return}
-  chrome.storage.local.get(['pendingJob'],state=>{
-    if(state.pendingJob?.jobId){
-      chrome.tabs.get(state.pendingJob.tabId,tab=>{
-        if(!chrome.runtime.lastError&&tab){
-          chrome.tabs.update(tab.id,{active:true})
+async function loadAccounts() {
+  const seq = ++loadAccountsSeq
+  $('queue').innerHTML = '<div class="empty">Carregando perfis...</div>'
+  try {
+    const { accounts } = await request('/extension/accounts')
+    if (seq !== loadAccountsSeq) return
+    const { activeAccountId: saved } = await chrome.storage.local.get('activeAccountId')
+    if (seq !== loadAccountsSeq) return
+    availableAccounts = accounts
+    const selected = accounts.find((account) => account.id === Number(saved)) || accounts[0]
+    $('accountSelect').innerHTML = ''
+    accounts.forEach((account) => {
+      const option = document.createElement('option')
+      option.value = String(account.id)
+      option.textContent = `${account.label} · ${account.owner}`
+      $('accountSelect').appendChild(option)
+    })
+    if (!selected) {
+      activeAccountId = 0
+      $('profileMeta').textContent = 'Nenhum perfil associado. Cadastre um em Equipe e contas.'
+      $('accountSelect').disabled = true
+      $('autoRun').disabled = true
+      $('queue').innerHTML =
+        '<div class="empty">Associe um perfil do Brave antes de usar a fila.</div>'
+      return
+    }
+    activeAccountId = selected.id
+    $('accountSelect').disabled = false
+    $('accountSelect').value = String(selected.id)
+    $('autoRun').disabled = false
+    updateProfileMeta(selected)
+    await chrome.storage.local.set({ activeAccountId })
+    if (seq !== loadAccountsSeq) return
+    updateAutoRunButton()
+    loadQueue()
+  } catch (error) {
+    if (seq === loadAccountsSeq)
+      $('queue').innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`
+  }
+}
+function updateProfileMeta(account) {
+  $('profileMeta').textContent =
+    `Perfil local: ${account.browserProfile || 'não informado'} · ${account.status === 'connected' ? 'conectado' : 'aguardando conexão'}`
+}
+function loadQueue() {
+  const seq = ++loadQueueSeq
+  if (!activeAccountId) return
+  $('queue').innerHTML = '<div class="empty">Carregando...</div>'
+  request('/extension/queue?accountId=' + encodeURIComponent(activeAccountId))
+    .then(({ jobs, account, automation }) => {
+      if (seq !== loadQueueSeq) return
+      if (account) updateProfileMeta({ ...account, status: 'connected' })
+      const steps = ['Preencher dados']
+      if (automation?.autoAdvance) steps.push('Avançar')
+      if (automation?.fillGroups) steps.push(`${automation.targetGroups?.length || 0} grupos`)
+      if (automation?.autoPublish) steps.push('Publicar')
+      $('automationTitle').textContent = automation?.autoPublish
+        ? 'Publicação automática ativa'
+        : 'Confirmação final manual'
+      $('automationSummary').textContent =
+        steps.join(' → ') + (automation?.autoPublish ? '' : ' → revisar e publicar manualmente')
+      $('queue').innerHTML = jobs.length
+        ? ''
+        : '<div class="empty">Nenhum trabalho pendente para este perfil.<br><small>No painel, use ⋯ → Adicionar à fila e escolha este perfil.</small></div>'
+      jobs.forEach((job) => {
+        const card = document.createElement('div')
+        const locked = Boolean(job.locked || job.publishUncertain)
+        card.className = `vehicle ${locked ? 'locked-job' : job.jobStatus === 'error' ? 'error-job' : job.jobStatus === 'filling' ? 'filling-job' : job.jobStatus === 'awaiting_confirmation' ? 'filled-job' : ''}`
+        const action = job.publishUncertain
+          ? 'Resultado de publicação a confirmar'
+          : locked
+            ? 'Em uso em outra aba'
+            : job.jobStatus === 'pending'
+              ? 'Abrir e preencher'
+              : job.jobStatus === 'awaiting_confirmation'
+                ? 'Preencher novamente'
+                : 'Retomar preenchimento'
+        card.innerHTML = `<div class="vehicle-top"><strong>${Number(job.year)} ${escapeHtml(job.make)} ${escapeHtml(job.model)}</strong><span class="status ${locked ? 'locked' : escapeHtml(job.jobStatus)}">${job.publishUncertain ? 'Resultado incerto' : locked ? 'Em execução' : statusLabel(job.jobStatus)}</span></div><small>${Number(job.km).toLocaleString('pt-BR')} km · ${Number(job.price).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })} · ${Number(job.imageCount || 0)} fotos</small><div class="job-meta">Trabalho #${Number(job.jobId)} · ${escapeHtml(job.accountLabel)}${job.errorCode ? ' · ' + escapeHtml(job.errorCode) : ''}</div><button data-id="${Number(job.jobId)}" ${locked ? 'disabled title="Resolva a pendência no painel antes de repetir."' : ''}>${action}</button>`
+        if (!locked) card.querySelector('button').onclick = () => prepare(job.jobId)
+        $('queue').appendChild(card)
+      })
+    })
+    .catch((error) => {
+      if (seq === loadQueueSeq)
+        $('queue').innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`
+    })
+}
+function prepare(jobId) {
+  if (!instanceId) {
+    alert('A identificação local da extensão ainda está carregando. Tente novamente.')
+    return
+  }
+  chrome.storage.local.get(['pendingJob'], (state) => {
+    if (state.pendingJob?.jobId) {
+      chrome.tabs.get(state.pendingJob.tabId, (tab) => {
+        if (!chrome.runtime.lastError && tab) {
+          chrome.tabs.update(tab.id, { active: true })
           alert(`O trabalho #${state.pendingJob.jobId} já está ativo nesta extensão.`)
           return
         }
-        chrome.storage.local.remove('pendingJob',()=>openJob(jobId))
+        chrome.storage.local.remove('pendingJob', () => openJob(jobId))
       })
       return
     }
     openJob(jobId)
   })
 }
-async function sendWhenReady(tabId,message){
-  const deadline=Date.now()+45000
-  while(Date.now()<deadline){
-    const tab=await chrome.tabs.get(tabId)
-    if(tab.status==='complete'){
-      const sent=await new Promise(resolve=>chrome.tabs.sendMessage(tabId,message,()=>resolve(!chrome.runtime.lastError)))
-      if(sent)return
+async function sendWhenReady(tabId, message) {
+  const deadline = Date.now() + 45000
+  while (Date.now() < deadline) {
+    const tab = await chrome.tabs.get(tabId)
+    if (tab.status === 'complete') {
+      const sent = await new Promise((resolve) =>
+        chrome.tabs.sendMessage(tabId, message, () => resolve(!chrome.runtime.lastError)),
+      )
+      if (sent) return
     }
-    await new Promise(resolve=>setTimeout(resolve,300))
+    await new Promise((resolve) => setTimeout(resolve, 300))
   }
   throw new Error('A aba do Marketplace não carregou a extensão a tempo.')
 }
-async function openJob(jobId){
-  if(openingJob)return
-  openingJob=true
+async function openJob(jobId) {
+  if (openingJob) return
+  openingJob = true
   let tab
-  let prepared=false
-  try{
-    const accountId=activeAccountId
-    tab=await chrome.tabs.create({url:'https://www.facebook.com/marketplace/create/vehicle'})
-    const task=await request('/extension/jobs/'+jobId+'/prepare',{method:'POST',body:JSON.stringify({accountId,instanceId,tabId:tab.id,document:'/marketplace/create/vehicle'})})
-    await chrome.storage.local.set({pendingJob:task})
-    prepared=true
-    await sendWhenReady(tab.id,{type:'FILL_VEHICLE',task})
-  }catch(error){
-    if(tab?.id&&!prepared)await chrome.tabs.remove(tab.id).catch(()=>{})
+  let prepared = false
+  try {
+    const accountId = activeAccountId
+    tab = await chrome.tabs.create({ url: 'https://www.facebook.com/marketplace/create/vehicle' })
+    const task = await request('/extension/jobs/' + jobId + '/prepare', {
+      method: 'POST',
+      body: JSON.stringify({
+        accountId,
+        instanceId,
+        tabId: tab.id,
+        document: '/marketplace/create/vehicle',
+      }),
+    })
+    await chrome.storage.local.set({ pendingJob: task })
+    prepared = true
+    await sendWhenReady(tab.id, { type: 'FILL_VEHICLE', task })
+  } catch (error) {
+    if (tab?.id && !prepared) await chrome.tabs.remove(tab.id).catch(() => {})
     alert(error.message)
-  }finally{openingJob=false}
+  } finally {
+    openingJob = false
+  }
 }
-function updateAutoRunButton(){
-  chrome.storage.local.get('autoRun',({autoRun})=>{
-    $('autoRun').textContent=autoRun?'Pausar consumo automático':'Iniciar consumo automático'
-    $('autoRun').classList.toggle('running',Boolean(autoRun))
-    $('autoRun').setAttribute('aria-pressed',String(Boolean(autoRun)))
+function updateAutoRunButton() {
+  chrome.storage.local.get('autoRun', ({ autoRun }) => {
+    $('autoRun').textContent = autoRun ? 'Pausar consumo automático' : 'Iniciar consumo automático'
+    $('autoRun').classList.toggle('running', Boolean(autoRun))
+    $('autoRun').setAttribute('aria-pressed', String(Boolean(autoRun)))
   })
 }
-function escapeHtml(value){return String(value).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
-$('login').onclick=async()=>{
-  $('loginError').textContent=''
-  $('login').disabled=true
-  try{
-    const data=await request('/auth/login',{method:'POST',body:JSON.stringify({email:$('email').value,password:$('password').value})})
-    token=data.token
-    await chrome.storage.local.set({token,user:data.user})
-    setConnected(true,data.user)
+function escapeHtml(value) {
+  return String(value).replace(
+    /[&<>"']/g,
+    (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch],
+  )
+}
+$('login').onclick = async () => {
+  $('loginError').textContent = ''
+  $('login').disabled = true
+  try {
+    const data = await request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: $('email').value, password: $('password').value }),
+    })
+    token = data.token
+    await chrome.storage.local.set({ token, user: data.user })
+    setConnected(true, data.user)
     await loadAccounts()
-  }catch(error){$('loginError').textContent=error.message}
-  finally{$('password').value='';$('login').disabled=false}
+  } catch (error) {
+    $('loginError').textContent = error.message
+  } finally {
+    $('password').value = ''
+    $('login').disabled = false
+  }
 }
-$('logout').onclick=async()=>{
-  loadAccountsSeq++;loadQueueSeq++
-  const activeToken=token
-  try{
-    const response=await fetch(API+'/auth/logout',{method:'POST',headers:{Authorization:'Bearer '+activeToken}})
-    if(!response.ok)console.warn('AutoFlow: a sessão do servidor não foi revogada',response.status)
-  }catch(error){console.warn('AutoFlow: não foi possível revogar a sessão no servidor',error instanceof Error?error.message:String(error))}
-  chrome.storage.local.remove(['token','user','activeAccountId','pendingJob','autoRun'],()=>{token='';activeAccountId=0;setConnected(false);updateAutoRunButton()})
-}
-$('refresh').onclick=loadQueue
-$('autoRun').onclick=()=>chrome.storage.local.get('autoRun',({autoRun})=>{
-  const next=!autoRun
-  chrome.storage.local.set({autoRun:next},()=>{
+$('logout').onclick = async () => {
+  loadAccountsSeq++
+  loadQueueSeq++
+  const activeToken = token
+  try {
+    const response = await fetch(API + '/auth/logout', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + activeToken },
+    })
+    if (!response.ok)
+      console.warn('AutoFlow: a sessão do servidor não foi revogada', response.status)
+  } catch (error) {
+    console.warn(
+      'AutoFlow: não foi possível revogar a sessão no servidor',
+      error instanceof Error ? error.message : String(error),
+    )
+  }
+  chrome.storage.local.remove(['token', 'user', 'activeAccountId', 'pendingJob', 'autoRun'], () => {
+    token = ''
+    activeAccountId = 0
+    setConnected(false)
     updateAutoRunButton()
-    if(next)chrome.runtime.sendMessage({type:'AUTOFLOW_RUN_QUEUE'})
   })
+}
+$('refresh').onclick = loadQueue
+$('autoRun').onclick = () =>
+  chrome.storage.local.get('autoRun', ({ autoRun }) => {
+    const next = !autoRun
+    chrome.storage.local.set({ autoRun: next }, () => {
+      updateAutoRunButton()
+      if (next) chrome.runtime.sendMessage({ type: 'AUTOFLOW_RUN_QUEUE' })
+    })
+  })
+$('accountSelect').onchange = () => {
+  activeAccountId = Number($('accountSelect').value)
+  const account = availableAccounts.find((item) => item.id === activeAccountId)
+  if (account) updateProfileMeta(account)
+  chrome.storage.local.set({ activeAccountId, autoRun: false }, () => {
+    updateAutoRunButton()
+    loadQueue()
+  })
+}
+chrome.storage.local.get(['token', 'user', 'instanceId'], (data) => {
+  instanceId =
+    data.instanceId ||
+    `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`
+  if (!data.instanceId) chrome.storage.local.set({ instanceId })
+  token = data.token || ''
+  if (token) {
+    request('/me')
+      .then(({ user }) => {
+        setConnected(true, user)
+        loadAccounts()
+      })
+      .catch(() =>
+        chrome.storage.local.remove(['token', 'user', 'activeAccountId', 'pendingJob'], () =>
+          setConnected(false),
+        ),
+      )
+  } else setConnected(false)
 })
-$('accountSelect').onchange=()=>{activeAccountId=Number($('accountSelect').value);const account=availableAccounts.find(item=>item.id===activeAccountId);if(account)updateProfileMeta(account);chrome.storage.local.set({activeAccountId,autoRun:false},()=>{updateAutoRunButton();loadQueue()})}
-chrome.storage.local.get(['token','user','instanceId'],data=>{instanceId=data.instanceId||`${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`;if(!data.instanceId)chrome.storage.local.set({instanceId});token=data.token||'';if(token){request('/me').then(({user})=>{setConnected(true,user);loadAccounts()}).catch(()=>chrome.storage.local.remove(['token','user','activeAccountId','pendingJob'],()=>setConnected(false)))}else setConnected(false)})

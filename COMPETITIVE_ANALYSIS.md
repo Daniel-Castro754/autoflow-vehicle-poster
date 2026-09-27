@@ -12,19 +12,19 @@ O trabalho atual prioriza integridade operacional: filas e leases por trabalho/p
 
 ## Comparação
 
-| Capacidade | AutoFlow atual | Referência pública | Leitura |
-|---|---|---|---|
-| Painel + extensão | Sim | MarketSync e FLUF | Base correta |
-| Sessão local, sem senha do Facebook no servidor | Sim | MarketSync, FLUF e projeto aberto | Manter |
-| Preenchimento de veículo | Preenche campos por rótulos e valida os valores antes de avançar | MarketSync | Cobertura real ainda depende de idioma e mudanças no DOM do Marketplace |
-| Fotos | Até 20 fotos, upload retomável, validação de decodificação e reordenação; a primeira é a capa | MarketSync envia em ordem; FLUF sincroniza edições | Não há seleção de capa separada da ordem |
-| Revisão/publicação final | Publicação manual por padrão; automação opcional, desativada por padrão e protegida por gates | MarketSync descreve revisão humana | Não tratar publicação automática como garantia de resultado; resultado incerto exige reconciliação |
-| Várias contas/perfis | Contas vinculadas a usuários e fila filtrada pelo perfil ativo | MarketSync usa contas por representante | A execução também verifica job, lease, aba e documento |
-| Estado da publicação | Fila, diagnóstico campo a campo, histórico, recuperação e estados de confirmação/remoção | FLUF descreve edição, remoção e sincronização | Testes de integração cobrem os contratos locais |
-| Prevenção de duplicidade | Bloqueia novos trabalhos incompatíveis e não repete automaticamente publicação ambígua | AutoPoster anuncia detecção de duplicados | Verificações locais não substituem reconciliação do anúncio no Facebook |
-| Operação em lote | Agendamento, pausa, retomada, prioridade e filtros da fila; ações de estoque em massa | FLUF descreve operações em massa | A importação por CSV/planilha ainda não está implementada |
-| Importação/sincronização de estoque | Não implementada | FLUF e ferramentas de concessionárias | Continua sendo uma frente futura independente |
-| Observabilidade | Relatórios agregados, ocorrências paginadas, métricas por vendedor/perfil e health monitor | Projeto FAP expõe progresso, falhas e resumo | Não há telemetria externa centralizada por padrão |
+| Capacidade                                      | AutoFlow atual                                                                                | Referência pública                                 | Leitura                                                                                            |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Painel + extensão                               | Sim                                                                                           | MarketSync e FLUF                                  | Base correta                                                                                       |
+| Sessão local, sem senha do Facebook no servidor | Sim                                                                                           | MarketSync, FLUF e projeto aberto                  | Manter                                                                                             |
+| Preenchimento de veículo                        | Preenche campos por rótulos e valida os valores antes de avançar                              | MarketSync                                         | Cobertura real ainda depende de idioma e mudanças no DOM do Marketplace                            |
+| Fotos                                           | Até 20 fotos, upload retomável, validação de decodificação e reordenação; a primeira é a capa | MarketSync envia em ordem; FLUF sincroniza edições | Não há seleção de capa separada da ordem                                                           |
+| Revisão/publicação final                        | Publicação manual por padrão; automação opcional, desativada por padrão e protegida por gates | MarketSync descreve revisão humana                 | Não tratar publicação automática como garantia de resultado; resultado incerto exige reconciliação |
+| Várias contas/perfis                            | Contas vinculadas a usuários e fila filtrada pelo perfil ativo                                | MarketSync usa contas por representante            | A execução também verifica job, lease, aba e documento                                             |
+| Estado da publicação                            | Fila, diagnóstico campo a campo, histórico, recuperação e estados de confirmação/remoção      | FLUF descreve edição, remoção e sincronização      | Testes de integração cobrem os contratos locais                                                    |
+| Prevenção de duplicidade                        | Bloqueia novos trabalhos incompatíveis e não repete automaticamente publicação ambígua        | AutoPoster anuncia detecção de duplicados          | Verificações locais não substituem reconciliação do anúncio no Facebook                            |
+| Operação em lote                                | Agendamento, pausa, retomada, prioridade e filtros da fila; ações de estoque em massa         | FLUF descreve operações em massa                   | A importação por CSV/planilha ainda não está implementada                                          |
+| Importação/sincronização de estoque             | Não implementada                                                                              | FLUF e ferramentas de concessionárias              | Continua sendo uma frente futura independente                                                      |
+| Observabilidade                                 | Relatórios agregados, ocorrências paginadas, métricas por vendedor/perfil e health monitor    | Projeto FAP expõe progresso, falhas e resumo       | Não há telemetria externa centralizada por padrão                                                  |
 
 ## O que o código aberto ensina
 
@@ -40,7 +40,7 @@ Segunda rodada de pesquisa, focada em procurar um caminho oficial (API/feed) par
 
 ### Integração oficial investigada naquela data
 
-As páginas consultadas então indicavam que a distribuição automática de catálogo de parceiros para o Marketplace havia sido descontinuada em 13/09/2021 e que o Commerce Manager tratava *Automotive Inventory Ads*. Reconfirme a documentação oficial da Meta antes de usar esta observação para decisões de compliance. O AutoFlow mantém a sessão no navegador local e não depende de enviar cookies ao servidor.
+As páginas consultadas então indicavam que a distribuição automática de catálogo de parceiros para o Marketplace havia sido descontinuada em 13/09/2021 e que o Commerce Manager tratava _Automotive Inventory Ads_. Reconfirme a documentação oficial da Meta antes de usar esta observação para decisões de compliance. O AutoFlow mantém a sessão no navegador local e não depende de enviar cookies ao servidor.
 
 ### Observações de política registradas naquela data
 
@@ -51,14 +51,14 @@ As páginas consultadas então indicavam que a distribuição automática de cat
 
 ### Concorrência 2026 (ferramentas novas encontradas nesta rodada)
 
-| Ferramenta | O que faz de diferente | Vale trazer para o AutoFlow? |
-|---|---|---|
-| [CARVID](https://www.carvidapp.com/facebook-marketplace-auto-poster/) | Cap de 10/dia com intervalo randomizado "mimic human behavior"; remove anúncio vendido em 24h automaticamente via DMS; leaderboard de posts/cliques/leads por vendedor | Sim — pacing randomizado e o gatilho de remoção em 24h |
-| [Owini](https://owini.ai/post/best-facebook-marketplace-posting-tool) | Digitação e cliques com atraso/movimento de mouse simulados; descrição única gerada por IA por anúncio | Sim — pacing humano no preenchimento da extensão |
-| [ZenLitePro](https://www.zenlitepro.com/) | 25–40 posts/dia por conta usando ambientes de navegador isolados + **proxies residenciais** | **Não** — extrapola o limite oficial de 10/dia e usa rotação de IP, exatamente o padrão que este documento já recomendava evitar |
-| Shiftly Auto | Processamento em lote espalhado ao longo de horas | Já está no roadmap (P1, item 8) |
-| DealerCenter Auto-Uploader | Puxa direto do DMS e roda "como se fosse manual" num PC Windows dedicado | Confirma a demanda por importação de estoque (P1, item 6) |
-| Bots abertos ([Ezee-Kits](https://github.com/Ezee-Kits/Facebook-Marketplace-Auto-Poster-Bot-Python-Pyppeteer-), [privacyrepo](https://github.com/privacyrepo/facebook-marketplace-autolisting-bot)) | Clicam em "Publicar" sozinhos; vários apagam e republicam o mesmo anúncio para subir no feed; nenhum documenta limite de taxa | **Não copiar** — evitar repetição artificial de anúncios e retries de resultado incerto, seja no modo manual ou automático |
+| Ferramenta                                                                                                                                                                                          | O que faz de diferente                                                                                                                                                 | Vale trazer para o AutoFlow?                                                                                                     |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| [CARVID](https://www.carvidapp.com/facebook-marketplace-auto-poster/)                                                                                                                               | Cap de 10/dia com intervalo randomizado "mimic human behavior"; remove anúncio vendido em 24h automaticamente via DMS; leaderboard de posts/cliques/leads por vendedor | Sim — pacing randomizado e o gatilho de remoção em 24h                                                                           |
+| [Owini](https://owini.ai/post/best-facebook-marketplace-posting-tool)                                                                                                                               | Digitação e cliques com atraso/movimento de mouse simulados; descrição única gerada por IA por anúncio                                                                 | Sim — pacing humano no preenchimento da extensão                                                                                 |
+| [ZenLitePro](https://www.zenlitepro.com/)                                                                                                                                                           | 25–40 posts/dia por conta usando ambientes de navegador isolados + **proxies residenciais**                                                                            | **Não** — extrapola o limite oficial de 10/dia e usa rotação de IP, exatamente o padrão que este documento já recomendava evitar |
+| Shiftly Auto                                                                                                                                                                                        | Processamento em lote espalhado ao longo de horas                                                                                                                      | Já está no roadmap (P1, item 8)                                                                                                  |
+| DealerCenter Auto-Uploader                                                                                                                                                                          | Puxa direto do DMS e roda "como se fosse manual" num PC Windows dedicado                                                                                               | Confirma a demanda por importação de estoque (P1, item 6)                                                                        |
+| Bots abertos ([Ezee-Kits](https://github.com/Ezee-Kits/Facebook-Marketplace-Auto-Poster-Bot-Python-Pyppeteer-), [privacyrepo](https://github.com/privacyrepo/facebook-marketplace-autolisting-bot)) | Clicam em "Publicar" sozinhos; vários apagam e republicam o mesmo anúncio para subir no feed; nenhum documenta limite de taxa                                          | **Não copiar** — evitar repetição artificial de anúncios e retries de resultado incerto, seja no modo manual ou automático       |
 
 ### Ajustes no roadmap por causa desta pesquisa
 
@@ -81,10 +81,10 @@ As páginas consultadas então indicavam que a distribuição automática de cat
 
 ### P1 histórico — operação diária
 
-7. Importação por CSV/planilha e, depois, sincronização com a fonte de estoque da loja. *(maior alavanca de produtividade segundo todos os concorrentes comerciais pesquisados)*
+7. Importação por CSV/planilha e, depois, sincronização com a fonte de estoque da loja. _(maior alavanca de produtividade segundo todos os concorrentes comerciais pesquisados)_
 8. Identificador de estoque/VIN e prevenção de duplicidade por veículo + perfil.
 9. Pausa, retomada e repetição manual de trabalhos com erro.
-10. **Marcar vendido, retirar anúncio e registrar URL final da publicação.** *(agora é requisito de compliance da Meta — remover em até 24h após a venda — não só organização interna)*
+10. **Marcar vendido, retirar anúncio e registrar URL final da publicação.** _(agora é requisito de compliance da Meta — remover em até 24h após a venda — não só organização interna)_
 11. Histórico de alterações e auditoria por usuário.
 
 ### P2 histórico — diferenciação
@@ -92,7 +92,7 @@ As páginas consultadas então indicavam que a distribuição automática de cat
 12. Modelos de descrição por loja e por tipo de veículo.
 13. Decodificação de VIN e preenchimento de opcionais.
 14. Sugestões de descrição e qualidade das fotos, sempre com revisão humana.
-15. Indicadores por vendedor: tempo até publicar, taxa de preenchimento completo e erros por campo. *(CARVID já expõe isso como leaderboard de posts/cliques/leads por vendedor)*
+15. Indicadores por vendedor: tempo até publicar, taxa de preenchimento completo e erros por campo. _(CARVID já expõe isso como leaderboard de posts/cliques/leads por vendedor)_
 
 ## O que não recomendo priorizar
 

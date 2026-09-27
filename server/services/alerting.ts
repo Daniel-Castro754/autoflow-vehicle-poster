@@ -26,7 +26,7 @@ function fetchWithTimeout(url: string, init: RequestInit) {
 
 export async function sendCriticalAlert(
   alert: CriticalErrorAlert,
-  config?: AlertConfig
+  config?: AlertConfig,
 ): Promise<{ telegram: boolean; webhook: boolean }> {
   const telegramBotToken = (config?.telegramBotToken || process.env.TELEGRAM_BOT_TOKEN || '').trim()
   const telegramChatId = (config?.telegramChatId || process.env.TELEGRAM_CHAT_ID || '').trim()
@@ -52,22 +52,27 @@ export async function sendCriticalAlert(
 
   if (telegramBotToken && telegramChatId) {
     try {
-      const response = await fetchWithTimeout(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: telegramChatId,
-          text: message,
-          parse_mode: 'MarkdownV2',
-        }),
-      })
+      const response = await fetchWithTimeout(
+        `https://api.telegram.org/bot${telegramBotToken}/sendMessage`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: telegramChatId,
+            text: message,
+            parse_mode: 'MarkdownV2',
+          }),
+        },
+      )
       telegramSuccess = response.ok
-      void response.body?.cancel().catch(()=>{})
+      void response.body?.cancel().catch(() => {})
       if (!response.ok) {
         logger.warn('AutoFlowAlert', `Telegram respondeu com status ${response.status}`)
       }
     } catch (err) {
-      logger.warn('AutoFlowAlert', 'Erro ao enviar alerta para o Telegram', { error: err instanceof Error ? err.message : err })
+      logger.warn('AutoFlowAlert', 'Erro ao enviar alerta para o Telegram', {
+        error: err instanceof Error ? err.message : err,
+      })
     }
   }
 
@@ -84,12 +89,14 @@ export async function sendCriticalAlert(
         }),
       })
       webhookSuccess = response.ok
-      void response.body?.cancel().catch(()=>{})
+      void response.body?.cancel().catch(() => {})
       if (!response.ok) {
         logger.warn('AutoFlowAlert', `Webhook respondeu com status ${response.status}`)
       }
     } catch (err) {
-      logger.warn('AutoFlowAlert', 'Erro ao enviar alerta para webhook', { error: err instanceof Error ? err.message : err })
+      logger.warn('AutoFlowAlert', 'Erro ao enviar alerta para webhook', {
+        error: err instanceof Error ? err.message : err,
+      })
     }
   }
 
