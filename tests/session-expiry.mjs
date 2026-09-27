@@ -15,6 +15,7 @@ const anonymous = createApiClient(server.base, '')
 const login = () =>
   anonymous('/auth/login', {
     method: 'POST',
+    headers: { Origin: server.base.replace(/\/api$/, '') },
     body: JSON.stringify({ email: server.email, password: server.password }),
   })
 try {

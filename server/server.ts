@@ -206,7 +206,10 @@ const configuredOrigins = new Set(
 function applyCors(req: IncomingMessage, res: ServerResponse) {
   const origin = String(req.headers.origin || '')
   const allowed =
-    !origin || configuredOrigins.has(origin) || /^chrome-extension:\/\/[a-p]{32}$/.test(origin)
+    !origin ||
+    origin === publicOrigin ||
+    configuredOrigins.has(origin) ||
+    /^chrome-extension:\/\/[a-p]{32}$/.test(origin)
   if (origin) res.setHeader('Vary', 'Origin')
   if (origin && allowed) res.setHeader('Access-Control-Allow-Origin', origin)
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
