@@ -129,6 +129,43 @@ const migrations: Migration[] = [
     CREATE INDEX IF NOT EXISTS idx_publication_events_org_time_type
       ON publication_job_events (organization_id,created_at,event_type);`,
   },
+  {
+    version: 10,
+    columns: [
+      ['social_accounts', 'automation_paused', 'INTEGER NOT NULL DEFAULT 0'],
+      ['social_accounts', 'automation_pause_reason', "TEXT NOT NULL DEFAULT ''"],
+      ['social_accounts', 'automation_paused_at', 'TEXT'],
+      ['vehicles', 'stock_code', "TEXT NOT NULL DEFAULT ''"],
+      ['vehicles', 'vin', "TEXT NOT NULL DEFAULT ''"],
+    ],
+    sql: `
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_vehicles_org_stock_code
+      ON vehicles (organization_id,stock_code COLLATE NOCASE) WHERE trim(stock_code)<>'';
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_vehicles_org_vin
+      ON vehicles (organization_id,vin COLLATE NOCASE) WHERE trim(vin)<>'';
+    CREATE TABLE IF NOT EXISTS selector_health_events (
+      id INTEGER PRIMARY KEY,
+      organization_id INTEGER NOT NULL,
+      social_account_id INTEGER NOT NULL,
+      publication_job_id INTEGER,
+      selector_config_version TEXT NOT NULL DEFAULT '',
+      page_locale TEXT NOT NULL DEFAULT '',
+      critical_total INTEGER NOT NULL DEFAULT 0,
+      missing_count INTEGER NOT NULL DEFAULT 0,
+      success_rate REAL NOT NULL DEFAULT 1,
+      missing_fields TEXT NOT NULL DEFAULT '[]',
+      severe INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (organization_id) REFERENCES organizations(id),
+      FOREIGN KEY (social_account_id) REFERENCES social_accounts(id),
+      FOREIGN KEY (publication_job_id) REFERENCES publication_jobs(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_selector_health_org_time
+      ON selector_health_events (organization_id,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_selector_health_account_time
+      ON selector_health_events (organization_id,social_account_id,created_at DESC);
+    `,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {
