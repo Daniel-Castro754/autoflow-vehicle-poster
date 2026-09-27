@@ -1,9 +1,13 @@
+import { servePanel } from './services/static-panel.ts'
+import { hashPassword, verifyPassword } from './lib/passwords.ts'
+import { open } from 'node:fs/promises'
+import { pipeline } from 'node:stream/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { randomBytes, scrypt, timingSafeEqual, createHmac, createHash } from 'node:crypto'
+import { randomBytes, timingSafeEqual, createHmac, createHash } from 'node:crypto'
 import { logger } from './lib/logger.ts'
 import { startGroupCurationWorker } from './services/group-curation-worker.ts'
 import { startHealthMonitor, runHealthCheck } from './services/health-monitor.ts'
@@ -65,19 +69,6 @@ function publicationDuplicateRisk(organizationId:number,vehicleId:number,exclude
   return findPublicationDuplicateRisk(db,organizationId,vehicleId,excludeJobId)
 }
 
-function derivePassword(password:string,salt:string) {
-  return new Promise<Buffer>((resolve,reject)=>scrypt(password,salt,64,(error,key)=>error?reject(error):resolve(key)))
-}
-async function hashPassword(password:string) {
-  const salt = randomBytes(16).toString('hex')
-  return `${salt}:${(await derivePassword(password,salt)).toString('hex')}`
-}
-async function verifyPassword(password:string, stored:string) {
-  const [salt, expected] = stored.split(':')
-  if(!/^[a-f0-9]{32}$/.test(salt||'')||!/^[a-f0-9]{128}$/.test(expected||''))return false
-  try{return timingSafeEqual(await derivePassword(password,salt),Buffer.from(expected,'hex'))}
-  catch{return false}
-}
 const dummyPasswordHash=await hashPassword(randomBytes(32).toString('hex'))
 const authRouteDependencies={db,send,jsonBody,userById,verifyPassword,dummyPasswordHash,sign,runHealthCheck}
 function sign(payload:object) {
@@ -166,17 +157,10 @@ for(const organization of db.prepare('SELECT id FROM organizations').all() as Ar
     try{const legacy=JSON.parse(String(settings?.targetGroups||'[]'));if(Array.isArray(legacy)&&legacy.length)replaceMarketplaceGroups(organization.id,legacy)}catch{/* configuração antiga inválida */}
   }
 }
-// Repairs values written by an early Windows encoding issue in the development seed.
-db.prepare("UPDATE organizations SET name='AutoPrime Veículos' WHERE name='AutoPrime Ve'||char(65533)||'culos'").run()
-db.prepare("UPDATE organization_settings SET default_location='São Paulo, SP' WHERE default_location='S'||char(65533)||'o Paulo, SP'").run()
-db.prepare("UPDATE vehicles SET vehicle_type='Carro/picape' WHERE vehicle_type='Carro/Caminhonete'").run()
-db.prepare("UPDATE vehicles SET vehicle_type='Outro' WHERE vehicle_type='Outro veículo'").run()
-db.prepare("UPDATE vehicles SET exterior_color='Prateado' WHERE exterior_color='Prata'").run()
-db.prepare("UPDATE vehicles SET interior_color='Preto' WHERE interior_color='' AND exterior_color!=''").run()
 startHealthMonitor(db, 60000)
 startGroupCurationWorker(db)
 
-createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   const originAllowed=applyCors(req,res)
   if (req.method === 'OPTIONS') return originAllowed?send(res,204,null):send(res,403,{error:'Origem não permitida.'})
   if(!originAllowed)return send(res,403,{error:'Origem não permitida.'})
@@ -185,12 +169,21 @@ createServer(async (req, res) => {
     const uploadFile = url.pathname.match(/^\/uploads\/([a-f0-9]{24}\.(?:jpg|jpeg|png|webp))$/)
     if (req.method === 'GET' && uploadFile) {
       const path = join(uploadsDir,uploadFile[1])
-      if (!existsSync(path)) return send(res,404,{error:'Imagem não encontrada.'})
-      const ext = uploadFile[1].split('.').pop()
-      const mime = ext==='png'?'image/png':ext==='webp'?'image/webp':'image/jpeg'
-      res.writeHead(200,{'Content-Type':mime,'Cache-Control':'public, max-age=3600'})
-      return res.end(readFileSync(path))
+      const file = await open(path, 'r').catch(error => {
+        if (error.code === 'ENOENT') return null
+        throw error
+      })
+      if (!file) return send(res,404,{error:'Imagem não encontrada.'})
+      try {
+        const info = await file.stat()
+        const ext = uploadFile[1].split('.').pop()
+        const mime = ext==='png'?'image/png':ext==='webp'?'image/webp':'image/jpeg'
+        res.writeHead(200,{'Content-Type':mime,'Content-Length':info.size,'Cache-Control':'public, max-age=86400, immutable','X-Content-Type-Options':'nosniff'})
+        await pipeline(file.createReadStream({autoClose:false}),res)
+      } finally { await file.close() }
+      return
     }
+    if(await servePanel(req,res,url,join(root,'dist')))return
     if(await handleAuthRoute(req,res,url,undefined,authRouteDependencies))return
     const auth = readToken(req)
     if (!auth) return send(res,401,{error:'Sessão inválida ou expirada.'})
@@ -218,7 +211,12 @@ createServer(async (req, res) => {
     if(await handleAlertRoute(req,res,url,auth,{db,send,isAdmin}))return
     return send(res,404,{error:'Rota não encontrada.'})
   } catch (error) {
+    if(res.headersSent || res.destroyed){res.destroy();return}
     if(error instanceof HttpError)return send(res,error.status,{error:error.message})
     logger.error('Server','Erro não tratado na requisição',{error}); return send(res,500,{error:'Erro interno da aplicação.'})
   }
-}).listen(port,host,() => console.log(`API AutoFlow em ${publicOrigin}`))
+})
+server.requestTimeout=30_000
+server.headersTimeout=10_000
+server.keepAliveTimeout=5_000
+server.listen(port,host,() => logger.info('Server',`API AutoFlow em ${publicOrigin}`))

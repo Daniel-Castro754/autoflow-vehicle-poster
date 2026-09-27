@@ -16,10 +16,15 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
       ...reactRefresh.configs.vite.rules,
       'react-hooks/purity':'off',
+      'no-console':['warn',{allow:['warn','error','info']}],
+      'no-debugger':'error',
+      'eqeqeq':['error','always'],
+      'prefer-const':'error',
+      '@typescript-eslint/consistent-type-imports':'error',
     },
   },
   {
-    files:['server/**/*.ts','tests/**/*.mjs','extension-mv2/**/*.js'],
+    files:['server/**/*.ts','tests/**/*.mjs','scripts/**/*.mjs','extension-mv2/**/*.js'],
     languageOptions:{ ecmaVersion:2022, globals:{...globals.node,...globals.browser,...globals.webextensions} },
   },
 )

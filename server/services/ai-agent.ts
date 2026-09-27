@@ -68,7 +68,7 @@ const BRAZILIAN_MAKES = [
   'Chevrolet', 'Volkswagen', 'Fiat', 'Ford', 'Toyota', 'Honda', 'Hyundai',
   'Jeep', 'Renault', 'Nissan', 'BMW', 'Mercedes-Benz', 'Mercedes', 'Audi',
   'Peugeot', 'Citroën', 'Citroen', 'Mitsubishi', 'Caoa Chery', 'Chery',
-  'Kia', 'Volvo', 'Land Rover', 'RAM', 'Porsche', 'BYD', 'GWM'
+  'Kia', 'Volvo', 'Land Rover', 'RAM', 'Porsche', 'BYD', 'GWM', 'JAC'
 ]
 
 const POPULAR_MODELS: Record<string, string[]> = {
@@ -83,6 +83,16 @@ const POPULAR_MODELS: Record<string, string[]> = {
   Nissan: ['Kicks', 'Versa', 'March', 'Sentra', 'Frontier'],
   Ford: ['Ka', 'EcoSport', 'Ranger', 'Fiesta', 'Focus', 'Fusion'],
   BMW: ['320i', 'X1', 'X3', '328i', '118i'],
+  'Mercedes-Benz': ['C180', 'C200', 'C300', 'GLA', 'GLC', 'GLE', 'A200'],
+  'Citroën': ['C3', 'C4 Cactus', 'C4', 'Berlingo'],
+  Peugeot: ['208', '2008', '3008', '408'],
+  Mitsubishi: ['L200', 'Outlander', 'ASX', 'Eclipse Cross'],
+  Kia: ['Sportage', 'Seltos', 'Cerato', 'Stonic'],
+  Volvo: ['XC40', 'XC60', 'XC90'],
+  'Land Rover': ['Discovery', 'Defender', 'Evoque'],
+  RAM: ['Rampage', '1500'],
+  JAC: ['T40', 'T60', 'E-JS4'],
+  GWM: ['Haval H6', 'Ora 03', 'Poer'],
 }
 
 /**
@@ -121,7 +131,7 @@ export function parseVehicleRawText(rawText: string): ParsedVehicle {
 
   // If make found, search for its specific models first
   if (detectedMake && POPULAR_MODELS[detectedMake]) {
-    for (const model of POPULAR_MODELS[detectedMake]) {
+    for (const model of [...POPULAR_MODELS[detectedMake]].sort((a,b)=>b.length-a.length)) {
       const modelRegex = new RegExp(`\\b${model.replace('-', '[- ]?')}\\b`, 'i')
       if (modelRegex.test(text)) {
         detectedModel = model
@@ -131,9 +141,9 @@ export function parseVehicleRawText(rawText: string): ParsedVehicle {
   }
 
   // Fallback: search all known models
-  if (!detectedModel) {
+  if (!detectedModel && !detectedMake) {
     for (const [make, models] of Object.entries(POPULAR_MODELS)) {
-      for (const model of models) {
+      for (const model of [...models].sort((a,b)=>b.length-a.length)) {
         const modelRegex = new RegExp(`\\b${model.replace('-', '[- ]?')}\\b`, 'i')
         if (modelRegex.test(text)) {
           detectedModel = model
@@ -355,14 +365,14 @@ export async function runAutopilotPipeline(db: DatabaseSync, organizationId: num
     .get(organizationId) as { dailyLimit?: number; executionIntervalMinutes?: number } | undefined
   const dailyLimit = Math.max(1, Number(settings?.dailyLimit) || 10)
   const executionIntervalMinutes = Math.max(0, Math.min(1440, Number(settings?.executionIntervalMinutes ?? 25)))
-  const accountCapacity = db.prepare(`SELECT a.id,MAX(0,?-COALESCE(SUM(CASE WHEN date(j.created_at,'localtime')=date('now','localtime') AND j.status!='canceled' THEN 1 ELSE 0 END),0)) remaining
+  const accountCapacity = db.prepare(`SELECT a.id,MAX(0,?-COALESCE(SUM(CASE WHEN autoflow_day(j.created_at)=autoflow_day(CURRENT_TIMESTAMP) AND j.status!='canceled' THEN 1 ELSE 0 END),0)) remaining
     FROM social_accounts a LEFT JOIN publication_jobs j ON j.organization_id=a.organization_id AND j.social_account_id=a.id
-    WHERE a.organization_id=? GROUP BY a.id`).all(dailyLimit, organizationId) as Array<{ id: number; remaining: number }>
+    WHERE a.organization_id=? AND a.status='connected' GROUP BY a.id`).all(dailyLimit, organizationId) as Array<{ id: number; remaining: number }>
   const remainingCapacity = accountCapacity.reduce((total, account) => total + Math.max(0, Number(account.remaining) || 0), 0)
 
   // 1. Fetch available accounts
   const accounts = db.prepare(`SELECT id, label, browser_profile browserProfile, status FROM social_accounts
-    WHERE organization_id = ?`)
+    WHERE organization_id = ? AND status='connected'`)
     .all(organizationId) as Array<{ id: number; label: string; browserProfile: string; status: string }>
 
   if (!accounts.length) {

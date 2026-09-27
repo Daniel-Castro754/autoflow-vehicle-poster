@@ -110,7 +110,7 @@ export async function handleExtensionRoute(
       const dailyLimit=Math.max(1,Number(executionSettings?.dailyLimit||10))
       const intervalMinutes=Math.max(0,Math.min(1440,Number(executionSettings?.executionIntervalMinutes??25)))
       const usage=db.prepare(`SELECT COUNT(*) count,MAX(CASE WHEN status IN ('completed','removed') THEN updated_at END) lastCompletedAt
-        FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND date(created_at,'localtime')=date('now','localtime') AND status!='canceled'`)
+        FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND autoflow_day(created_at)=autoflow_day(CURRENT_TIMESTAMP) AND status!='canceled'`)
         .get(auth.organizationId,accountId) as {count?:number;lastCompletedAt?:string|null}|undefined
       if(Number(usage?.count||0)>=dailyLimit)return send(res,409,{error:`O limite diário deste perfil foi atingido (${dailyLimit} execuções).`,capacity:{dailyLimit,used:Number(usage?.count||0),remaining:0}})
       if(intervalMinutes>0&&usage?.lastCompletedAt){

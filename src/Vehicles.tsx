@@ -63,6 +63,7 @@ function Thumb({vehicle}:{vehicle:VehicleRecord}) {
 }
 
 async function filePayload(file:File) {
+  if(file.size>12*1024*1024)throw new Error(`${file.name} excede o limite de 12 MB.`)
   const dataBase64 = await new Promise<string>((resolve,reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(String(reader.result).split(',')[1] || '')
@@ -72,7 +73,7 @@ async function filePayload(file:File) {
   return {name:file.name, mimeType:file.type, dataBase64}
 }
 
-export default function VehiclesView({api,vehicles,accounts,reload,notify}:{api:ApiFn;vehicles:VehicleRecord[];accounts:AccountOption[];reload:()=>Promise<void>;notify:(message:string)=>void}) {
+export default function VehiclesView({api,vehicles,accounts,reload,notify,refreshVersion}:{api:ApiFn;refreshVersion:number;vehicles:VehicleRecord[];accounts:AccountOption[];reload:()=>Promise<void>;notify:(message:string)=>void}) {
   const [query,setQuery] = useState('')
   const [status,setStatus] = useState('Todos')
   const [selected,setSelected] = useState<Set<number>>(new Set())
@@ -91,7 +92,7 @@ export default function VehiclesView({api,vehicles,accounts,reload,notify}:{api:
     const params=new URLSearchParams({page:String(page),limit:'25',query:deferredQuery,status})
     void Promise.all([api<VehiclePage>(`/vehicles/paged?${params}`),api<VehicleSummary>('/vehicles/summary')]).then(([result,counts])=>{if(!active)return;setPageVehicles(result.vehicles);setPagination(result.pagination);setSummary(counts);if(result.pagination.currentPage!==page)setPage(result.pagination.currentPage)}).catch(error=>{if(active)notify(error instanceof Error?error.message:'Erro ao carregar veículos')}).finally(()=>{if(active)setPageLoading(false)})
     return()=>{active=false}
-  },[api,deferredQuery,status,page,vehicles,notify])
+  },[api,deferredQuery,status,page,refreshVersion,notify])
 
   const filtered = pageVehicles
   const allSelected = filtered.length > 0 && filtered.every(vehicle => selected.has(vehicle.id))
@@ -297,7 +298,9 @@ function VehicleDrawer({api,vehicle,onClose,onSaved}:{api:ApiFn;vehicle:VehicleR
   async function moveImage(index:number,direction:-1|1) {
     const target=index+direction
     if(target<0||target>=images.length||!vehicle)return
-    const next=[...images]; [next[index],next[target]]=[next[target],next[index]]
+    const sourceImage=images[index],targetImage=images[target]
+    if(!sourceImage||!targetImage)return
+    const next=[...images]; [next[index],next[target]]=[targetImage,sourceImage]
     const previous=images; setImages(next)
     try { await api(`/vehicles/${vehicle.id}/images/reorder`,{method:'PATCH',body:JSON.stringify({order:next.map(item=>item.id)})}) }
     catch(caught) { setImages(previous); setError(caught instanceof Error?caught.message:'Erro ao reordenar fotos') }

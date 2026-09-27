@@ -1,3 +1,4 @@
+import { pickFreePort, createApiClient } from './helpers/server.mjs'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
@@ -7,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
 import { jpegBase64, pngFixtureBase64, webpFixtureBase64 } from './helpers/images.mjs'
 
-const port=3399
+const port=await pickFreePort()
 const base=`http://127.0.0.1:${port}/api`
 const dataDir=await mkdtemp(join(tmpdir(),'autoflow-queue-test-'))
 const extensionOne='test_extension_instance_alpha'
@@ -23,26 +24,7 @@ server.stderr.on('data',chunk=>serverOutput+=chunk)
 
 async function waitForServer(){for(let attempt=0;attempt<40;attempt++){try{const response=await fetch(base+'/health');if(response.ok)return}catch{/* API ainda inicializando */}await new Promise(resolve=>setTimeout(resolve,100))}throw new Error(`A API de teste não iniciou. ${serverOutput}`)}
 async function login(email,password){const response=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});const data=await response.json();if(!response.ok)throw new Error(data.error);return data.token}
-async function call(path,token,options={}){const requestOptions={...options};if(requestOptions.body&&/^\/extension\/jobs\/\d+\//.test(path)){const body=JSON.parse(requestOptions.body);body.tabId=body.tabId||101;body.document=body.document||'/marketplace/create/vehicle';requestOptions.body=JSON.stringify(body)}const response=await fetch(base+path,{...requestOptions,headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`}});const data=await response.json();if(!response.ok)throw Object.assign(new Error(`${response.status} ${path}: ${data.error}`),{status:response.status,body:data});return data}
-const callWithoutDocumentBinding=call
-// eslint-disable-next-line no-func-assign -- adapt the shared test client to the document-binding contract
-call=async function(path,token,options={}){
-  const requestOptions={...options}
-  if(requestOptions.body&&/^\/extension\/jobs\/\d+\//.test(path)){
-    const body=JSON.parse(requestOptions.body)
-    body.documentId=body.documentId||'test_document_id'
-    requestOptions.body=JSON.stringify(body)
-  }
-  const result=await callWithoutDocumentBinding(path,token,requestOptions)
-  const preparePath=path.match(/^\/extension\/jobs\/(\d+)\/prepare$/)
-  if(preparePath&&result.leaseToken){
-    await callWithoutDocumentBinding(`/extension/jobs/${preparePath[1]}/bind-document`,token,{method:'POST',body:JSON.stringify({
-      leaseToken:result.leaseToken,tabId:result.tabId,document:result.document,documentId:'test_document_id',
-    })})
-    result.documentId='test_document_id'
-  }
-  return result
-}
+async function call(path,token,options={}){return createApiClient(base,token)(path,options)}
 async function expectStatus(status,operation){try{await operation();throw new Error(`A operação deveria responder ${status}.`)}catch(error){if(error.status!==status)throw error}}
 async function expectMissingSecretFailure(){
   const env={...process.env,PORT:'3398',DATA_DIR:join(dataDir,'missing-secret')}
@@ -58,7 +40,7 @@ try{
   const migrationDb=new DatabaseSync(join(dataDir,'autoflow.db'),{readOnly:true})
   const migrations=migrationDb.prepare('SELECT version,checksum FROM schema_migrations ORDER BY version').all()
   migrationDb.close()
-  if(migrations.length!==6||migrations.map(item=>item.version).join(',')!=='1,2,3,4,5,6'||migrations.some(item=>!/^[a-f0-9]{64}$/.test(item.checksum)))throw new Error('O banco não registrou as migrations versionadas com checksum.')
+  if(migrations.length!==8||migrations.map(item=>item.version).join(',')!=='1,2,3,4,5,6,7,8'||migrations.some(item=>!/^[a-f0-9]{64}$/.test(item.checksum)))throw new Error('O banco não registrou as migrations versionadas com checksum.')
   const malformedJson=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:'{'})
   if(malformedJson.status!==400)throw new Error('JSON inválido não retornou 400.')
   const oversizedBody=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:'x'.repeat(1024*1024),password:'x'})})
@@ -71,7 +53,7 @@ try{
   if(deniedCors.status!==403||deniedCors.headers.has('access-control-allow-origin'))throw new Error('Uma origem externa recebeu acesso CORS à API.')
   const contentScript=await readFile('extension-mv2/content.js','utf8')
   if(/\.innerHTML\s*=/.test(contentScript))throw new Error('O content script voltou a inserir HTML dinâmico diretamente.')
-  if(!contentScript.includes('AUTOFLOW_EXECUTION_ACTIVITY')||!contentScript.includes('setInterval(ping,30_000)'))throw new Error('O heartbeat não está condicionado à atividade do documento que executa o trabalho.')
+  if(!contentScript.includes('AUTOFLOW_EXECUTION_ACTIVITY')||!contentScript.replace(/\s/g,'').includes('setInterval(ping,15_000)'))throw new Error('O heartbeat não está condicionado à atividade do documento que executa o trabalho.')
   const extensionManifest=JSON.parse(await readFile('extension-mv2/manifest.json','utf8'))
   const extensionBackground=await readFile('extension-mv2/background.js','utf8')
   if(extensionManifest.manifest_version!==3||extensionManifest.background?.service_worker!=='background.js'||!extensionManifest.action)throw new Error('A extensão não está configurada como Manifest V3.')
@@ -83,8 +65,8 @@ try{
   const dashboardRoutes=await readFile('server/routes/dashboard.ts','utf8')
   const automationStart=dashboardRoutes.indexOf('function automationOverview')
   const automationHandler=dashboardRoutes.slice(automationStart)
-  if(!serverSource.includes('const automationStatements=createAutomationStatements(db)')||automationHandler.includes('db.prepare('))throw new Error('A Central voltou a preparar SQL durante cada request.')
-  if(dashboardRoutes.includes("date(created_at)=date('now')")||!dashboardRoutes.includes("date(created_at,'localtime')=date('now','localtime')"))throw new Error('Os limites diários voltaram a usar a data UTC.')
+  if(!serverSource.replace(/\s/g,'').includes('constautomationStatements=createAutomationStatements(db)')||automationHandler.includes('db.prepare('))throw new Error('A Central voltou a preparar SQL durante cada request.')
+  if(dashboardRoutes.includes("date(created_at)=date('now')")||!dashboardRoutes.replace(/\s/g,'').includes("autoflow_day(created_at)=autoflow_day(CURRENT_TIMESTAMP)"))throw new Error('Os limites diários voltaram a usar a data UTC.')
   const invalidPassword=randomUUID()
   for(let attempt=0;attempt<2;attempt++){
     const response=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:adminEmail,password:invalidPassword})})

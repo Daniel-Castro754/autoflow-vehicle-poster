@@ -42,6 +42,7 @@ export default function App() {
   const [authError, setAuthError] = useState('')
   const [loading, setLoading] = useState(Boolean(token))
   const [active, setActive] = useState('Veículos')
+  const [inventoryVersion,setInventoryVersion]=useState(0)
   const [vehicles, setVehicles] = useState<Vehicle[]>(token ? [] : seed)
   const [operationalStats,setOperationalStats]=useState<OperationalStats|null>(null)
   const [toast, setToast] = useState('')
@@ -65,6 +66,7 @@ export default function App() {
     catch(error){
       if(error instanceof ApiError&&error.status===401){const message='Sua sessão expirou. Entre novamente.';clearSession(message);throw new Error(message,{cause:error})}
       if(error instanceof ApiError)throw Object.assign(error,{missing:error.missing})
+      console.error('AutoFlow: falha inesperada na API',{path:path.split('?')[0],type:error instanceof Error?error.name:'UnknownError'})
       throw error
     }
   },[token,clearSession])
@@ -76,6 +78,7 @@ export default function App() {
         api<OperationalStats>('/stats/global'),
       ])
       setVehicles(data.vehicles)
+      setInventoryVersion(value=>value+1)
       setOperationalStats(stats)
     }
     catch(error){if(token)setToast(error instanceof Error?error.message:'Não foi possível atualizar o estoque.')}
@@ -195,7 +198,7 @@ export default function App() {
 
     <main>
       <header><button className="mobile-menu" onClick={()=>setMobileMenuOpen(true)} aria-label="Abrir menu"><Menu/></button><div className="crumb"><span>AutoFlow</span><b>/</b><strong>{active}</strong></div><div className="header-actions"><button className="theme-quick" onClick={()=>changeTheme(theme==='light'?'dark':'light')} aria-label={theme==='light'?'Ativar tema escuro':'Ativar tema claro'} title={theme==='light'?'Tema escuro':'Tema claro'}>{theme==='light'?<Moon size={17}/>:<Sun size={17}/>}</button><div className="notification-wrap"><button className="icon-btn" onClick={()=>setNotificationsOpen(open=>!open)} aria-label="Abrir notificações" aria-expanded={notificationsOpen}><Bell size={19}/>{unreadCount>0&&<span className="notification-count">{unreadCount}</span>}</button>{notificationsOpen&&<NotificationCenter notifications={visibleNotifications} readIds={readNotificationIds} onClose={()=>setNotificationsOpen(false)} onReadAll={markAllNotificationsRead} onDismiss={dismissNotification} onDismissAll={dismissAllNotifications} onNavigate={(id,page)=>{markNotificationRead(id);setActive(page);setNotificationsOpen(false)}}/>}</div><span className="sync"><i/>Sincronizado agora</span></div></header>
-      {active === 'Visão geral' ? <OverviewView api={api} vehicles={vehicles} navigate={setActive}/> : active === 'Central de IA' ? <AiCenterView api={api} vehicles={vehicles} reloadVehicles={loadVehicles} navigate={setActive}/> : active === 'Publicações' ? <PublicationsView api={api} reload={loadVehicles}/> : active === 'Equipe e contas' ? <TeamView team={team} accounts={accounts} canManage={currentUser?.role==='admin'} onToggleUser={toggleUser} onAddUser={addUser} onAddAccount={addAccount}/> : active === 'Relatórios' ? <ReportsView api={api} vehicles={vehicles}/> : active === 'Configurações' ? <SettingsView api={api} onSaved={loadOrganizationName} theme={theme} onThemeChange={changeTheme}/> : <VehiclesView api={api} vehicles={vehicles} accounts={accounts} reload={loadVehicles} notify={message=>{setToast(message);setTimeout(()=>setToast(''),3000)}}/>}
+      {active === 'Visão geral' ? <OverviewView api={api} vehicles={vehicles} navigate={setActive}/> : active === 'Central de IA' ? <AiCenterView api={api} vehicles={vehicles} reloadVehicles={loadVehicles} navigate={setActive}/> : active === 'Publicações' ? <PublicationsView api={api} reload={loadVehicles}/> : active === 'Equipe e contas' ? <TeamView team={team} accounts={accounts} canManage={currentUser?.role==='admin'} onToggleUser={toggleUser} onAddUser={addUser} onAddAccount={addAccount}/> : active === 'Relatórios' ? <ReportsView api={api} vehicles={vehicles}/> : active === 'Configurações' ? <SettingsView api={api} onSaved={loadOrganizationName} theme={theme} onThemeChange={changeTheme}/> : <VehiclesView refreshVersion={inventoryVersion} api={api} vehicles={vehicles} accounts={accounts} reload={loadVehicles} notify={message=>{setToast(message);setTimeout(()=>setToast(''),3000)}}/>}
     </main>
     {toast&&<div className="toast"><Check size={17}/>{toast}</div>}
   </div>

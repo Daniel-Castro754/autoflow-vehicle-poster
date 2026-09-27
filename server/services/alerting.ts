@@ -16,6 +16,14 @@ export interface CriticalErrorAlert {
   timestamp?: string
 }
 
+export function escapeMarkdownV2(text: string) {
+  return String(text).replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, '\\$1')
+}
+
+function fetchWithTimeout(url: string, init: RequestInit) {
+  return fetch(url, { ...init, signal: AbortSignal.timeout(8000) })
+}
+
 export async function sendCriticalAlert(
   alert: CriticalErrorAlert,
   config?: AlertConfig
@@ -31,12 +39,12 @@ export async function sendCriticalAlert(
 
   const message = [
     '🚨 *Alerta Crítico no AutoFlow*',
-    `• *Tipo:* ${alert.type || 'Falha de Publicação'}`,
-    `• *Trabalho:* ${jobInfo}`,
-    `• *Perfil:* ${accountInfo}`,
-    `• *Erro:* ${alert.message}`,
-    `• *Tentativas:* ${attempts}`,
-    `• *Timestamp:* ${timestamp}`,
+    `• *Tipo:* ${escapeMarkdownV2(alert.type || 'Falha de Publicação')}`,
+    `• *Trabalho:* ${escapeMarkdownV2(jobInfo)}`,
+    `• *Perfil:* ${escapeMarkdownV2(accountInfo)}`,
+    `• *Erro:* ${escapeMarkdownV2(alert.message)}`,
+    `• *Tentativas:* ${escapeMarkdownV2(attempts)}`,
+    `• *Timestamp:* ${escapeMarkdownV2(timestamp)}`,
   ].join('\n')
 
   let telegramSuccess = false
@@ -44,18 +52,19 @@ export async function sendCriticalAlert(
 
   if (telegramBotToken && telegramChatId) {
     try {
-      const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+      const response = await fetchWithTimeout(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: telegramChatId,
           text: message,
-          parse_mode: 'Markdown',
+          parse_mode: 'MarkdownV2',
         }),
       })
       telegramSuccess = response.ok
+      void response.body?.cancel().catch(()=>{})
       if (!response.ok) {
-        logger.warn('AutoFlowAlert', `Telegram respondeu com status ${response.status}`, { body: await response.text() })
+        logger.warn('AutoFlowAlert', `Telegram respondeu com status ${response.status}`)
       }
     } catch (err) {
       logger.warn('AutoFlowAlert', 'Erro ao enviar alerta para o Telegram', { error: err instanceof Error ? err.message : err })
@@ -64,7 +73,7 @@ export async function sendCriticalAlert(
 
   if (webhookUrl) {
     try {
-      const response = await fetch(webhookUrl, {
+      const response = await fetchWithTimeout(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -75,6 +84,7 @@ export async function sendCriticalAlert(
         }),
       })
       webhookSuccess = response.ok
+      void response.body?.cancel().catch(()=>{})
       if (!response.ok) {
         logger.warn('AutoFlowAlert', `Webhook respondeu com status ${response.status}`)
       }

@@ -1,3 +1,5 @@
+import { pickFreePort } from './helpers/server.mjs'
+import { businessDate } from '../server/lib/timezone.ts'
 import { spawn } from 'node:child_process'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -75,7 +77,7 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
     attemptCount++
     if (attemptCount < 2) throw new Error('Falha simulada transitória')
     return 'sucesso'
-  }, { maxAttempts: 3, baseDelayMs: 10, maxDelayMs: 50 })
+  }, { maxAttempts: 3, baseDelayMs: 10, maxDelayMs: 50, shouldRetry: error=>error.message==='Falha simulada transitória' })
 
   assert.equal(retryResult, 'sucesso')
   assert.equal(attemptCount, 2)
@@ -134,7 +136,7 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
 {
   const now = new Date()
   const optimal = calculateOptimalSchedule({
-    fromTime: now,
+    referenceDate: now,
     existingTimestamps: [],
     accountId: 1,
   })
@@ -147,7 +149,7 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
   // Teste de prevenção de colisão: se houver horário muito próximo, deve avançar
   const collisionTarget = optimal.scheduledAt.getTime()
   const withCollision = calculateOptimalSchedule({
-    fromTime: now,
+    referenceDate: now,
     existingTimestamps: [collisionTarget],
     accountId: 1,
   })
@@ -192,13 +194,14 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
 // 1.5 Roteamento Autônomo de Sessões e Load Balancing
 {
   const memDb = new DatabaseSync(':memory:')
+  memDb.function('autoflow_day',value=>businessDate(String(value)))
   memDb.exec(`
     CREATE TABLE organization_settings (organization_id INTEGER PRIMARY KEY, daily_limit INTEGER);
     CREATE TABLE social_accounts (id INTEGER PRIMARY KEY, organization_id INTEGER, label TEXT, browser_profile TEXT, status TEXT, last_seen_at TEXT);
     CREATE TABLE publication_jobs (id INTEGER PRIMARY KEY, organization_id INTEGER, social_account_id INTEGER, vehicle_id INTEGER, status TEXT, created_at TEXT);
     INSERT INTO organization_settings VALUES (1, 10);
-    INSERT INTO social_accounts VALUES (1, 1, 'Perfil 1', 'Profile 1', 'active', datetime('now'));
-    INSERT INTO social_accounts VALUES (2, 1, 'Perfil 2', 'Profile 2', 'active', datetime('now'));
+    INSERT INTO social_accounts VALUES (1, 1, 'Perfil 1', 'Profile 1', 'connected', datetime('now'));
+    INSERT INTO social_accounts VALUES (2, 1, 'Perfil 2', 'Profile 2', 'connected', datetime('now'));
     -- Perfil 1 com 5 jobs hoje
     INSERT INTO publication_jobs VALUES (101, 1, 1, 991, 'completed', datetime('now'));
     INSERT INTO publication_jobs VALUES (102, 1, 1, 992, 'completed', datetime('now'));
@@ -242,7 +245,7 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
 
 console.log('\n--- Iniciando Testes de Integração com Servidor Live ---')
 
-const port = 3444
+const port = await pickFreePort()
 const base = `http://127.0.0.1:${port}/api`
 const dataDir = await mkdtemp(join(tmpdir(), 'autoflow-autonomous-test-'))
 const adminEmail = 'admin-auto@autoflow.local'
@@ -398,6 +401,7 @@ try {
     }),
   })
   const accountId = accountRes.id
+  await call(`/extension/queue?accountId=${accountId}`,token)
 
   const vehicleRes = await call('/vehicles', token, {
     method: 'POST',

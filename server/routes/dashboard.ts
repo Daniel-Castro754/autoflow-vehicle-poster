@@ -37,7 +37,7 @@ export function createAutomationStatements(db: DatabaseSync): AutomationStatemen
       FROM social_accounts a JOIN users u ON u.id=a.user_id WHERE a.organization_id=? AND a.user_id=? ORDER BY a.label`),
     settings: db.prepare('SELECT daily_limit dailyLimit,stuck_timeout_minutes stuckTimeoutMinutes FROM organization_settings WHERE organization_id=?'),
     latest: db.prepare(`WITH ranked AS (
-      SELECT j.social_account_id accountId,j.id,j.status,j.paused,j.scheduled_at scheduledAt,j.attempt_count attemptCount,j.fill_report fillReport,j.extension_version extensionVersion,
+      SELECT j.social_account_id accountId,j.id,j.status,j.paused,j.scheduled_at scheduledAt,j.attempt_count attemptCount,j.extension_version extensionVersion,
         j.started_at startedAt,j.updated_at updatedAt,j.lease_expires_at leaseExpiresAt,v.year,v.make,v.model,
         ROW_NUMBER() OVER (PARTITION BY j.social_account_id ORDER BY
           CASE WHEN j.status IN ('filling','pending','awaiting_confirmation','error') AND j.paused=0 AND (j.scheduled_at IS NULL OR datetime(j.scheduled_at)<=CURRENT_TIMESTAMP) THEN 0
@@ -45,9 +45,15 @@ export function createAutomationStatements(db: DatabaseSync): AutomationStatemen
             WHEN j.status IN ('filling','pending','awaiting_confirmation','error') THEN 2 ELSE 3 END,
           j.queue_priority,j.updated_at DESC) rank
       FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id WHERE j.organization_id=? AND j.social_account_id IS NOT NULL
-    ) SELECT accountId,id,status,paused,scheduledAt,attemptCount,fillReport,extensionVersion,startedAt,updatedAt,leaseExpiresAt,year,make,model FROM ranked WHERE rank=1`),
+    ) SELECT accountId,id,status,paused,scheduledAt,attemptCount,
+      (SELECT CASE WHEN json_valid(j.fill_report) THEN json_object(
+        'advanced',json_extract(j.fill_report,'$.advanced'),'publishAttempted',json_extract(j.fill_report,'$.publishAttempted'),
+        'missing',json_extract(j.fill_report,'$.missing'),'missingGroups',json_extract(j.fill_report,'$.missingGroups'),
+        'flowIssues',json_extract(j.fill_report,'$.flowIssues')) ELSE NULL END
+        FROM publication_jobs j WHERE j.id=ranked.id) fillReport,
+      extensionVersion,startedAt,updatedAt,leaseExpiresAt,year,make,model FROM ranked WHERE rank=1`),
     stats: db.prepare(`SELECT social_account_id accountId,
-      SUM(CASE WHEN date(created_at,'localtime')=date('now','localtime') AND status!='canceled' THEN 1 ELSE 0 END) today,
+      SUM(CASE WHEN autoflow_day(created_at)=autoflow_day(CURRENT_TIMESTAMP) AND status!='canceled' THEN 1 ELSE 0 END) today,
       SUM(CASE WHEN status IN ('completed','removed') THEN 1 ELSE 0 END) successes,
       SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) failures
       FROM publication_jobs WHERE organization_id=? AND social_account_id IS NOT NULL GROUP BY social_account_id`),

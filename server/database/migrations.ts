@@ -89,6 +89,21 @@ const migrations: Migration[] = [
   // Keep migrations 1–5 immutable for databases already opened by this branch.
   // Main added this checkpoint before schema versioning; ensureColumn handles both bases.
   { version: 6, columns: [['publication_jobs', 'publish_attempt_at', 'TEXT']], sql: '' },
+  { version: 7, columns: [], sql: `
+    UPDATE organizations SET name='AutoPrime Veículos' WHERE name='AutoPrime Ve'||char(65533)||'culos';
+    UPDATE organization_settings SET default_location='São Paulo, SP' WHERE default_location='S'||char(65533)||'o Paulo, SP';
+    UPDATE vehicles SET vehicle_type='Carro/picape' WHERE vehicle_type='Carro/Caminhonete';
+    UPDATE vehicles SET vehicle_type='Outro' WHERE vehicle_type='Outro veículo';
+    UPDATE vehicles SET exterior_color='Prateado' WHERE exterior_color='Prata';
+    UPDATE vehicles SET interior_color='Preto' WHERE interior_color='' AND exterior_color!='';
+  ` },
+  { version: 8, columns: [], sql: `
+    CREATE INDEX IF NOT EXISTS idx_publication_jobs_account_priority ON publication_jobs (organization_id,social_account_id,queue_priority,id);
+    CREATE INDEX IF NOT EXISTS idx_publication_jobs_account_vehicle ON publication_jobs (organization_id,social_account_id,vehicle_id,status);
+    CREATE INDEX IF NOT EXISTS idx_auth_sessions_expiry ON auth_sessions (datetime(expires_at));
+    CREATE INDEX IF NOT EXISTS idx_auth_sessions_revoked ON auth_sessions (datetime(revoked_at)) WHERE revoked_at IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_publication_events_org_id ON publication_job_events (organization_id,id DESC);
+  ` },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

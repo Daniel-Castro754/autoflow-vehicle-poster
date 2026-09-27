@@ -114,21 +114,36 @@ async function consumeQueue(){
   }catch(error){console.warn('AutoFlow: consumidor da fila pausado até a próxima verificação',error instanceof Error?error.message:String(error))}
   finally{queueConsumerRunning=false}
 }
-function validatePendingTab(){
-  chrome.storage.local.get(['pendingJob','token'],data=>{
-    const job=data.pendingJob
-    if(!job?.jobId||!job?.leaseToken||!data.token)return
-    chrome.tabs.get(job.tabId,tab=>{
-      if(chrome.runtime.lastError||!tab||tab.discarded||!/^https:\/\/(?:www\.)?facebook\.com\/marketplace\/(?:create\/vehicle|item\/)/.test(String(tab.url||''))){
-        chrome.storage.local.remove('pendingJob')
-      }
-    })
-  })
+async function clearPendingExecution(job){
+  const {pendingJob}=await chrome.storage.local.get('pendingJob')
+  if(pendingJob?.jobId===job.jobId&&pendingJob?.leaseToken===job.leaseToken&&pendingJob?.tabId===job.tabId){
+    await chrome.storage.local.remove('pendingJob')
+  }
 }
+async function validatePendingTab(){
+  const {pendingJob:job}=await chrome.storage.local.get('pendingJob')
+  if(!job?.jobId||!job?.leaseToken)return
+  const tab=await new Promise(resolve=>chrome.tabs.get(job.tabId,tab=>resolve(chrome.runtime.lastError?null:tab)))
+  if(!tab||tab.discarded||!/^https:\/\/(?:www\.)?facebook\.com\/marketplace\/(?:create\/vehicle|item\/)/.test(String(tab.url||''))){await clearPendingExecution(job);return}
+  if(job.documentId&&tab.status==='complete'){
+    const active=await new Promise(resolve=>chrome.tabs.sendMessage(job.tabId,{type:'AUTOFLOW_EXECUTION_PROBE',jobId:job.jobId},{documentId:job.documentId},response=>resolve(!chrome.runtime.lastError&&response?.active===true)))
+    if(!active)await clearPendingExecution(job)
+  }
+}
+chrome.tabs.onRemoved.addListener(tabId=>{
+  void chrome.storage.local.get('pendingJob').then(async({pendingJob})=>{
+    if(pendingJob?.tabId===tabId)await clearPendingExecution(pendingJob)
+    // Publication evidence and the result outbox survive tab closure.
+    await consumeQueue()
+  }).catch(error=>console.warn('AutoFlow: falha ao liberar a aba',error))
+})
 chrome.runtime.onInstalled.addListener(()=>{console.info('AutoFlow instalado no Brave');ensureHeartbeatAlarm()})
 chrome.runtime.onStartup.addListener(ensureHeartbeatAlarm)
-chrome.alarms.onAlarm.addListener(alarm=>{if(alarm.name===HEARTBEAT_ALARM){validatePendingTab();void flushPendingResults()}})
-chrome.alarms.onAlarm.addListener(alarm=>{if(alarm.name===HEARTBEAT_ALARM)void consumeQueue()})
+chrome.alarms.onAlarm.addListener(alarm=>{
+  if(alarm.name!==HEARTBEAT_ALARM)return
+  void (async()=>{await validatePendingTab();await flushPendingResults();await consumeQueue()})()
+    .catch(error=>console.warn('AutoFlow: falha na verificação da fila',error))
+})
 ensureHeartbeatAlarm()
 
 chrome.tabs.onUpdated.addListener((tabId,changeInfo)=>{
@@ -310,8 +325,9 @@ chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
       .then(async response=>{
         if(!response.ok)throw new Error(`HTTP ${response.status}`)
         const bytes=new Uint8Array(await response.arrayBuffer())
-        let binary=''
-        for(let offset=0;offset<bytes.length;offset+=32768)binary+=String.fromCharCode.apply(null,bytes.subarray(offset,offset+32768))
+        const chunks=[]
+        for(let offset=0;offset<bytes.length;offset+=32768)chunks.push(String.fromCharCode.apply(null,bytes.subarray(offset,offset+32768)))
+        const binary=chunks.join('')
         sendResponse({ok:true,dataBase64:btoa(binary),mimeType:response.headers.get('content-type')||'image/jpeg'})
       })
       .catch(error=>sendResponse({ok:false,error:error.message||String(error)}))

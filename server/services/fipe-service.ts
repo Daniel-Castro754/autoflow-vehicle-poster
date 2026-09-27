@@ -18,36 +18,27 @@ export interface FipeComparison {
   salesPitch: string
 }
 
-// Mapa rápido de IDs de marcas mais populares da FIPE para velocidade máxima (<50ms)
-const POPULAR_BRANDS: Record<string, string> = {
-  audi: '6',
-  bmw: '7',
-  chery: '136',
-  caoa: '136',
-  chevrolet: '23',
-  gm: '23',
-  citroen: '28',
-  fiat: '21',
-  ford: '22',
-  honda: '25',
-  hyundai: '26',
-  jeep: '29',
-  kia: '31',
-  mercedes: '39',
-  'mercedes-benz': '39',
-  mitsubishi: '41',
-  nissan: '43',
-  peugeot: '44',
-  ram: '185',
-  renault: '44',
-  toyota: '56',
-  volkswagen: '59',
-  vw: '59',
-  volvo: '58',
-}
-
-// Cache em memória durante o ciclo de execução do servidor
+const BASE_URL = 'https://parallelum.com.br/fipe/api/v1/carros/marcas'
+const CACHE_TTL_MS = 30 * 86400_000
 const fipeMemoryCache = new Map<string, FipeResult>()
+let brandCache: { entries: Array<{codigo: string; nome: string}>; fetchedAt: number } | undefined
+
+function normalize(value: string) {
+  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+function brandKey(value: string) {
+  const key = normalize(value)
+  return ({ gm:'chevrolet', 'gm chevrolet':'chevrolet', 'chevrolet gm':'chevrolet', vw:'volkswagen',
+    'vw volkswagen':'volkswagen', mercedes:'mercedes benz', caoa:'chery', 'caoa chery':'chery' } as Record<string,string>)[key] || key
+}
+function fresh(timestamp: number) {
+  const now = Date.now()
+  return now >= timestamp && now - timestamp < CACHE_TTL_MS && new Date(now).toISOString().slice(0,7) === new Date(timestamp).toISOString().slice(0,7)
+}
+export function clearFipeCache() {
+  fipeMemoryCache.clear()
+  brandCache = undefined
+}
 
 /**
  * Consulta a Tabela FIPE pública com timeout e fallback silencioso.
@@ -61,33 +52,25 @@ export async function lookupFipePrice(params: {
   const { make, model, year, timeoutMs = 4500 } = params
   if (!make || !model || !year) return null
 
-  const cacheKey = `${make.toLowerCase().trim()}_${model.toLowerCase().trim()}_${year}`
-  if (fipeMemoryCache.has(cacheKey)) {
-    return fipeMemoryCache.get(cacheKey)!
-  }
+  const cacheKey = `${brandKey(make)}_${normalize(model)}_${year}`
+  const cached = fipeMemoryCache.get(cacheKey)
+  if (cached && fresh(Date.parse(cached.fetchedAt))) return { ...cached }
+  fipeMemoryCache.delete(cacheKey)
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const cleanMake = make.toLowerCase().trim()
-    let brandCode = POPULAR_BRANDS[cleanMake]
-
-    // Se não estiver no mapa rápido, busca dinamicamente
-    if (!brandCode) {
-      const brandsRes = await fetch('https://parallelum.com.br/fipe/api/v1/carros/marcas', {
-        signal: controller.signal,
-      })
-      if (!brandsRes.ok) return null
-      const brands = (await brandsRes.json()) as Array<{ codigo: string; nome: string }>
-      const found = brands.find(
-        (b) =>
-          b.nome.toLowerCase().includes(cleanMake) ||
-          cleanMake.includes(b.nome.toLowerCase())
-      )
-      if (!found) return null
-      brandCode = found.codigo
+    if (!brandCache || !fresh(brandCache.fetchedAt)) {
+      const response = await fetch(BASE_URL, { signal: controller.signal })
+      if (!response.ok) return null
+      const entries = await response.json() as Array<{codigo: string; nome: string}>
+      if (!Array.isArray(entries)) return null
+      brandCache = { entries, fetchedAt: Date.now() }
     }
+    const brand = brandCache.entries.find(b => brandKey(b.nome) === brandKey(make))
+    if (!brand || !/^\d+$/.test(brand.codigo)) return null
+    const brandCode = brand.codigo
 
     // Busca os modelos da marca
     const modelsRes = await fetch(
@@ -102,22 +85,15 @@ export async function lookupFipePrice(params: {
     if (!modelsData.modelos || !modelsData.modelos.length) return null
 
     // Encontra o modelo por correspondência de termos
-    const cleanModel = model.toLowerCase().trim()
-    const modelTerms = cleanModel.split(/\s+/).filter((t) => t.length > 1)
+    const cleanModel = normalize(model)
+    const modelTerms = cleanModel.split(/\s+/).filter(Boolean)
+    if (!modelTerms.length) return null
 
     // Primeiro tenta correspondência onde todos os termos estejam presentes
-    let matchedModel = modelsData.modelos.find((m) => {
-      const name = m.nome.toLowerCase()
+    const matchedModel = modelsData.modelos.find((m) => {
+      const name = normalize(m.nome)
       return modelTerms.every((term) => name.includes(term))
     })
-
-    // Fallback: primeiro termo principal (ex: "Corolla", "Civic", "Onix", "Compass")
-    if (!matchedModel && modelTerms.length > 0) {
-      const primaryTerm = modelTerms[0]
-      matchedModel = modelsData.modelos.find((m) =>
-        m.nome.toLowerCase().includes(primaryTerm)
-      )
-    }
 
     if (!matchedModel) return null
 
@@ -132,8 +108,7 @@ export async function lookupFipePrice(params: {
     // Encontra o ano desejado (código começa com o ano, ex: '2024-1' ou '2024-6')
     const targetYearStr = String(year)
     const matchedYear =
-      years.find((y) => y.codigo.startsWith(targetYearStr)) ||
-      years.find((y) => y.nome.includes(targetYearStr))
+      years.find((y) => y.codigo.split('-')[0] === targetYearStr)
 
     if (!matchedYear) return null
 
@@ -152,7 +127,8 @@ export async function lookupFipePrice(params: {
       MesReferencia?: string
     }
 
-    if (!priceData.Valor) return null
+    if (!priceData.Valor || brandKey(priceData.Marca || '') !== brandKey(make) || Number(priceData.AnoModelo) !== year) return null
+    if (!modelTerms.every(term => normalize(priceData.Modelo || '').includes(term))) return null
 
     // Converte 'R$ 156.728,00' para 156728
     const rawNumber = priceData.Valor.replace(/[^\d]/g, '')
@@ -167,11 +143,13 @@ export async function lookupFipePrice(params: {
       modelName: priceData.Modelo || matchedModel.nome,
       brandName: priceData.Marca || make,
       yearModel: priceData.AnoModelo || year,
-      fetchedAt: new Date().toISOString(),
+      fetchedAt: new Date(Date.now()).toISOString(),
     }
 
+    for (const [key, value] of fipeMemoryCache) if (!fresh(Date.parse(value.fetchedAt))) fipeMemoryCache.delete(key)
+    if (fipeMemoryCache.size >= 500) fipeMemoryCache.delete(fipeMemoryCache.keys().next().value!)
     fipeMemoryCache.set(cacheKey, result)
-    return result
+    return { ...result }
   } catch {
     // Timeout ou erro de rede: retorna nulo sem interromper o fluxo operacional
     return null

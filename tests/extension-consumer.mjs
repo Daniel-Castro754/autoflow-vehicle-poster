@@ -28,13 +28,14 @@ async function runConsumer(queue, network = {}) {
       onAlarm: { addListener: fn => { listeners.alarms.push(fn); listeners.alarm = alarm => listeners.alarms.forEach(listener => listener(alarm)) } },
     },
     tabs: {
+      onRemoved:{addListener:fn=>{listeners.removed=fn}},
       create: async options => {
         const tab = { id: createdTabs.length + 1, ...options }
         createdTabs.push(tab)
         return tab
       },
       get: (id, callback) => callback({ id, status: 'complete', url: `https://www.facebook.com${stored.pendingJob?.document || ''}` }),
-      sendMessage: (_id, _message, callback) => callback?.(),
+      sendMessage: (_id, _message, options, callback) => { if(typeof options==='function') options(); else callback?.({active:network.contentActive!==false}) },
       onUpdated: { addListener: () => {}, removeListener: () => {} },
       remove: async () => {},
     },
@@ -165,3 +166,31 @@ console.log('✓ Queue consumer ignores non-retryable errors and uncertain publi
   assert.equal(result.requests.filter(request => request.url.includes('/publish-check')).length, 1, 'HTTP rejection must not be retried as a transport error')
 }
 console.log('✓ Durable results retain execution identity; stale acknowledgements preserve the next job.')
+
+{
+  const result=await runConsumer({jobs:[{jobId:22,jobStatus:'pending'}]})
+  result.stored.autoRun=false
+  result.stored.pendingPublishes={22:{jobId:22,leaseToken:'lease-22',tabId:1,report:{publishAttempted:true}}}
+  result.stored.pendingResults={'22:lease-22':{payload:{published:true}}}
+  result.listeners.removed(999)
+  await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(result.stored.pendingJob.jobId,22,'Closing another tab must not release the active job')
+  result.listeners.removed(1)
+  await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(result.stored.pendingJob,undefined)
+  assert(result.stored.pendingPublishes[22],'Closing a tab must retain publication evidence')
+  assert(result.stored.pendingResults['22:lease-22'],'Closing a tab must retain unsent results')
+  assert.equal(result.listeners.alarms.length,1)
+}
+console.log('✓ Fechamento de aba preserva evidências e resultados; alarme único.')
+
+{
+  const result=await runConsumer({jobs:[{jobId:22,jobStatus:'pending'}]},{contentActive:false})
+  result.stored.autoRun=false
+  result.stored.pendingPublishes={22:{jobId:22,report:{publishAttempted:true}}}
+  result.listeners.alarm({name:'autoflow-heartbeat'})
+  await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(result.stored.pendingJob,undefined,'An invalidated content context must not block the autonomous queue forever')
+  assert(result.stored.pendingPublishes[22])
+  assert(!result.requests.some(request=>request.url.includes('/heartbeat')),'A liveness probe is not a lease heartbeat')
+}

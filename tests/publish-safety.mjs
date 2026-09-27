@@ -1,3 +1,4 @@
+import { pickFreePort, createApiClient } from './helpers/server.mjs'
 import { jpegBase64 } from './helpers/images.mjs'
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -23,18 +24,18 @@ for(const legacy of [true,false]){
       INSERT INTO publication_jobs(id,organization_id,vehicle_id,publish_attempt_at) VALUES(1,1,1,'2026-09-20 12:00:00');`)
   }else{
     applyMigrations(migrationDb)
-    migrationDb.exec('DELETE FROM schema_migrations WHERE version=6; ALTER TABLE publication_jobs DROP COLUMN publish_attempt_at;')
+    migrationDb.exec('DELETE FROM schema_migrations WHERE version>=6; ALTER TABLE publication_jobs DROP COLUMN publish_attempt_at;')
     originalChecksums=migrationDb.prepare('SELECT version,checksum FROM schema_migrations ORDER BY version').all()
   }
   applyMigrations(migrationDb)
   applyMigrations(migrationDb)
-  assert.equal(migrationDb.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count,6)
+  assert.equal(migrationDb.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count,8)
   if(legacy)assert.equal(migrationDb.prepare('SELECT publish_attempt_at FROM publication_jobs WHERE id=1').get().publish_attempt_at,'2026-09-20 12:00:00')
   else assert.deepEqual(migrationDb.prepare('SELECT version,checksum FROM schema_migrations WHERE version<=5 ORDER BY version').all(),originalChecksums)
   migrationDb.close()
 }
 
-const port=3455
+const port=await pickFreePort()
 const base=`http://127.0.0.1:${port}/api`
 const dataDir=await mkdtemp(join(tmpdir(),'autoflow-safety-test-'))
 const adminEmail='admin-safety@autoflow.local'
@@ -46,21 +47,7 @@ server.stderr.on('data',chunk=>serverOutput+=chunk)
 
 async function waitForServer(){for(let attempt=0;attempt<40;attempt++){try{const response=await fetch(base+'/health');if(response.ok)return}catch{/* API ainda inicializando */}await new Promise(resolve=>setTimeout(resolve,100))}throw new Error(`A API de teste não iniciou. ${serverOutput}`)}
 async function login(email,password){const response=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});const data=await response.json();if(!response.ok)throw new Error(data.error);return data.token}
-async function call(path,token,options={}){
-  const requestOptions={...options}
-  if(requestOptions.body&&/^\/extension\/jobs\/\d+\//.test(path)){
-    const body=JSON.parse(requestOptions.body)
-    Object.assign(body,{tabId:101,document:'/marketplace/create/vehicle',documentId:'safety_test_document'})
-    if(body.error)body.failureCode='marketplace_form_timeout'
-    requestOptions.body=JSON.stringify(body)
-  }
-  const response=await fetch(base+path,{...requestOptions,headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`}})
-  const data=await response.json()
-  if(!response.ok)throw Object.assign(new Error(`${response.status} ${path}: ${data.error}`),{status:response.status,body:data})
-  const prepared=path.match(/^\/extension\/jobs\/(\d+)\/prepare$/)
-  if(prepared&&data.leaseToken)await call(`/extension/jobs/${prepared[1]}/bind-document`,token,{method:'POST',body:JSON.stringify({leaseToken:data.leaseToken})})
-  return data
-}
+async function call(path,token,options={}){return createApiClient(base,token)(path,options)}
 async function expectStatus(status,operation){try{await operation();throw new Error(`A operação deveria responder ${status}.`)}catch(error){if(error.status!==status)throw error}}
 
 async function createReadyVehicle(token,overrides={}){
@@ -165,7 +152,7 @@ try{
   // The organization, not the request body, enables automatic retries.
   testDb.prepare('UPDATE organization_settings SET auto_retry=1').run()
   const preparedH=await call(`/extension/jobs/${publicationH.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_instance_h'})})
-  const lateAutoRetryResult=await call(`/extension/jobs/${publicationH.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedH.leaseToken,error:'Agora com auto-retry ativo',autoRetry:true,extensionVersion:'0.16.0'})})
+  const lateAutoRetryResult=await call(`/extension/jobs/${publicationH.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedH.leaseToken,error:'Agora com auto-retry ativo',failureCode:'marketplace_form_timeout',autoRetry:true,extensionVersion:'0.16.0'})})
   if(lateAutoRetryResult.status!=='pending'||lateAutoRetryResult.autoRetry!==true)throw new Error('attempt_count alto por falhas anteriores não deveria esgotar o auto-retry, que ainda não tinha sido usado.')
 
   // 4. Um relatório de preenchimento parcial que sinaliza suspeita de mudança de layout do
@@ -178,7 +165,7 @@ try{
   if(driftResult.status!=='awaiting_confirmation')throw new Error('Um preenchimento parcial sem exceção deveria aguardar confirmação normalmente.')
   const driftReport=JSON.parse(jobRow(publicationD.id).fillReport||'{}')
   if(driftReport.layoutDriftSuspected!==true)throw new Error('O sinal de suspeita de mudança de layout não foi persistido no relatório.')
-  if(JSON.stringify(driftReport.notFoundFields)!==JSON.stringify(['Ano','Fabricante']))throw new Error('Os campos não localizados não foram persistidos corretamente.')
+  assert.deepEqual([...driftReport.notFoundFields].sort(),['Ano','Fabricante'].sort())
 
   // 5. auto_curate_groups=1 deve aplicar a curadoria sozinho (sem clique manual no painel)
   //    quando o worker periódico roda — mesmo resultado que POST /api/groups/auto-curate já produz.
@@ -211,14 +198,15 @@ try{
   // 7. A partir da 2ª falha consecutiva do mesmo job, o auto-retry deve rerotear para uma
   //    conta saudável com espaço disponível em vez de insistir sempre na mesma conta.
   const accountB=await call('/social-accounts',adminToken,{method:'POST',body:JSON.stringify({userId:(await call('/team',adminToken)).users[0].id,label:'Facebook Teste 2',browserProfile:'Brave Perfil Teste 2'})})
+  await call(`/extension/queue?accountId=${accountB.id}`,adminToken)
   const vehicleF=await createReadyVehicle(adminToken)
   const publicationF=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:vehicleF.id,accountId:account.id})})
   const preparedF1=await call(`/extension/jobs/${publicationF.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_instance_f1'})})
-  const firstFailure=await call(`/extension/jobs/${publicationF.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedF1.leaseToken,error:'Falha simulada 1',autoRetry:true,extensionVersion:'0.15.0'})})
+  const firstFailure=await call(`/extension/jobs/${publicationF.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedF1.leaseToken,error:'Falha simulada 1',failureCode:'marketplace_form_timeout',autoRetry:true,extensionVersion:'0.15.0'})})
   if(firstFailure.accountId!==account.id)throw new Error('A primeira falha não deveria rerotear a conta ainda.')
   testDb.prepare('UPDATE publication_jobs SET scheduled_at=NULL WHERE id=?').run(publicationF.id)
   const preparedF2=await call(`/extension/jobs/${publicationF.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_instance_f1'})})
-  const secondFailure=await call(`/extension/jobs/${publicationF.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedF2.leaseToken,error:'Falha simulada 2',autoRetry:true,extensionVersion:'0.15.0'})})
+  const secondFailure=await call(`/extension/jobs/${publicationF.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedF2.leaseToken,error:'Falha simulada 2',failureCode:'marketplace_form_timeout',autoRetry:true,extensionVersion:'0.15.0'})})
   if(secondFailure.accountId!==accountB.id)throw new Error('A segunda falha consecutiva deveria rerotear o job para a conta saudável disponível.')
   const rerouted=testDb.prepare('SELECT social_account_id accountId FROM publication_jobs WHERE id=?').get(publicationF.id)
   if(rerouted.accountId!==accountB.id)throw new Error('O job não foi persistido na nova conta após o reroteamento automático.')
@@ -234,10 +222,10 @@ try{
   const vehicleG=await createReadyVehicle(adminToken)
   const publicationG=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:vehicleG.id,accountId:account.id})})
   const preparedG1=await call(`/extension/jobs/${publicationG.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_instance_g1'})})
-  await call(`/extension/jobs/${publicationG.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedG1.leaseToken,error:'Falha simulada 1',autoRetry:true,extensionVersion:'0.15.0'})})
+  await call(`/extension/jobs/${publicationG.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedG1.leaseToken,error:'Falha simulada 1',failureCode:'marketplace_form_timeout',autoRetry:true,extensionVersion:'0.15.0'})})
   testDb.prepare('UPDATE publication_jobs SET scheduled_at=NULL WHERE id=?').run(publicationG.id)
   const preparedG2=await call(`/extension/jobs/${publicationG.id}/prepare`,adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_instance_g1'})})
-  const noAlternative=await call(`/extension/jobs/${publicationG.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedG2.leaseToken,error:'Falha simulada 2',autoRetry:true,extensionVersion:'0.15.0'})})
+  const noAlternative=await call(`/extension/jobs/${publicationG.id}/fill-result`,adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:preparedG2.leaseToken,error:'Falha simulada 2',failureCode:'marketplace_form_timeout',autoRetry:true,extensionVersion:'0.15.0'})})
   if(noAlternative.accountId!==account.id)throw new Error('Sem conta alternativa disponível, o job deveria permanecer na mesma conta.')
 
   testDb.close()

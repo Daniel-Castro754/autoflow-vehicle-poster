@@ -1,3 +1,4 @@
+import { hashPassword, passwordNeedsUpgrade } from '../lib/passwords.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { randomBytes } from 'node:crypto'
@@ -77,6 +78,10 @@ export async function handleAuthRoute(
     if (!row || !passwordValid || Number(row.active ?? 1) !== 1) {
       send(res, 401, { error: 'E-mail ou senha inválidos.' })
       return true
+    }
+    if (passwordNeedsUpgrade(String(row.password_hash))) {
+      const upgraded = await hashPassword(suppliedPassword)
+      db.prepare('UPDATE users SET password_hash=? WHERE id=? AND password_hash=?').run(upgraded,row.id,row.password_hash)
     }
     loginBuckets.delete(accountKey)
     const sessionId = randomBytes(24).toString('hex')

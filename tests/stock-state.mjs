@@ -72,14 +72,16 @@ try{
   const concurrent=await fixture('Edição concorrente')
   let slowRequest
   const slowResponse=new Promise((resolve,reject)=>{
-    slowRequest=httpRequest(`${base}/vehicles/${concurrent.vehicleId}`,{method:'PATCH',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`}},response=>{
+    slowRequest=httpRequest(`${base}/vehicles/${concurrent.vehicleId}`,{method:'PATCH',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`,Expect:'100-continue'}},response=>{
       response.resume();response.on('end',()=>resolve(response.statusCode))
     })
     slowRequest.on('error',reject)
   })
   const body=JSON.stringify({...payload,model:'Edição concorrente'})
+  const requestStarted=new Promise(resolve=>slowRequest.once('continue',resolve))
+  slowRequest.flushHeaders()
+  await requestStarted
   slowRequest.write(body.slice(0,10))
-  await new Promise(resolve=>setTimeout(resolve,50))
   await call(`/vehicles/${concurrent.vehicleId}/mark-sold`,'POST')
   slowRequest.end(body.slice(10))
   assert.equal(await slowResponse,409)

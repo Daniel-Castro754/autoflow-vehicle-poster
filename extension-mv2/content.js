@@ -62,9 +62,12 @@
     },2200))
   }
 
+  function rootScope(){
+    return [...document.querySelectorAll('[role="main"],form')].find(element=>visible(element)&&element.querySelector('input,textarea,[role="combobox"]'))||document.body
+  }
   function labelNodes(labels){
     const keys=labels.map(normalize)
-    return [...document.querySelectorAll('label,span,div')].filter(element=>{
+    return [...rootScope().querySelectorAll('label,span,div')].filter(element=>{
       if(!visible(element))return false
       const text=normalize(element.textContent)
       if(!text||text.length>80)return false
@@ -82,7 +85,7 @@
 
   function findField(labels,selector,{allowHidden=false}={}){
     const keys=labels.map(normalize)
-    const controls=[...document.querySelectorAll(selector)].filter(element=>allowHidden||visible(element))
+    const controls=[...rootScope().querySelectorAll(selector)].filter(element=>allowHidden||visible(element))
     const direct=controls.find(element=>keys.some(key=>attributeText(element).includes(key)))
     if(direct)return direct
     const labelsFound=labelNodes(labels)
@@ -217,25 +220,36 @@
     return confirmField(labels,value,'input:not([type="file"]),textarea,[contenteditable="true"],[role="textbox"],[role="combobox"]')
   }
 
+  function contextError(error){
+    return /Extension context invalidated/i.test(error?.message||'')
+      ?Object.assign(new Error('Extensão recarregada. Reabra a aba do Marketplace.'),{code:'CONTEXT_INVALIDATED'}):error
+  }
   function runtimeMessage(message){
-    return new Promise((resolve,reject)=>chrome.runtime.sendMessage(message,response=>{
-      const error=chrome.runtime.lastError
-      if(error)return reject(new Error(error.message))
-      if(!response?.ok)return reject(new Error(response?.error||'A extensão não conseguiu carregar a imagem.'))
-      resolve(response)
-    }))
+    return new Promise((resolve,reject)=>{
+      try{
+        if(!chrome.runtime?.id)throw Object.assign(new Error('Extensão recarregada.'),{code:'CONTEXT_INVALIDATED'})
+        chrome.runtime.sendMessage(message,response=>{
+          try{
+            const error=chrome.runtime.lastError
+            if(error)return reject(contextError(new Error(error.message)))
+            if(!response?.ok)return reject(new Error(response?.error||'Falha na extensão.'))
+            resolve(response)
+          }catch(error){reject(contextError(error))}
+        })
+      }catch(error){reject(contextError(error))}
+    })
   }
   function startExecutionActivity(task){
     if(!task?.jobId||!task.documentId)return()=>{}
-    const ping=()=>chrome.runtime.sendMessage({
-      type:'AUTOFLOW_EXECUTION_ACTIVITY',
-      jobId:task.jobId,
-      document:location.pathname,
-      documentId:task.documentId,
-    },()=>{void chrome.runtime.lastError})
+    let stopped=false
+    const ping=()=>{
+      if(stopped)return
+      void runtimeMessage({type:'AUTOFLOW_EXECUTION_ACTIVITY',jobId:task.jobId,document:location.pathname,documentId:task.documentId})
+        .catch(error=>{if(error.code==='CONTEXT_INVALIDATED'){stopped=true;clearInterval(timer)}})
+    }
+    const timer=setInterval(ping,15_000)
     ping()
-    const timer=setInterval(ping,30_000)
-    return()=>clearInterval(timer)
+    return()=>{stopped=true;clearInterval(timer)}
   }
 
   function photoCount(){
@@ -271,33 +285,49 @@
     return new File([bytes],name,{type:mimeType||'image/jpeg'})
   }
 
+  const imageUploads=new Map()
   async function uploadImages(images){
     if(!Array.isArray(images)||!images.length)return 0
-    const alreadyUploaded=photoCount()
-    if(alreadyUploaded>0)return alreadyUploaded
-    let input=null
-    for(let attempt=0;attempt<24&&!input;attempt++){input=photoInput();if(!input)await sleep(250)}
-    if(!input)return 0
-    const transfer=new DataTransfer()
-    for(const image of images.slice(0,20)){
-      try{
-        const response=await runtimeMessage({type:'AUTOFLOW_FETCH_IMAGE',url:image.url})
-        transfer.items.add(fileFromBase64(response.dataBase64,image.name||`veiculo-${transfer.files.length+1}.jpg`,image.mimeType||response.mimeType))
-      }catch(error){console.warn('AutoFlow: não foi possível carregar uma foto',error)}
+    const target=images.slice(0,20)
+    const key=JSON.stringify(target.map(image=>image.url))
+    let state=imageUploads.get(key)
+    const initial=photoCount()||0
+    if(initial>=target.length)return initial
+    // Unknown existing photos cannot be mapped to source files safely.
+    if(!state&&initial>0)return initial
+    if(!state){state={completed:new Set(),awaiting:null};imageUploads.set(key,state)}
+    if(state.awaiting){
+      if(initial===state.awaiting.before+1){state.completed.add(state.awaiting.index);state.awaiting=null}
+      else return initial
     }
-    if(!transfer.files.length)return 0
-    const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'files')?.set
-    if(setter)setter.call(input,transfer.files)
-    else Object.defineProperty(input,'files',{configurable:true,value:transfer.files})
-    input.dispatchEvent(new Event('input',{bubbles:true}))
-    input.dispatchEvent(new Event('change',{bubbles:true}))
-    const deadline=Date.now()+30000
-    while(Date.now()<deadline){
-      await sleep(500)
-      const accepted=photoCount()
-      if(accepted!==null&&accepted>0)return accepted
+    for(let index=0;index<target.length;index++){
+      if(state.completed.has(index))continue
+      let input=null
+      for(let attempt=0;attempt<24&&!input;attempt++){input=photoInput();if(!input)await sleep(250)}
+      if(!input)return photoCount()||0
+      let response
+      try{response=await runtimeMessage({type:'AUTOFLOW_FETCH_IMAGE',url:target[index].url})}
+      catch(error){if(error.code==='CONTEXT_INVALIDATED')throw error;return photoCount()||0}
+      const before=photoCount()
+      if(before===null||before!==state.completed.size)return before||0
+      const transfer=new DataTransfer()
+      transfer.items.add(fileFromBase64(response.dataBase64,target[index].name||`veiculo-${index+1}.jpg`,target[index].mimeType||response.mimeType))
+      state.awaiting={index,before}
+      const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'files')?.set
+      if(setter)setter.call(input,transfer.files)
+      else Object.defineProperty(input,'files',{configurable:true,value:transfer.files})
+      input.dispatchEvent(new Event('input',{bubbles:true}))
+      input.dispatchEvent(new Event('change',{bubbles:true}))
+      const deadline=Date.now()+30000
+      while(Date.now()<deadline){
+        await sleep(500)
+        const accepted=photoCount()
+        if(accepted===before+1){state.completed.add(index);state.awaiting=null;break}
+        if(accepted!==null&&accepted!==before)return accepted
+      }
+      if(state.awaiting)return photoCount()||before
     }
-    return 0
+    return photoCount()||0
   }
 
   function controlText(element){return normalize([element.innerText,element.textContent,element.getAttribute?.('aria-label'),element.getAttribute?.('title')].filter(Boolean).join(' '))}
@@ -525,7 +555,7 @@
         const retried=await step(field.label,field.run)
         if(retried[1])resultMap.set(field.label,retried)
       }
-      if(imageCount===0&&attempt===0){
+      if(imageCount<expectedImageCount&&attempt===0){
         imageCount=await uploadImages(vehicle.images)
         resultMap.set('Fotos',['Fotos',expectedImageCount>0&&imageCount===expectedImageCount])
       }
@@ -581,7 +611,7 @@
 
   async function reportResult(message){
     try{await runtimeMessage(message);return true}
-    catch(error){console.warn('AutoFlow: resultado preservado para reenvio pelo background',error);return false}
+    catch(error){if(error.code==='CONTEXT_INVALIDATED')throw error;console.warn('AutoFlow: resultado preservado para reenvio pelo background',error);return false}
   }
 
   function showNotice(results,vehicle,flow){
@@ -628,6 +658,7 @@
       stopActivity=startExecutionActivity(boundTask)
       return await fill(boundTask)
     }catch(error){
+      if(contextError(error)?.code==='CONTEXT_INVALIDATED')return false
       console.error('AutoFlow: falha no preenchimento',error)
       if(boundTask?.jobId&&boundTask.documentId)return await reportResult({
         type:'AUTOFLOW_FILL_ERROR',
@@ -650,12 +681,15 @@
       attempts++
       if(document.querySelector('input,textarea,[role="combobox"],[contenteditable="true"]')){
         clearInterval(timer)
-        run(task).finally(()=>chrome.storage.local.remove('pendingVehicle'))
+        run(task).finally(()=>{try{return chrome.storage.local.remove('pendingVehicle').catch(()=>{})}catch{/* contexto recarregado */}})
       }else if(attempts>40){
         clearInterval(timer)
         run({...task,startupError:'O formulário do Marketplace não ficou disponível.'})
       }
     },500)
   })
-  chrome.runtime.onMessage.addListener(message=>{if(message.type==='FILL_VEHICLE')run(message.task||message.vehicle)})
+  chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
+    if(message.type==='AUTOFLOW_EXECUTION_PROBE'){sendResponse({active:runningJobs.has(message.jobId)});return}
+    if(message.type==='FILL_VEHICLE')run(message.task||message.vehicle)
+  })
 })()

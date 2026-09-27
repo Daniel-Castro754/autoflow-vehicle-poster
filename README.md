@@ -4,7 +4,7 @@ Painel inicial para estoque, atribuição de vendedores e acompanhamento da fila
 
 ## Rodar localmente
 
-Requer Node.js 22.13.0 ou superior.
+Requer Node.js 22.18.0 ou superior; Node.js 24 LTS é a versão recomendada (`nvm use`).
 
 ```powershell
 npm install
@@ -74,3 +74,18 @@ npm run backup -- restore ".\backups\autoflow-backup-<timestamp>" ".\restore-tes
 A restauração só aceita um destino inexistente ou vazio. Faça ensaios periódicos em uma pasta separada e mantenha as cópias em outro dispositivo; o manifesto detecta corrupção, mas não substitui armazenamento redundante.
 
 Para testes isolados, `DATA_DIR` permite escolher outra pasta de banco e uploads, e `PORT` altera a porta da API e as URLs de imagens retornadas pelo servidor. A extensão permanece configurada para a porta padrão `3333`.
+
+## Configuração e validação
+
+Copie `.env.example` para `.env` e preencha `AUTH_SECRET`, `INITIAL_ADMIN_EMAIL` e `INITIAL_ADMIN_PASSWORD`. Os campos de segredo ficam vazios de propósito. O fuso operacional padrão é `America/Sao_Paulo`; `SCHEDULE_TIMEZONE` aceita um identificador IANA e governa o agendamento, o histórico e a contagem diária, independentemente do fuso do computador.
+
+`npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run build` e `npm test` são os mesmos gates da CI. Os testes usam bancos temporários e bloqueiam HTTP externo; não publicam no Facebook nem enviam alertas reais. `LOG_LEVEL` aceita `info`, `warn` e `error`; os logs são JSON com campos sensíveis ocultos.
+
+## Container local
+
+```sh
+docker build -t autoflow .
+docker run --rm --env-file .env -p 127.0.0.1:3333:3333 -v autoflow-data:/app/data autoflow
+```
+
+O container serve o painel compilado e a API na porta 3333, como usuário sem privilégios. Banco e fotos ficam no volume `/app/data`. Para acesso remoto, configure `PUBLIC_ORIGIN` e `CORS_ORIGINS` com as origens reais. A extensão continua usando a API local.

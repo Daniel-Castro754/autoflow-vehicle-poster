@@ -173,7 +173,7 @@ export function AiCenterView({
         timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         prompt: text,
         reply: res.reply,
-        actionTaken: res.actionTaken,
+        ...(res.actionTaken===undefined?{}:{actionTaken:res.actionTaken}),
       }
       setCommandLogs(prev => [logEntry, ...prev])
       await loadAudit()

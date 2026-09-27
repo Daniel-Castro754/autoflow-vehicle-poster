@@ -164,3 +164,8 @@
 .theme-dark .ai-parsed-description{color:#8da19a}
 .theme-dark .ai-parsed-description textarea{background:#111a18;border-color:#34443f;color:#dce8e4}
 .automation-profile.online{border-color:#a9d8c8}
+
+.help-tip .help-tip-trigger{display:inline-flex;align-items:center;justify-content:center;border:0;padding:0;background:transparent;color:inherit;cursor:help;font:inherit}
+.help-tip .help-tip-trigger:focus-visible{outline:2px solid #169974;outline-offset:3px;border-radius:50%}
+.help-tip[data-open="true"] .help-tip-bubble{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0)}
+.help-tip[data-open="false"] .help-tip-bubble{opacity:0;visibility:hidden}
