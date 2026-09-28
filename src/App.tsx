@@ -436,7 +436,7 @@ export default function App() {
     )
       return
     try {
-      const result = await api<{ resumedJobs?: number }>(
+      await api(
         `/social-accounts/${account.id}/automation`,
         {
           method: 'PATCH',
@@ -447,7 +447,7 @@ export default function App() {
       setToast(
         paused
           ? 'Automação do perfil pausada.'
-          : `Automação retomada${result.resumedJobs ? `; ${result.resumedJobs} trabalho(s) liberado(s)` : ''}.`,
+          : 'Automação retomada. Trabalhos pausados manualmente permanecem pausados.',
       )
       setTimeout(() => setToast(''), 3000)
     } catch (error) {
