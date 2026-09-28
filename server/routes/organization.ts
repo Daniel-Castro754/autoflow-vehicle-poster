@@ -356,15 +356,11 @@ export async function handleOrganizationRoute(
           SET automation_paused=1,automation_pause_reason=?,automation_paused_at=CURRENT_TIMESTAMP
           WHERE id=? AND organization_id=?`,
       ).run(reason, accountId, auth.organizationId)
-      db.prepare(
-        `UPDATE publication_jobs SET paused=1,updated_at=CURRENT_TIMESTAMP
-          WHERE organization_id=? AND social_account_id=? AND status IN ('pending','error')`,
-      ).run(auth.organizationId, accountId)
       send(res, 200, { ok: true, paused: true })
       return true
     }
-    const resumedJobs = closeSelectorCircuitBreaker(db, auth.organizationId, accountId)
-    send(res, 200, { ok: true, paused: false, resumedJobs })
+    closeSelectorCircuitBreaker(db, auth.organizationId, accountId)
+    send(res, 200, { ok: true, paused: false })
     return true
   }
 
