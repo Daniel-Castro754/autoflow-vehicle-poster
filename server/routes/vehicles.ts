@@ -11,6 +11,7 @@ import {
 import {
   csvVehicles,
   findVehicleIdentifierConflict,
+  findVehicleIdentifierConflicts,
   normalizeInventoryIdentifier,
   validateInventoryIdentifiers,
 } from '../services/vehicle-import.ts'
@@ -248,7 +249,21 @@ export async function handleVehicleMutationRoute(
           })
           continue
         }
-        const duplicate = findVehicleIdentifierConflict(db, auth.organizationId, stockCode, vin)
+        const identifierConflicts = findVehicleIdentifierConflicts(
+          db,
+          auth.organizationId,
+          stockCode,
+          vin,
+        )
+        if (identifierConflicts.length > 1) {
+          errors.push({
+            row: rowNumber,
+            error:
+              'O ID de estoque e o VIN apontam para veículos diferentes. Revise os identificadores antes de atualizar.',
+          })
+          continue
+        }
+        const duplicate = identifierConflicts[0]
         if (duplicate) {
           if (mode !== 'update') {
             skipped++
