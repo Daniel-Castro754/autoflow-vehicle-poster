@@ -35,7 +35,13 @@ import {
 } from './vehicleOptions'
 
 type ApiFn = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
-type AccountOption = { id: number; label: string; browserProfile?: string }
+type AccountOption = {
+  id: number
+  label: string
+  browserProfile?: string
+  automationPaused?: number
+  automationPauseReason?: string
+}
 type MenuState = { vehicleId: number; top: number; left: number }
 type VehiclePage = {
   vehicles: VehicleRecord[]
@@ -698,7 +704,9 @@ function QueueDrawer({
   onClose: () => void
   onQueued: () => Promise<void>
 }) {
-  const [accountId, setAccountId] = useState(accounts[0]?.id || 0)
+  const [accountId, setAccountId] = useState(
+    accounts.find((account) => !account.automationPaused)?.id || 0,
+  )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -753,13 +761,20 @@ function QueueDrawer({
                 required
               >
                 {accounts.map((account) => (
-                  <option key={account.id} value={account.id}>
+                  <option key={account.id} value={account.id} disabled={Boolean(account.automationPaused)}>
                     {account.label}
                     {account.browserProfile ? ` · ${account.browserProfile}` : ''}
+                    {account.automationPaused ? ' · pausado' : ''}
                   </option>
                 ))}
               </select>
             </label>
+            {!accounts.some((account) => !account.automationPaused) && (
+              <div className="auth-error">
+                <CircleAlert />
+                Todos os perfis estão com a automação pausada. Revise o motivo em Equipe e contas.
+              </div>
+            )}
             <div className="queue-explanation">
               <Send />
               <div>
