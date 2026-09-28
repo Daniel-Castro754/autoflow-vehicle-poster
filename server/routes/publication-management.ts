@@ -51,6 +51,7 @@ export function isPublicationManagementRoute(req: IncomingMessage, url: URL) {
       '/api/publications/extension-visibility',
       '/api/publications/queue-state',
       '/api/publications/reassign',
+      '/api/publications/reprocess-batch',
       '/api/publications/schedule-batch',
     ].includes(url.pathname)
   )
@@ -264,6 +265,70 @@ export async function handlePublicationManagementRoute(
       )
     return send(res, 200, { updated: ids.length, visible: Boolean(visible) })
   }
+  if (req.method === 'PATCH' && url.pathname === '/api/publications/reprocess-batch') {
+    const b = (await jsonBody(req)) as Record<string, unknown>
+    const ids = Array.isArray(b.ids)
+      ? [...new Set(b.ids.map(Number).filter(Number.isInteger))].slice(0, 100)
+      : []
+    if (!ids.length) return send(res, 400, { error: 'Selecione pelo menos um trabalho com erro.' })
+    const placeholders = ids.map(() => '?').join(',')
+    const jobs = db
+      .prepare(
+        `SELECT j.id,j.status,j.social_account_id accountId,
+          COALESCE(a.automation_paused,0) automationPaused,
+          COALESCE(a.automation_pause_reason,'') automationPauseReason
+        FROM publication_jobs j
+        LEFT JOIN social_accounts a ON a.id=j.social_account_id AND a.organization_id=j.organization_id
+        WHERE j.organization_id=? AND j.id IN (${placeholders})`,
+      )
+      .all(auth.organizationId, ...ids) as Array<{
+      id: number
+      status: string
+      accountId?: number
+      automationPaused: number
+      automationPauseReason: string
+    }>
+    if (jobs.length !== ids.length)
+      return send(res, 400, { error: 'Um ou mais trabalhos não pertencem a esta empresa.' })
+    if (!canManageJobs(ids, auth))
+      return send(res, 403, { error: 'Você não pode reprocessar trabalhos de outro perfil.' })
+    if (jobs.some((job) => job.status !== 'error'))
+      return send(res, 409, {
+        error: 'O reprocessamento em lote aceita somente trabalhos no estado Erro.',
+      })
+    if (jobsIncludeSoldVehicle(ids, auth.organizationId))
+      return send(res, 409, { error: 'Veículos vendidos não podem voltar à fila.' })
+    const pausedAccount = jobs.find((job) => job.automationPaused)
+    if (pausedAccount)
+      return send(res, 423, {
+        error:
+          pausedAccount.automationPauseReason ||
+          'Um dos perfis selecionados está com a automação pausada até revisão do Marketplace.',
+        accountPaused: true,
+      })
+
+    db.exec('BEGIN')
+    try {
+      db.prepare(
+        `UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,
+          error_code=NULL,fill_report='',publish_attempt_at=NULL,last_lease_token=NULL,
+          started_at=NULL,filled_at=NULL,removed_at=NULL,lease_token=NULL,lease_owner=NULL,
+          lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP
+        WHERE organization_id=? AND id IN (${placeholders})`,
+      ).run(auth.organizationId, ...ids)
+      for (const id of ids)
+        recordJobEvent(auth.organizationId, id, 'retry_requested', auth.userId, {
+          status: 'pending',
+          batch: true,
+        })
+      db.exec('COMMIT')
+    } catch (error) {
+      db.exec('ROLLBACK')
+      throw error
+    }
+    return send(res, 200, { ok: true, updated: ids.length })
+  }
+
   if (req.method === 'PATCH' && url.pathname === '/api/publications/queue-state') {
     const b = (await jsonBody(req)) as Record<string, unknown>
     const ids = Array.isArray(b.ids) ? [...new Set(b.ids.map(Number).filter(Number.isInteger))] : []
