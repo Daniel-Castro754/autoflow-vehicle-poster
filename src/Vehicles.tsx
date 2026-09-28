@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useState } from 'react'
+import { useDeferredValue, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Car,
@@ -17,6 +17,7 @@ import {
   Sparkles,
   Tag,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react'
 import { FieldLabel, HelpTip } from './HelpTip'
@@ -50,6 +51,8 @@ export type VehicleRecord = {
   trim: string
   price: number
   km: number
+  stockCode?: string
+  vin?: string
   seller: string
   initials: string
   status: 'Pronto' | 'Publicado' | 'Rascunho' | 'Atenção' | 'Vendido'
@@ -158,6 +161,8 @@ export default function VehiclesView({
     pageSize: 25,
   })
   const [summary, setSummary] = useState<VehicleSummary | null>(null)
+  const [importing, setImporting] = useState(false)
+  const importInputRef = useRef<HTMLInputElement>(null)
   const deferredQuery = useDeferredValue(query)
 
   useEffect(() => {
@@ -275,6 +280,50 @@ export default function VehiclesView({
     }
   }
 
+  async function importCsv(file?: File) {
+    if (!file) return
+    if (file.size > 2 * 1024 * 1024) {
+      notify('O CSV deve ter no máximo 2 MB.')
+      return
+    }
+    const mode = window.confirm(
+      'Deseja atualizar veículos existentes quando o ID de estoque ou VIN já estiver cadastrado?\n\nOK = atualizar existentes\nCancelar = importar somente novos',
+    )
+      ? 'update'
+      : 'skip'
+    setImporting(true)
+    try {
+      const result = await api<{
+        total: number
+        created: number
+        updated: number
+        skipped: number
+        failed: number
+        errors: Array<{ row: number; error: string }>
+      }>('/vehicles/import', {
+        method: 'POST',
+        body: JSON.stringify({ csv: await file.text(), mode }),
+      })
+      notify(
+        `CSV processado: ${result.created} novo(s), ${result.updated} atualizado(s), ${result.skipped} ignorado(s), ${result.failed} com erro.`,
+      )
+      if (result.errors.length) {
+        window.alert(
+          ['Linhas que precisam de revisão:', ...result.errors.slice(0, 12).map((item) => `Linha ${item.row}: ${item.error}`)].join(
+            '\n',
+          ),
+        )
+      }
+      setPage(1)
+      await reload()
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Erro ao importar CSV')
+    } finally {
+      setImporting(false)
+      if (importInputRef.current) importInputRef.current.value = ''
+    }
+  }
+
   return (
     <section className="content vehicles-page">
       <div className="title-row">
@@ -282,15 +331,32 @@ export default function VehiclesView({
           <h1>Veículos</h1>
           <p>Gerencie dados, fotos e publicações do estoque.</p>
         </div>
-        <div className="action-with-help">
-          <button className="primary" onClick={() => setEditor(null)}>
-            <Plus size={18} />
-            Adicionar veículo
-          </button>
-          <HelpTip
-            text="Cadastre todos os dados e as fotos antes de colocar o veículo na fila de publicação."
-            placement="bottom"
+        <div className="title-actions">
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            hidden
+            onChange={(event) => void importCsv(event.target.files?.[0])}
           />
+          <button
+            className="secondary"
+            onClick={() => importInputRef.current?.click()}
+            disabled={importing}
+          >
+            <Upload size={18} />
+            {importing ? 'Importando...' : 'Importar CSV'}
+          </button>
+          <div className="action-with-help">
+            <button className="primary" onClick={() => setEditor(null)}>
+              <Plus size={18} />
+              Adicionar veículo
+            </button>
+            <HelpTip
+              text="Cadastre todos os dados e as fotos antes de colocar o veículo na fila de publicação."
+              placement="bottom"
+            />
+          </div>
         </div>
       </div>
       <div className="stats">
@@ -767,6 +833,8 @@ function VehicleDrawer({
       trim: form.get('trim'),
       price: Number(form.get('price')),
       km: Number(form.get('km')),
+      stockCode: form.get('stockCode'),
+      vin: form.get('vin'),
       vehicleType: form.get('vehicleType'),
       location: form.get('location'),
       transmission: form.get('transmission'),
@@ -954,6 +1022,29 @@ function VehicleDrawer({
               <label>
                 <FieldLabel help="Versão ou acabamento, por exemplo XEi 2.0.">Versão</FieldLabel>
                 <input name="trim" defaultValue={vehicle?.trim || ''} placeholder="XEi 2.0" />
+              </label>
+              <label>
+                <FieldLabel help="Código interno único do estoque. É usado para evitar importações e cadastros duplicados.">
+                  ID de estoque
+                </FieldLabel>
+                <input
+                  name="stockCode"
+                  defaultValue={vehicle?.stockCode || ''}
+                  placeholder="Ex.: LJ-004218"
+                  maxLength={64}
+                />
+              </label>
+              <label>
+                <FieldLabel help="VIN ou chassi. Quando informado, também é tratado como identificador único dentro da empresa.">
+                  VIN / chassi
+                </FieldLabel>
+                <input
+                  name="vin"
+                  defaultValue={vehicle?.vin || ''}
+                  placeholder="Ex.: 9BW..."
+                  maxLength={32}
+                  autoCapitalize="characters"
+                />
               </label>
               <label>
                 <FieldLabel help="Cidade usada no anúncio. Se ficar em branco, será aplicada a localização padrão das Configurações. O Facebook pode pedir a confirmação de uma sugestão.">
