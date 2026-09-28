@@ -36,7 +36,7 @@ export function findBestAccountForVehicle(
           AND busy.social_account_id=a.id AND busy.vehicle_id=?
           AND busy.status IN ('pending','filling','error','awaiting_confirmation')) busy
       FROM social_accounts a
-      WHERE a.organization_id = ? AND a.status = 'connected'
+      WHERE a.organization_id = ? AND a.status = 'connected' AND COALESCE(a.automation_paused,0)=0
       ORDER BY a.label
     `,
     )

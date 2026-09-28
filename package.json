@@ -18,7 +18,7 @@
     "test:publish-safety": "node --import=./tests/helpers/offline.mjs tests/publish-safety.mjs",
     "test:backup": "node --import=./tests/helpers/offline.mjs tests/backup.mjs",
     "backup": "node scripts/backup.mjs",
-    "test": "npm run test:stock && npm run test:queue && npm run test:autonomous && npm run test:extension-consumer && npm run test:backup && npm run test:publish-safety && npm run test:audit && npm run test:fipe && npm run test:timezone && npm run test:sessions && npm run test:extension-resilience && npm run test:operations",
+    "test": "npm run test:stock && npm run test:queue && npm run test:autonomous && npm run test:extension-consumer && npm run test:backup && npm run test:publish-safety && npm run test:audit && npm run test:fipe && npm run test:timezone && npm run test:sessions && npm run test:extension-resilience && npm run test:operations && npm run test:selector-config && npm run test:vehicle-import && npm run test:selector-health",
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
@@ -29,7 +29,11 @@
     "test:timezone": "node --import=./tests/helpers/offline.mjs tests/scheduler-timezone.mjs",
     "test:sessions": "node --import=./tests/helpers/offline.mjs tests/session-expiry.mjs",
     "test:extension-resilience": "node --import=./tests/helpers/offline.mjs tests/extension-resilience.mjs",
-    "test:operations": "node --import=./tests/helpers/offline.mjs tests/operations.mjs"
+    "test:operations": "node --import=./tests/helpers/offline.mjs tests/operations.mjs",
+    "build:extension": "node scripts/build-extension.mjs",
+    "test:selector-config": "node tests/selector-config.mjs",
+    "test:vehicle-import": "node tests/vehicle-import.mjs",
+    "test:selector-health": "node tests/selector-health.mjs"
   },
   "dependencies": {
     "lucide-react": "1.31.0",

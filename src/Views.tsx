@@ -58,7 +58,13 @@ type Vehicle = {
   imageCount?: number
   updatedAt?: string
 }
-type AccountOption = { id: number; label: string; owner?: string }
+type AccountOption = {
+  id: number
+  label: string
+  owner?: string
+  automationPaused?: number
+  automationPauseReason?: string
+}
 type OverviewData = {
   vehicleStats?: {
     inventoryValue?: number
@@ -682,6 +688,27 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
       setMessage(err instanceof Error ? err.message : 'Erro ao atualizar os trabalhos')
     }
   }
+  async function reprocessBatch(ids: number[]) {
+    if (!ids.length) return
+    try {
+      const result = await api<{ updated: number }>('/publications/reprocess-batch', {
+        method: 'PATCH',
+        body: JSON.stringify({ ids }),
+      })
+      setSelected((current) => {
+        const next = new Set(current)
+        ids.forEach((id) => next.delete(id))
+        return next
+      })
+      setMessage(
+        `${result.updated} trabalho${result.updated === 1 ? '' : 's'} devolvido${result.updated === 1 ? '' : 's'} à fila para nova tentativa.`,
+      )
+      await load()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Erro ao reprocessar os trabalhos')
+    }
+  }
+
   async function movePriority(id: number, direction: 'up' | 'down') {
     try {
       await api(`/publications/${id}/priority`, {
@@ -848,13 +875,20 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
   )
   const allExtensionSelected =
     activeJobs.length > 0 && activeJobs.every((job) => selected.has(job.id))
+  const selectedErrorIds = filteredJobs
+    .filter((job) => job.status === 'error' && selected.has(job.id))
+    .map((job) => job.id)
   const pending = publicationStats.pending,
     completed = publicationStats.completed,
     errors = publicationStats.errors
   const scheduledCount = publicationStats.scheduled
   const eligibleReassignAccounts = reassignIds
-    ? accounts.filter((account) =>
-        reassignIds.every((id) => pageJobs.find((job) => job.id === id)?.accountId !== account.id),
+    ? accounts.filter(
+        (account) =>
+          !account.automationPaused &&
+          reassignIds.every(
+            (id) => pageJobs.find((job) => job.id === id)?.accountId !== account.id,
+          ),
       )
     : []
   const onlineProfiles = profiles.filter((profile) => profile.online).length
@@ -1258,6 +1292,15 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
                 <Play />
                 Retomar
               </button>
+              {selectedErrorIds.length > 0 && (
+                <button
+                  onClick={() => reprocessBatch(selectedErrorIds)}
+                  title="Recoloca somente os trabalhos com erro no início da fila"
+                >
+                  <RotateCcw size={14} />
+                  Reprocessar erros ({selectedErrorIds.length})
+                </button>
+              )}
               {selected.size > 1 && (
                 <button onClick={() => openBatchSchedule([...selected])}>
                   <CalendarClock />
@@ -1611,8 +1654,9 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
                 <select name="accountId" required>
                   <option value="">Selecione o perfil responsável</option>
                   {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
+                    <option key={a.id} value={a.id} disabled={Boolean(a.automationPaused)}>
                       {a.label}
+                      {a.automationPaused ? ' · pausado' : ''}
                     </option>
                   ))}
                 </select>

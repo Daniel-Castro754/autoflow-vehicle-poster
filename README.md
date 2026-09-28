@@ -28,13 +28,14 @@ O comando `npm run dev` inicia o painel em `http://localhost:5173` e a API em `h
 - Busca e filtro por status
 - Indicadores de estoque e publicação
 - Cadastro persistente de veículos
+- Importação CSV de estoque com atualização opcional por ID de estoque/VIN e prevenção de duplicidade
 - Login com sessão assinada e senha protegida por scrypt
 - Banco SQLite local com isolamento por empresa
 - Modelos para equipe, contas sociais e fila de publicação
 - Tela de equipe com criação de vendedores
 - Associação de responsáveis a perfis locais do Brave
 - Estado de conexão preparado para a extensão
-- Extensão Manifest V3 experimental para Brave em `extension-mv2/` (nome legado do diretório)
+- Extensão Manifest V3 para Brave em `extension/`, com mapa de seletores versionado e diagnóstico de layout
 - Fila da extensão e preenchimento assistido do Marketplace
 - Tema claro/escuro persistente por navegador
 - Central de notificações com atalhos operacionais
@@ -51,7 +52,8 @@ O comando `npm run dev` inicia o painel em `http://localhost:5173` e a API em `h
 - Ajuda contextual acessível com indicadores `?` e avisos `!`
 - Fila isolada por trabalho e perfil ativo do Brave
 - Lease renovado somente por mensagens do content script da mesma aba e documento; uma aba aberta e o alarme do worker não mantêm uma execução viva
-- Retorno de preenchimento com campos encontrados, pendências, fotos e versão da extensão
+- Retorno de preenchimento com campos encontrados, pendências, fotos, idioma da página, versão da extensão e versão do mapa de seletores
+- Circuit breaker por perfil: falhas graves de layout pausam apenas a automação afetada até revisão e retomada pelo administrador
 - Estados operacionais `Pendente`, `Preenchendo`, `Aguardando confirmação`, `Concluída` e `Erro`
 - O piloto automático aplica os mesmos requisitos de publicação da fila normal, incluindo campos completos, fotos válidas e proteção contra anúncios duplicados
 - Agendamento recorrente configurável por organização, com execução exclusiva entre o worker e comandos manuais
@@ -81,7 +83,7 @@ Para testes isolados, `DATA_DIR` permite escolher outra pasta de banco e uploads
 
 Copie `.env.example` para `.env` e preencha `AUTH_SECRET`, `INITIAL_ADMIN_EMAIL` e `INITIAL_ADMIN_PASSWORD`. Os campos de segredo ficam vazios de propósito. O fuso operacional padrão é `America/Sao_Paulo`; `SCHEDULE_TIMEZONE` aceita um identificador IANA e governa o agendamento, o histórico e a contagem diária, independentemente do fuso do computador.
 
-`npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run build` e `npm test` são os mesmos gates da CI. Os testes usam bancos temporários e bloqueiam HTTP externo; não publicam no Facebook nem enviam alertas reais. `LOG_LEVEL` aceita `info`, `warn` e `error`; os logs são JSON com campos sensíveis ocultos.
+`npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run build`, `npm run build:extension` e `npm test` são os mesmos gates da CI. Os testes usam bancos temporários e bloqueiam HTTP externo; não publicam no Facebook nem enviam alertas reais. `LOG_LEVEL` aceita `info`, `warn` e `error`; os logs são JSON com campos sensíveis ocultos.
 
 Para ativar a criação periódica da fila, use **Configurações → Agendar estoque automaticamente** e escolha o intervalo. A configuração **Publicar automaticamente** continua independente. Detalhes sobre limites, métricas, logs e alertas estão em [Operação autônoma e observabilidade](docs/AUTONOMOUS_OPERATIONS.md).
 
@@ -93,3 +95,13 @@ docker run --rm --env-file .env -p 127.0.0.1:3333:3333 -v autoflow-data:/app/dat
 ```
 
 O container serve o painel compilado e a API na porta 3333, como usuário sem privilégios. Banco e fotos ficam no volume `/app/data`. Para acesso remoto, configure `PUBLIC_ORIGIN` e `CORS_ORIGINS` com as origens reais. A extensão continua usando a API local.
+
+## Extensão local
+
+Para gerar uma pasta pronta para **Carregar sem compactação** e também um ZIP versionado:
+
+```powershell
+npm run build:extension
+```
+
+Os artefatos ficam em `dist/extension/` e `dist/autoflow-extension-v<versão>.zip`. O fonte da extensão fica em `extension/`.

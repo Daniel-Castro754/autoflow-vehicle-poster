@@ -44,6 +44,9 @@ type SocialAccount = {
   status: string
   browserProfile: string
   lastSeenAt?: string
+  automationPaused?: number
+  automationPauseReason?: string
+  automationPausedAt?: string
 }
 type OperationalStats = {
   vehicles: {
@@ -423,6 +426,33 @@ export default function App() {
     }
   }
 
+  async function setAccountAutomation(account: SocialAccount, paused: boolean) {
+    if (
+      !window.confirm(
+        paused
+          ? `Pausar a automação de ${account.label}?`
+          : `Retomar a automação de ${account.label}? Os trabalhos pendentes voltarão a ficar disponíveis para a extensão.`,
+      )
+    )
+      return
+    try {
+      await api(`/social-accounts/${account.id}/automation`, {
+        method: 'PATCH',
+        body: JSON.stringify({ paused }),
+      })
+      await loadTeam()
+      setToast(
+        paused
+          ? 'Automação do perfil pausada.'
+          : 'Automação retomada. Trabalhos pausados manualmente permanecem pausados.',
+      )
+      setTimeout(() => setToast(''), 3000)
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : 'Erro ao alterar a automação do perfil')
+      setTimeout(() => setToast(''), 3000)
+    }
+  }
+
   async function toggleUser(user: TeamUser) {
     const active = user.active !== 1
     if (
@@ -650,6 +680,7 @@ export default function App() {
             onToggleUser={toggleUser}
             onAddUser={addUser}
             onAddAccount={addAccount}
+            onSetAccountAutomation={setAccountAutomation}
           />
         ) : active === 'Relatórios' ? (
           <ReportsView api={api} vehicles={vehicles} />
@@ -768,6 +799,7 @@ function TeamView({
   onToggleUser,
   onAddUser,
   onAddAccount,
+  onSetAccountAutomation,
 }: {
   team: TeamUser[]
   accounts: SocialAccount[]
@@ -775,6 +807,7 @@ function TeamView({
   onToggleUser: (user: TeamUser) => Promise<void>
   onAddUser: (e: React.FormEvent<HTMLFormElement>) => Promise<boolean>
   onAddAccount: (e: React.FormEvent<HTMLFormElement>) => Promise<boolean>
+  onSetAccountAutomation: (account: SocialAccount, paused: boolean) => Promise<void>
 }) {
   const [modal, setModal] = useState<'user' | 'account' | null>(null)
   return (
@@ -873,10 +906,22 @@ function TeamView({
                         {account.browserProfile} · {owner?.name || 'Sem responsável'}
                       </small>
                     </div>
-                    <span className="connection">
+                    <span
+                      className={`connection ${account.automationPaused ? 'paused' : ''}`}
+                      title={account.automationPauseReason || ''}
+                    >
                       <i />
-                      Aguardando extensão
+                      {account.automationPaused ? 'Automação pausada' : 'Aguardando extensão'}
                     </span>
+                    {account.automationPaused && canManage && (
+                      <button
+                        className="team-user-toggle"
+                        onClick={() => void onSetAccountAutomation(account, false)}
+                        title={account.automationPauseReason || 'Retomar automação'}
+                      >
+                        Retomar
+                      </button>
+                    )}
                   </div>
                 )
               })}

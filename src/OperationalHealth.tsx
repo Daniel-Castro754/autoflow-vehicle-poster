@@ -10,12 +10,24 @@ type Report = {
   warningCount: number
   jobs: { pending: number; active: number; awaitingConfirmation: number }
   performance: { completed: number; errors: number; averageDurationSeconds: number | null }
+  selectorHealth: {
+    checks: number
+    severe: number
+    averageSuccessRate: number
+    failingFields: Array<{ field: string; failures: number }>
+  }
   accounts: Array<{
     id: number
     label: string
     completed: number
     errors: number
     successRate: number | null
+    automationPaused?: number
+    automationPauseReason?: string
+    selectorChecks?: number
+    selectorSevereFailures?: number
+    selectorSuccessRate?: number | null
+    averageDurationSeconds?: number | null
   }>
   autopilot: {
     enabled: number
@@ -130,7 +142,36 @@ export function OperationalHealth({ api }: { api: <T>(path: string) => Promise<T
                   : `${Math.round(report.performance.averageDurationSeconds)} s`}
               </dd>
             </div>
+            <div>
+              <dt>Checks de seletores · 24h</dt>
+              <dd>{report.selectorHealth.checks}</dd>
+            </div>
+            <div>
+              <dt>Drift grave · 24h</dt>
+              <dd>{report.selectorHealth.severe}</dd>
+            </div>
           </dl>
+          {report.accounts.some((account) => account.automationPaused) && (
+            <p className="health-error">
+              <strong>Automação pausada:</strong>{' '}
+              {report.accounts
+                .filter((account) => account.automationPaused)
+                .map((account) =>
+                  account.automationPauseReason
+                    ? `${account.label} — ${account.automationPauseReason}`
+                    : account.label,
+                )
+                .join(' · ')}
+            </p>
+          )}
+          {report.selectorHealth.failingFields.length > 0 && (
+            <p className="health-note">
+              <strong>Campos com mais falhas de localização nas últimas 24h:</strong>{' '}
+              {report.selectorHealth.failingFields
+                .map((item) => `${item.field} (${item.failures})`)
+                .join(' · ')}
+            </p>
+          )}
           <p className="health-autopilot">
             <strong>
               Agendamento recorrente: {report.autopilot.enabled ? 'ativo' : 'desligado'}.
@@ -156,18 +197,36 @@ export function OperationalHealth({ api }: { api: <T>(path: string) => Promise<T
                     <th scope="col">Publicados</th>
                     <th scope="col">Em erro</th>
                     <th scope="col">Sucesso</th>
+                    <th scope="col">Seletores</th>
                   </tr>
                 </thead>
                 <tbody>
                   {report.accounts.map((account) => (
                     <tr key={account.id}>
-                      <th scope="row">{account.label}</th>
+                      <th scope="row">
+                        {account.label}
+                        {account.automationPaused ? (
+                          <small className="job-report warning">Automação pausada</small>
+                        ) : null}
+                      </th>
                       <td>{account.completed}</td>
                       <td>{account.errors}</td>
                       <td>
                         {account.successRate === null
                           ? '—'
                           : `${Math.round(account.successRate * 100)}%`}
+                      </td>
+                      <td
+                        title={
+                          account.selectorChecks
+                            ? `${account.selectorChecks} check(s); ${account.selectorSevereFailures || 0} falha(s) grave(s)`
+                            : 'Sem diagnóstico de seletores no período'
+                        }
+                      >
+                        {account.selectorSuccessRate === null ||
+                        account.selectorSuccessRate === undefined
+                          ? '—'
+                          : `${Math.round(account.selectorSuccessRate * 100)}%`}
                       </td>
                     </tr>
                   ))}

@@ -8,6 +8,13 @@ import {
   validImageContent,
   validateVehicleBody,
 } from '../services/vehicle-input.ts'
+import {
+  csvVehicles,
+  findVehicleIdentifierConflict,
+  findVehicleIdentifierConflicts,
+  normalizeInventoryIdentifier,
+  validateInventoryIdentifiers,
+} from '../services/vehicle-import.ts'
 
 type AuthContext = { userId: number; organizationId: number }
 type Dependencies = {
@@ -44,6 +51,7 @@ type VehiclePageStatements = {
 }
 
 const vehicleSelect = `SELECT v.id,v.year,v.make,v.model,v.trim,v.price,v.km,v.color,v.status,
+  v.stock_code stockCode,v.vin,
   v.vehicle_type vehicleType,v.location,v.transmission,v.fuel_type fuelType,v.body_type bodyType,
   v.exterior_color exteriorColor,v.interior_color interiorColor,v.vehicle_condition condition,v.description,v.sold_at soldAt,
   COALESCE(u.name,'Não atribuído') seller,
@@ -57,10 +65,10 @@ export function createVehiclePageStatements(db: DatabaseSync): VehiclePageStatem
   return {
     count:
       db.prepare(`SELECT COUNT(*) total FROM vehicles v LEFT JOIN users u ON u.id=v.assigned_user_id
-      WHERE v.organization_id=? AND (?='' OR lower(v.make||' '||v.model||' '||CAST(v.year AS TEXT)||' '||COALESCE(u.name,'')) LIKE '%'||lower(?)||'%')
+      WHERE v.organization_id=? AND (?='' OR lower(v.make||' '||v.model||' '||CAST(v.year AS TEXT)||' '||COALESCE(v.stock_code,'')||' '||COALESCE(v.vin,'')||' '||COALESCE(u.name,'')) LIKE '%'||lower(?)||'%')
       AND (?='Todos' OR v.status=?)`),
     list: db.prepare(`${vehicleSelect}
-      WHERE v.organization_id=? AND (?='' OR lower(v.make||' '||v.model||' '||CAST(v.year AS TEXT)||' '||COALESCE(u.name,'')) LIKE '%'||lower(?)||'%')
+      WHERE v.organization_id=? AND (?='' OR lower(v.make||' '||v.model||' '||CAST(v.year AS TEXT)||' '||COALESCE(v.stock_code,'')||' '||COALESCE(v.vin,'')||' '||COALESCE(u.name,'')) LIKE '%'||lower(?)||'%')
       AND (?='Todos' OR v.status=?) ORDER BY v.updated_at DESC,v.id DESC LIMIT ? OFFSET ?`),
     all: db.prepare(`${vehicleSelect} WHERE v.organization_id=? ORDER BY v.updated_at DESC`),
     summary: db.prepare(`WITH inventory AS (
@@ -198,12 +206,169 @@ export async function handleVehicleMutationRoute(
     recordJobEvent,
   }: MutationDependencies,
 ): Promise<boolean> {
+  if (req.method === 'POST' && url.pathname === '/api/vehicles/import') {
+    const body = (await jsonBody(req, 2 * 1024 * 1024)) as Record<string, unknown>
+    const csv = String(body.csv || '')
+    if (!csv.trim()) {
+      send(res, 400, { error: 'Envie o conteúdo do arquivo CSV.' })
+      return true
+    }
+    const mode = body.mode === 'update' ? 'update' : 'skip'
+    let rows: Array<Record<string, unknown>>
+    try {
+      rows = csvVehicles(csv, 2000)
+    } catch (error) {
+      send(res, 400, { error: error instanceof Error ? error.message : 'CSV inválido.' })
+      return true
+    }
+    if (!rows.length) {
+      send(res, 400, { error: 'O CSV não contém linhas de veículos.' })
+      return true
+    }
+    let created = 0,
+      updated = 0,
+      skipped = 0
+    const errors: Array<{ row: number; error: string }> = []
+    db.exec('BEGIN')
+    try {
+      for (let index = 0; index < rows.length; index++) {
+        const rowNumber = index + 2
+        const vehicleInput = applyVehicleDefaults(db, rows[index], auth.organizationId)
+        const stockCode = normalizeInventoryIdentifier(vehicleInput.stockCode)
+        const vin = normalizeInventoryIdentifier(vehicleInput.vin)
+        const identifierError = validateInventoryIdentifiers(stockCode, vin)
+        const validationError = identifierError || validateVehicleBody(vehicleInput)
+        if (validationError) {
+          errors.push({ row: rowNumber, error: validationError })
+          continue
+        }
+        if (terminalVehicleStatuses.has(String(vehicleInput.status || 'Rascunho'))) {
+          errors.push({
+            row: rowNumber,
+            error: 'CSV não pode definir diretamente um veículo como Publicado ou Vendido.',
+          })
+          continue
+        }
+        const identifierConflicts = findVehicleIdentifierConflicts(
+          db,
+          auth.organizationId,
+          stockCode,
+          vin,
+        )
+        if (identifierConflicts.length > 1) {
+          errors.push({
+            row: rowNumber,
+            error:
+              'O ID de estoque e o VIN apontam para veículos diferentes. Revise os identificadores antes de atualizar.',
+          })
+          continue
+        }
+        const duplicate = identifierConflicts[0]
+        if (duplicate) {
+          if (mode !== 'update') {
+            skipped++
+            continue
+          }
+          const current = db
+            .prepare('SELECT status FROM vehicles WHERE id=? AND organization_id=?')
+            .get(duplicate.id, auth.organizationId) as { status: string } | undefined
+          if (!current || terminalVehicleStatuses.has(current.status)) {
+            skipped++
+            continue
+          }
+          db.prepare(
+            `UPDATE vehicles SET year=?,make=?,model=?,trim=?,price=?,km=?,stock_code=?,vin=?,vehicle_type=?,location=?,transmission=?,fuel_type=?,body_type=?,exterior_color=?,interior_color=?,vehicle_condition=?,description=?,status=?,assigned_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`,
+          ).run(
+            Number(vehicleInput.year),
+            String(vehicleInput.make),
+            String(vehicleInput.model).trim(),
+            String(vehicleInput.trim || ''),
+            Number(vehicleInput.price),
+            Number(vehicleInput.km),
+            stockCode,
+            vin,
+            String(vehicleInput.vehicleType),
+            String(vehicleInput.location).trim(),
+            String(vehicleInput.transmission),
+            String(vehicleInput.fuelType),
+            String(vehicleInput.bodyType),
+            String(vehicleInput.exteriorColor),
+            String(vehicleInput.interiorColor),
+            String(vehicleInput.condition),
+            String(vehicleInput.description).trim(),
+            String(vehicleInput.status || 'Rascunho'),
+            auth.userId,
+            duplicate.id,
+            auth.organizationId,
+          )
+          updated++
+          continue
+        }
+        db.prepare(
+          `INSERT INTO vehicles (organization_id,year,make,model,trim,price,km,stock_code,vin,status,assigned_user_id,vehicle_type,location,transmission,fuel_type,body_type,exterior_color,interior_color,vehicle_condition,description)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        ).run(
+          auth.organizationId,
+          Number(vehicleInput.year),
+          String(vehicleInput.make),
+          String(vehicleInput.model).trim(),
+          String(vehicleInput.trim || ''),
+          Number(vehicleInput.price),
+          Number(vehicleInput.km),
+          stockCode,
+          vin,
+          String(vehicleInput.status || 'Rascunho'),
+          auth.userId,
+          String(vehicleInput.vehicleType),
+          String(vehicleInput.location).trim(),
+          String(vehicleInput.transmission),
+          String(vehicleInput.fuelType),
+          String(vehicleInput.bodyType),
+          String(vehicleInput.exteriorColor),
+          String(vehicleInput.interiorColor),
+          String(vehicleInput.condition),
+          String(vehicleInput.description).trim(),
+        )
+        created++
+      }
+      db.exec('COMMIT')
+    } catch (error) {
+      db.exec('ROLLBACK')
+      throw error
+    }
+    send(res, 200, {
+      total: rows.length,
+      created,
+      updated,
+      skipped,
+      failed: errors.length,
+      errors: errors.slice(0, 100),
+    })
+    return true
+  }
+
   if (req.method === 'POST' && url.pathname === '/api/vehicles') {
     const body = (await jsonBody(req)) as Record<string, unknown>
     const vehicleInput = applyVehicleDefaults(db, body, auth.organizationId)
-    const validationError = validateVehicleBody(vehicleInput)
+    const stockCode = normalizeInventoryIdentifier(vehicleInput.stockCode)
+    const vin = normalizeInventoryIdentifier(vehicleInput.vin)
+    const validationError =
+      validateInventoryIdentifiers(stockCode, vin) || validateVehicleBody(vehicleInput)
     if (validationError) {
       send(res, 400, { error: validationError })
+      return true
+    }
+    const identifierConflict = findVehicleIdentifierConflict(
+      db,
+      auth.organizationId,
+      stockCode,
+      vin,
+    )
+    if (identifierConflict) {
+      send(res, 409, {
+        error: 'Já existe um veículo com o mesmo identificador de estoque ou VIN/chassi.',
+        duplicateVehicleId: identifierConflict.id,
+      })
       return true
     }
     if (terminalVehicleStatuses.has(String(vehicleInput.status || 'Rascunho'))) {
@@ -212,8 +377,8 @@ export async function handleVehicleMutationRoute(
     }
     const result = db
       .prepare(
-        `INSERT INTO vehicles (organization_id,year,make,model,trim,price,km,status,assigned_user_id,vehicle_type,location,transmission,fuel_type,body_type,exterior_color,interior_color,vehicle_condition,description)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO vehicles (organization_id,year,make,model,trim,price,km,stock_code,vin,status,assigned_user_id,vehicle_type,location,transmission,fuel_type,body_type,exterior_color,interior_color,vehicle_condition,description)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         auth.organizationId,
@@ -223,6 +388,8 @@ export async function handleVehicleMutationRoute(
         String(vehicleInput.trim || ''),
         Number(vehicleInput.price),
         Number(vehicleInput.km),
+        stockCode,
+        vin,
         String(vehicleInput.status || 'Rascunho'),
         auth.userId,
         String(vehicleInput.vehicleType),
@@ -251,9 +418,26 @@ export async function handleVehicleMutationRoute(
       .prepare('SELECT status FROM vehicles WHERE id=? AND organization_id=?')
       .get(vehicleId, auth.organizationId) as { status: string }
     const vehicleInput = applyVehicleDefaults(db, body, auth.organizationId)
-    const validationError = validateVehicleBody(vehicleInput)
+    const stockCode = normalizeInventoryIdentifier(vehicleInput.stockCode)
+    const vin = normalizeInventoryIdentifier(vehicleInput.vin)
+    const validationError =
+      validateInventoryIdentifiers(stockCode, vin) || validateVehicleBody(vehicleInput)
     if (validationError) {
       send(res, 400, { error: validationError })
+      return true
+    }
+    const identifierConflict = findVehicleIdentifierConflict(
+      db,
+      auth.organizationId,
+      stockCode,
+      vin,
+      vehicleId,
+    )
+    if (identifierConflict) {
+      send(res, 409, {
+        error: 'Já existe outro veículo com o mesmo identificador de estoque ou VIN/chassi.',
+        duplicateVehicleId: identifierConflict.id,
+      })
       return true
     }
     const requestedStatus = String(vehicleInput.status || 'Rascunho')
@@ -267,7 +451,7 @@ export async function handleVehicleMutationRoute(
     }
     const result = db
       .prepare(
-        `UPDATE vehicles SET year=?,make=?,model=?,trim=?,price=?,km=?,vehicle_type=?,location=?,transmission=?,fuel_type=?,body_type=?,exterior_color=?,interior_color=?,vehicle_condition=?,description=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`,
+        `UPDATE vehicles SET year=?,make=?,model=?,trim=?,price=?,km=?,stock_code=?,vin=?,vehicle_type=?,location=?,transmission=?,fuel_type=?,body_type=?,exterior_color=?,interior_color=?,vehicle_condition=?,description=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`,
       )
       .run(
         Number(vehicleInput.year),
@@ -276,6 +460,8 @@ export async function handleVehicleMutationRoute(
         String(vehicleInput.trim || ''),
         Number(vehicleInput.price),
         Number(vehicleInput.km),
+        stockCode,
+        vin,
         String(vehicleInput.vehicleType),
         String(vehicleInput.location).trim(),
         String(vehicleInput.transmission),

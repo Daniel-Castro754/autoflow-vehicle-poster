@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
+import { closeSelectorCircuitBreaker } from '../services/selector-health.ts'
 
 type AuthContext = { userId: number; organizationId: number }
 type Group = {
@@ -324,6 +325,42 @@ export async function handleOrganizationRoute(
       throw error
     }
     send(res, 200, { ok: true, active: body.active })
+    return true
+  }
+
+  const accountAutomationRoute = url.pathname.match(/^\/api\/social-accounts\/(\d+)\/automation$/)
+  if (req.method === 'PATCH' && accountAutomationRoute) {
+    if (!isAdmin(auth)) {
+      send(res, 403, { error: 'Somente administradores podem alterar a automação de perfis.' })
+      return true
+    }
+    const accountId = Number(accountAutomationRoute[1])
+    const account = db
+      .prepare('SELECT id FROM social_accounts WHERE id=? AND organization_id=?')
+      .get(accountId, auth.organizationId)
+    if (!account) {
+      send(res, 404, { error: 'Perfil de publicação não encontrado.' })
+      return true
+    }
+    const body = (await jsonBody(req)) as Record<string, unknown>
+    if (typeof body.paused !== 'boolean') {
+      send(res, 400, { error: 'Informe se a automação deve ficar pausada.' })
+      return true
+    }
+    if (body.paused) {
+      const reason = String(body.reason || 'Pausa manual pelo administrador.')
+        .trim()
+        .slice(0, 500)
+      db.prepare(
+        `UPDATE social_accounts
+          SET automation_paused=1,automation_pause_reason=?,automation_paused_at=CURRENT_TIMESTAMP
+          WHERE id=? AND organization_id=?`,
+      ).run(reason, accountId, auth.organizationId)
+      send(res, 200, { ok: true, paused: true })
+      return true
+    }
+    closeSelectorCircuitBreaker(db, auth.organizationId, accountId)
+    send(res, 200, { ok: true, paused: false })
     return true
   }
 

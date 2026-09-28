@@ -360,6 +360,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   if (!originAllowed) return send(res, 403, { error: 'Origem não permitida.' })
   try {
     const url = new URL(req.url || '/', 'http://localhost')
+    if (req.method === 'GET' && url.pathname === '/health/live')
+      return send(res, 200, { status: 'alive', timestamp: new Date().toISOString() })
+    if (req.method === 'GET' && url.pathname === '/health/ready') {
+      try {
+        db.prepare('SELECT 1 value').get()
+        return send(res, 200, { status: 'ready', timestamp: new Date().toISOString() })
+      } catch {
+        return send(res, 503, { status: 'not_ready', timestamp: new Date().toISOString() })
+      }
+    }
     const uploadFile = url.pathname.match(/^\/uploads\/([a-f0-9]{24}\.(?:jpg|jpeg|png|webp))$/)
     if (req.method === 'GET' && uploadFile) {
       const path = join(uploadsDir, uploadFile[1])
