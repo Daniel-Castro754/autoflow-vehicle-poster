@@ -12,7 +12,7 @@
     fields: {},
   }
   function detectPageLocale() {
-    const declared = String(document.documentElement?.lang || navigator?.language || '').toLowerCase()
+    const declared = String(document.documentElement?.lang || globalThis.navigator?.language || '').toLowerCase()
     if (declared.startsWith('es')) return 'es-ES'
     if (declared.startsWith('en')) return 'en-US'
     if (declared.startsWith('pt')) return 'pt-BR'
