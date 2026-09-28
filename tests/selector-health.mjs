@@ -70,7 +70,10 @@ const pausedAccount = db
 assert.equal(pausedAccount.automationPaused, 1)
 assert.match(pausedAccount.reason, /Preço/)
 assert.deepEqual(
-  db.prepare('SELECT id,paused FROM publication_jobs ORDER BY id').all(),
+  db
+    .prepare('SELECT id,paused FROM publication_jobs ORDER BY id')
+    .all()
+    .map((row) => ({ ...row })),
   [
     { id: 1, paused: 0 },
     { id: 2, paused: 1 },
@@ -88,7 +91,10 @@ assert.equal(
   0,
 )
 assert.deepEqual(
-  db.prepare('SELECT id,paused FROM publication_jobs ORDER BY id').all(),
+  db
+    .prepare('SELECT id,paused FROM publication_jobs ORDER BY id')
+    .all()
+    .map((row) => ({ ...row })),
   [
     { id: 1, paused: 0 },
     { id: 2, paused: 1 },
