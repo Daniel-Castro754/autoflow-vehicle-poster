@@ -12,11 +12,15 @@
     fields: {},
   }
   function detectPageLocale() {
-    const declared = String(document.documentElement?.lang || globalThis.navigator?.language || '').toLowerCase()
+    const declared = String(
+      document.documentElement?.lang || globalThis.navigator?.language || '',
+    ).toLowerCase()
     if (declared.startsWith('es')) return 'es-ES'
     if (declared.startsWith('en')) return 'en-US'
     if (declared.startsWith('pt')) return 'pt-BR'
-    const sample = String(document.body?.innerText || '').slice(0, 6000).toLowerCase()
+    const sample = String(document.body?.innerText || '')
+      .slice(0, 6000)
+      .toLowerCase()
     if (/\b(precio|ubicaci[oó]n|kilometraje|descripci[oó]n)\b/.test(sample)) return 'es-ES'
     if (/\b(price|location|mileage|description)\b/.test(sample)) return 'en-US'
     return selectorConfig.fallbackLocale || 'pt-BR'
@@ -27,7 +31,9 @@
     const localized = spec?.labels?.[pageLocale] || []
     const fallbackLocalized = spec?.labels?.[selectorConfig.fallbackLocale] || []
     const allKnown = Object.values(spec?.labels || {}).flat()
-    return [...new Set([...localized, ...fallbackLocalized, ...allKnown, ...fallback].filter(Boolean))]
+    return [
+      ...new Set([...localized, ...fallbackLocalized, ...allKnown, ...fallback].filter(Boolean)),
+    ]
   }
   // Marcado por fillText/selectCustom quando o controle não é localizado no DOM (diferente
   // de "localizado, mas o valor não confirmou") — usado por step() para sinalizar possível
@@ -963,7 +969,10 @@
         key: 'vehicleType',
         label: 'Tipo de veículo',
         run: () =>
-          selectCustom(fieldLabels('vehicleType', ['tipo de veiculo', 'vehicle type']), vehicle.vehicleType || 'Carro/picape'),
+          selectCustom(
+            fieldLabels('vehicleType', ['tipo de veiculo', 'vehicle type']),
+            vehicle.vehicleType || 'Carro/picape',
+          ),
         critical: true,
       },
       {
@@ -988,19 +997,16 @@
       {
         key: 'model',
         label: 'Modelo',
-        run: () =>
-          selectOrFill(fieldLabels('model', ['modelo', 'model']), vehicle.model),
+        run: () => selectOrFill(fieldLabels('model', ['modelo', 'model']), vehicle.model),
         critical: true,
       },
       {
         key: 'mileage',
         label: 'Quilometragem',
         run: () =>
-          fillText(
-            fieldLabels('mileage', ['quilometragem', 'mileage', 'odometro']),
-            vehicle.km,
-            { humanTyping: true },
-          ),
+          fillText(fieldLabels('mileage', ['quilometragem', 'mileage', 'odometro']), vehicle.km, {
+            humanTyping: true,
+          }),
         critical: true,
       },
       {
@@ -1023,8 +1029,7 @@
       {
         key: 'fuelType',
         label: 'Combustível',
-        run: () =>
-          selectCustom(fieldLabels('fuelType', ['combustivel', 'fuel']), vehicle.fuelType),
+        run: () => selectCustom(fieldLabels('fuelType', ['combustivel', 'fuel']), vehicle.fuelType),
         critical: true,
       },
       {
@@ -1032,7 +1037,12 @@
         label: 'Carroceria',
         run: () =>
           selectCustom(
-            fieldLabels('bodyType', ['estilo da carroceria', 'carroceria', 'body style', 'body type']),
+            fieldLabels('bodyType', [
+              'estilo da carroceria',
+              'carroceria',
+              'body style',
+              'body type',
+            ]),
             vehicle.bodyType,
           ),
         critical: true,
@@ -1051,14 +1061,20 @@
         key: 'exteriorColor',
         label: 'Cor externa',
         run: () =>
-          selectCustom(fieldLabels('exteriorColor', ['cor externa', 'exterior color']), vehicle.exteriorColor),
+          selectCustom(
+            fieldLabels('exteriorColor', ['cor externa', 'exterior color']),
+            vehicle.exteriorColor,
+          ),
         critical: false,
       },
       {
         key: 'interiorColor',
         label: 'Cor interna',
         run: () =>
-          selectCustom(fieldLabels('interiorColor', ['cor interna', 'interior color']), vehicle.interiorColor),
+          selectCustom(
+            fieldLabels('interiorColor', ['cor interna', 'interior color']),
+            vehicle.interiorColor,
+          ),
         critical: false,
       },
       {

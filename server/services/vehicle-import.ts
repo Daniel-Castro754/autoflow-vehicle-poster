@@ -97,9 +97,11 @@ function countDelimiter(line: string, delimiter: string) {
 export function detectCsvDelimiter(text: string) {
   const firstLine = text.split(/\r?\n/).find((line) => line.trim()) || ''
   const candidates = [',', ';', '\t']
-  return candidates
-    .map((delimiter) => ({ delimiter, count: countDelimiter(firstLine, delimiter) }))
-    .sort((a, b) => b.count - a.count)[0]?.delimiter || ','
+  return (
+    candidates
+      .map((delimiter) => ({ delimiter, count: countDelimiter(firstLine, delimiter) }))
+      .sort((a, b) => b.count - a.count)[0]?.delimiter || ','
+  )
 }
 
 export function parseCsv(text: string, maxRows = 2000): string[][] {

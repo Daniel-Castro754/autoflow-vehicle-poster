@@ -17,7 +17,6 @@ Após atualizar os arquivos, abra `brave://extensions` e clique em **Recarregar*
 
 A extensão usa um service worker do Manifest V3. O heartbeat da reserva é reativado por `chrome.alarms` mesmo depois que o navegador suspende o worker, e também é reconfigurado ao instalar ou iniciar o Brave.
 
-
 ## Robustez de seletores
 
 Os labels do formulário ficam em `selector-config.js`, com versão própria e aliases para PT-BR, inglês e espanhol. O content script registra a saúde dos campos críticos em cada execução. Quando vários controles deixam de existir no DOM ao mesmo tempo, o servidor abre um circuit breaker somente para o perfil afetado e impede novas tentativas até um administrador revisar o Marketplace e clicar em **Retomar** no painel.

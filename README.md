@@ -96,7 +96,6 @@ docker run --rm --env-file .env -p 127.0.0.1:3333:3333 -v autoflow-data:/app/dat
 
 O container serve o painel compilado e a API na porta 3333, como usuário sem privilégios. Banco e fotos ficam no volume `/app/data`. Para acesso remoto, configure `PUBLIC_ORIGIN` e `CORS_ORIGINS` com as origens reais. A extensão continua usando a API local.
 
-
 ## Extensão local
 
 Para gerar uma pasta pronta para **Carregar sem compactação** e também um ZIP versionado:

@@ -25,8 +25,12 @@ export function sanitizeSelectorHealth(
   const computedRate =
     criticalTotal > 0 ? Math.max(0, Math.min(1, (criticalTotal - missingCount) / criticalTotal)) : 1
   return {
-    configVersion: String(raw.configVersion || '').trim().slice(0, 50),
-    pageLocale: String(raw.pageLocale || '').trim().slice(0, 20),
+    configVersion: String(raw.configVersion || '')
+      .trim()
+      .slice(0, 50),
+    pageLocale: String(raw.pageLocale || '')
+      .trim()
+      .slice(0, 20),
     criticalTotal,
     missingCount,
     successRate: Number.isFinite(providedRate)
@@ -73,20 +77,23 @@ export function openSelectorCircuitBreaker(
   jobId: number,
   missingFields: string[],
 ) {
-  const reason = `Possível mudança no formulário do Facebook: ${missingFields.join(', ') || 'vários campos críticos não foram encontrados'}.`.slice(
-    0,
-    500,
-  )
+  const reason =
+    `Possível mudança no formulário do Facebook: ${missingFields.join(', ') || 'vários campos críticos não foram encontrados'}.`.slice(
+      0,
+      500,
+    )
   db.prepare(
     `UPDATE social_accounts
       SET automation_paused=1,automation_pause_reason=?,automation_paused_at=CURRENT_TIMESTAMP
       WHERE id=? AND organization_id=?`,
   ).run(reason, accountId, organizationId)
-  const paused = db.prepare(
-    `UPDATE publication_jobs SET paused=1,updated_at=CURRENT_TIMESTAMP
+  const paused = db
+    .prepare(
+      `UPDATE publication_jobs SET paused=1,updated_at=CURRENT_TIMESTAMP
       WHERE organization_id=? AND social_account_id=? AND id<>?
         AND status IN ('pending','error')`,
-  ).run(organizationId, accountId, jobId)
+    )
+    .run(organizationId, accountId, jobId)
   return { reason, pausedJobs: Number(paused.changes || 0) }
 }
 
@@ -100,13 +107,15 @@ export function closeSelectorCircuitBreaker(
       SET automation_paused=0,automation_pause_reason='',automation_paused_at=NULL
       WHERE id=? AND organization_id=?`,
   ).run(accountId, organizationId)
-  const resumed = db.prepare(
-    `UPDATE publication_jobs SET paused=0,extension_visible=1,updated_at=CURRENT_TIMESTAMP
+  const resumed = db
+    .prepare(
+      `UPDATE publication_jobs SET paused=0,extension_visible=1,updated_at=CURRENT_TIMESTAMP
       WHERE organization_id=? AND social_account_id=? AND status IN ('pending','error')
         AND NOT EXISTS (
           SELECT 1 FROM vehicles v WHERE v.id=publication_jobs.vehicle_id
             AND (v.status='Vendido' OR v.sold_at IS NOT NULL)
         )`,
-  ).run(organizationId, accountId)
+    )
+    .run(organizationId, accountId)
   return Number(resumed.changes || 0)
 }

@@ -907,17 +907,9 @@ export async function handleExtensionRoute(
       selectorHealth.missingFields.length > 0 ||
       selectorHealth.configVersion
     )
-      recordSelectorHealth(
-        db,
-        auth.organizationId,
-        job.accountId,
-        job.id,
-        selectorHealth,
-      )
+      recordSelectorHealth(db, auth.organizationId, job.accountId, job.id, selectorHealth)
 
-    let selectorCircuit:
-      | { reason: string; pausedJobs: number }
-      | undefined
+    let selectorCircuit: { reason: string; pausedJobs: number } | undefined
     if (report.layoutDriftSuspected && selectorHealth.severe) {
       selectorCircuit = openSelectorCircuitBreaker(
         db,

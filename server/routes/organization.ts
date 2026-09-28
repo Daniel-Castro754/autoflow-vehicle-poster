@@ -328,9 +328,7 @@ export async function handleOrganizationRoute(
     return true
   }
 
-  const accountAutomationRoute = url.pathname.match(
-    /^\/api\/social-accounts\/(\d+)\/automation$/,
-  )
+  const accountAutomationRoute = url.pathname.match(/^\/api\/social-accounts\/(\d+)\/automation$/)
   if (req.method === 'PATCH' && accountAutomationRoute) {
     if (!isAdmin(auth)) {
       send(res, 403, { error: 'Somente administradores podem alterar a automação de perfis.' })

@@ -309,9 +309,10 @@ export default function VehiclesView({
       )
       if (result.errors.length) {
         window.alert(
-          ['Linhas que precisam de revisão:', ...result.errors.slice(0, 12).map((item) => `Linha ${item.row}: ${item.error}`)].join(
-            '\n',
-          ),
+          [
+            'Linhas que precisam de revisão:',
+            ...result.errors.slice(0, 12).map((item) => `Linha ${item.row}: ${item.error}`),
+          ].join('\n'),
         )
       }
       setPage(1)

@@ -248,12 +248,7 @@ export async function handleVehicleMutationRoute(
           })
           continue
         }
-        const duplicate = findVehicleIdentifierConflict(
-          db,
-          auth.organizationId,
-          stockCode,
-          vin,
-        )
+        const duplicate = findVehicleIdentifierConflict(db, auth.organizationId, stockCode, vin)
         if (duplicate) {
           if (mode !== 'update') {
             skipped++
