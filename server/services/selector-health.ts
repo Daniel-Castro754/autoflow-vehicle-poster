@@ -87,14 +87,8 @@ export function openSelectorCircuitBreaker(
       SET automation_paused=1,automation_pause_reason=?,automation_paused_at=CURRENT_TIMESTAMP
       WHERE id=? AND organization_id=?`,
   ).run(reason, accountId, organizationId)
-  const paused = db
-    .prepare(
-      `UPDATE publication_jobs SET paused=1,updated_at=CURRENT_TIMESTAMP
-      WHERE organization_id=? AND social_account_id=? AND id<>?
-        AND status IN ('pending','error')`,
-    )
-    .run(organizationId, accountId, jobId)
-  return { reason, pausedJobs: Number(paused.changes || 0) }
+  void jobId
+  return { reason }
 }
 
 export function closeSelectorCircuitBreaker(
@@ -107,15 +101,5 @@ export function closeSelectorCircuitBreaker(
       SET automation_paused=0,automation_pause_reason='',automation_paused_at=NULL
       WHERE id=? AND organization_id=?`,
   ).run(accountId, organizationId)
-  const resumed = db
-    .prepare(
-      `UPDATE publication_jobs SET paused=0,extension_visible=1,updated_at=CURRENT_TIMESTAMP
-      WHERE organization_id=? AND social_account_id=? AND status IN ('pending','error')
-        AND NOT EXISTS (
-          SELECT 1 FROM vehicles v WHERE v.id=publication_jobs.vehicle_id
-            AND (v.status='Vendido' OR v.sold_at IS NOT NULL)
-        )`,
-    )
-    .run(organizationId, accountId)
-  return Number(resumed.changes || 0)
+  return true
 }
