@@ -503,7 +503,10 @@ export default function VehiclesView({
                         <strong>
                           {vehicle.year} {vehicle.make} {vehicle.model}
                         </strong>
-                        <small>{vehicle.trim}</small>
+                        <small>
+                          {vehicle.trim}
+                          {vehicle.stockCode ? ` · Estoque ${vehicle.stockCode}` : ''}
+                        </small>
                       </div>
                     </div>
                   </td>
