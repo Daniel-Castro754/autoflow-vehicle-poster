@@ -58,7 +58,13 @@ type Vehicle = {
   imageCount?: number
   updatedAt?: string
 }
-type AccountOption = { id: number; label: string; owner?: string }
+type AccountOption = {
+  id: number
+  label: string
+  owner?: string
+  automationPaused?: number
+  automationPauseReason?: string
+}
 type OverviewData = {
   vehicleStats?: {
     inventoryValue?: number
@@ -877,8 +883,12 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
     errors = publicationStats.errors
   const scheduledCount = publicationStats.scheduled
   const eligibleReassignAccounts = reassignIds
-    ? accounts.filter((account) =>
-        reassignIds.every((id) => pageJobs.find((job) => job.id === id)?.accountId !== account.id),
+    ? accounts.filter(
+        (account) =>
+          !account.automationPaused &&
+          reassignIds.every(
+            (id) => pageJobs.find((job) => job.id === id)?.accountId !== account.id,
+          ),
       )
     : []
   const onlineProfiles = profiles.filter((profile) => profile.online).length
@@ -1644,8 +1654,9 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
                 <select name="accountId" required>
                   <option value="">Selecione o perfil responsável</option>
                   {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
+                    <option key={a.id} value={a.id} disabled={Boolean(a.automationPaused)}>
                       {a.label}
+                      {a.automationPaused ? ' · pausado' : ''}
                     </option>
                   ))}
                 </select>
