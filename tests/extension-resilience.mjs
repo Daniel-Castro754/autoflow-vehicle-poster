@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import vm from 'node:vm'
 
 const source = (
-  await readFile(new URL('../extension-mv2/content.js', import.meta.url), 'utf8')
+  await readFile(new URL('../extension/content.js', import.meta.url), 'utf8')
 ).replace(/\}\)\(\)\s*$/, 'globalThis.content={runtimeMessage,run,uploadImages};\n})()')
 function contentFixture() {
   let count = 0,
