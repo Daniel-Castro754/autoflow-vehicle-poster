@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import vm from 'node:vm'
 
-const source = await readFile(new URL('../extension-mv2/background.js', import.meta.url), 'utf8')
+const source = await readFile(new URL('../extension/background.js', import.meta.url), 'utf8')
 
 async function runConsumer(queue, network = {}) {
   const listeners = { alarms: [] }
