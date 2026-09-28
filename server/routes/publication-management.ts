@@ -136,13 +136,24 @@ export async function handlePublicationManagementRoute(
       const best = findBestAccountForVehicle(db, auth.organizationId, vehicle.id)
       if (best) accountId = best.id
     }
-    if (
-      !Number.isInteger(accountId) ||
-      !db
-        .prepare('SELECT id FROM social_accounts WHERE id=? AND organization_id=?')
-        .get(accountId, auth.organizationId)
-    )
+    const selectedAccount = Number.isInteger(accountId)
+      ? (db
+          .prepare(
+            'SELECT id,automation_paused automationPaused,automation_pause_reason automationPauseReason FROM social_accounts WHERE id=? AND organization_id=?',
+          )
+          .get(accountId, auth.organizationId) as
+          | { id: number; automationPaused: number; automationPauseReason?: string }
+          | undefined)
+      : undefined
+    if (!selectedAccount)
       return send(res, 400, { error: 'Selecione o perfil do Brave que publicará este veículo.' })
+    if (selectedAccount.automationPaused)
+      return send(res, 423, {
+        error:
+          selectedAccount.automationPauseReason ||
+          'A automação deste perfil está pausada até revisão do formulário do Marketplace.',
+        accountPaused: true,
+      })
     if (!allowedExtensionAccount(accountId, auth))
       return send(res, 403, { error: 'Você não pode criar trabalhos para este perfil.' })
     const duplicateRisk = publicationDuplicateRisk(auth.organizationId, vehicle.id)
@@ -299,9 +310,20 @@ export async function handlePublicationManagementRoute(
     const accountId = Number(b.accountId)
     if (!ids.length) return send(res, 400, { error: 'Selecione pelo menos um trabalho.' })
     const target = db
-      .prepare('SELECT id FROM social_accounts WHERE id=? AND organization_id=?')
-      .get(accountId, auth.organizationId)
+      .prepare(
+        'SELECT id,automation_paused automationPaused,automation_pause_reason automationPauseReason FROM social_accounts WHERE id=? AND organization_id=?',
+      )
+      .get(accountId, auth.organizationId) as
+      | { id: number; automationPaused: number; automationPauseReason?: string }
+      | undefined
     if (!target) return send(res, 400, { error: 'Selecione um perfil de destino válido.' })
+    if (target.automationPaused)
+      return send(res, 423, {
+        error:
+          target.automationPauseReason ||
+          'O perfil de destino está com a automação pausada até revisão do Marketplace.',
+        accountPaused: true,
+      })
     const placeholders = ids.map(() => '?').join(',')
     const jobs = db
       .prepare(
