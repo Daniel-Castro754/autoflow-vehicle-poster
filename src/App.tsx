@@ -436,13 +436,10 @@ export default function App() {
     )
       return
     try {
-      await api(
-        `/social-accounts/${account.id}/automation`,
-        {
-          method: 'PATCH',
-          body: JSON.stringify({ paused }),
-        },
-      )
+      await api(`/social-accounts/${account.id}/automation`, {
+        method: 'PATCH',
+        body: JSON.stringify({ paused }),
+      })
       await loadTeam()
       setToast(
         paused

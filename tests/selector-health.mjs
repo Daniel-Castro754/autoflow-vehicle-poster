@@ -97,4 +97,6 @@ assert.deepEqual(
 )
 
 db.close()
-console.log('✓ Circuit breaker: pausa por perfil sem alterar pausas manuais e autoassign ignora perfil bloqueado.')
+console.log(
+  '✓ Circuit breaker: pausa por perfil sem alterar pausas manuais e autoassign ignora perfil bloqueado.',
+)

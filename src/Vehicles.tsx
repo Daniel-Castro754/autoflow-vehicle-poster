@@ -761,7 +761,11 @@ function QueueDrawer({
                 required
               >
                 {accounts.map((account) => (
-                  <option key={account.id} value={account.id} disabled={Boolean(account.automationPaused)}>
+                  <option
+                    key={account.id}
+                    value={account.id}
+                    disabled={Boolean(account.automationPaused)}
+                  >
                     {account.label}
                     {account.browserProfile ? ` · ${account.browserProfile}` : ''}
                     {account.automationPaused ? ' · pausado' : ''}

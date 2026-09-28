@@ -143,8 +143,7 @@ export async function handlePublicationManagementRoute(
             'SELECT id,automation_paused automationPaused,automation_pause_reason automationPauseReason FROM social_accounts WHERE id=? AND organization_id=?',
           )
           .get(accountId, auth.organizationId) as
-          | { id: number; automationPaused: number; automationPauseReason?: string }
-          | undefined)
+          { id: number; automationPaused: number; automationPauseReason?: string } | undefined)
       : undefined
     if (!selectedAccount)
       return send(res, 400, { error: 'Selecione o perfil do Brave que publicará este veículo.' })
@@ -379,8 +378,7 @@ export async function handlePublicationManagementRoute(
         'SELECT id,automation_paused automationPaused,automation_pause_reason automationPauseReason FROM social_accounts WHERE id=? AND organization_id=?',
       )
       .get(accountId, auth.organizationId) as
-      | { id: number; automationPaused: number; automationPauseReason?: string }
-      | undefined
+      { id: number; automationPaused: number; automationPauseReason?: string } | undefined
     if (!target) return send(res, 400, { error: 'Selecione um perfil de destino válido.' })
     if (target.automationPaused)
       return send(res, 423, {
