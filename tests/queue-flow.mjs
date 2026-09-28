@@ -136,7 +136,7 @@ try {
   const deniedCors = await fetch(base + '/health', { headers: { Origin: 'https://evil.example' } })
   if (deniedCors.status !== 403 || deniedCors.headers.has('access-control-allow-origin'))
     throw new Error('Uma origem externa recebeu acesso CORS à API.')
-  const contentScript = await readFile('extension-mv2/content.js', 'utf8')
+  const contentScript = await readFile('extension/content.js', 'utf8')
   if (/\.innerHTML\s*=/.test(contentScript))
     throw new Error('O content script voltou a inserir HTML dinâmico diretamente.')
   if (
@@ -146,8 +146,8 @@ try {
     throw new Error(
       'O heartbeat não está condicionado à atividade do documento que executa o trabalho.',
     )
-  const extensionManifest = JSON.parse(await readFile('extension-mv2/manifest.json', 'utf8'))
-  const extensionBackground = await readFile('extension-mv2/background.js', 'utf8')
+  const extensionManifest = JSON.parse(await readFile('extension/manifest.json', 'utf8'))
+  const extensionBackground = await readFile('extension/background.js', 'utf8')
   if (
     extensionManifest.manifest_version !== 3 ||
     extensionManifest.background?.service_worker !== 'background.js' ||
