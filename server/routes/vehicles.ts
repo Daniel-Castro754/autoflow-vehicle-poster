@@ -64,10 +64,10 @@ export function createVehiclePageStatements(db: DatabaseSync): VehiclePageStatem
   return {
     count:
       db.prepare(`SELECT COUNT(*) total FROM vehicles v LEFT JOIN users u ON u.id=v.assigned_user_id
-      WHERE v.organization_id=? AND (?='' OR lower(v.make||' '||v.model||' '||CAST(v.year AS TEXT)||' '||COALESCE(u.name,'')) LIKE '%'||lower(?)||'%')
+      WHERE v.organization_id=? AND (?='' OR lower(v.make||' '||v.model||' '||CAST(v.year AS TEXT)||' '||COALESCE(v.stock_code,'')||' '||COALESCE(v.vin,'')||' '||COALESCE(u.name,'')) LIKE '%'||lower(?)||'%')
       AND (?='Todos' OR v.status=?)`),
     list: db.prepare(`${vehicleSelect}
-      WHERE v.organization_id=? AND (?='' OR lower(v.make||' '||v.model||' '||CAST(v.year AS TEXT)||' '||COALESCE(u.name,'')) LIKE '%'||lower(?)||'%')
+      WHERE v.organization_id=? AND (?='' OR lower(v.make||' '||v.model||' '||CAST(v.year AS TEXT)||' '||COALESCE(v.stock_code,'')||' '||COALESCE(v.vin,'')||' '||COALESCE(u.name,'')) LIKE '%'||lower(?)||'%')
       AND (?='Todos' OR v.status=?) ORDER BY v.updated_at DESC,v.id DESC LIMIT ? OFFSET ?`),
     all: db.prepare(`${vehicleSelect} WHERE v.organization_id=? ORDER BY v.updated_at DESC`),
     summary: db.prepare(`WITH inventory AS (
