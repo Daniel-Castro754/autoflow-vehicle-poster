@@ -971,6 +971,13 @@ td {
   border-radius: 50%;
   margin-right: 5px;
 }
+.connection.paused {
+  color: #9d3f3f;
+  background: #fdeaea;
+}
+.connection.paused i {
+  background: #d65757;
+}
 .account-empty {
   min-height: 300px;
   display: flex;
