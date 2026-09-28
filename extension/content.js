@@ -435,9 +435,9 @@
     return false
   }
 
-  async function selectOrFill(labels, value) {
+  async function selectOrFill(labels, value, { humanTyping = false } = {}) {
     if (await selectCustom(labels, value)) return true
-    const filled = await fillText(labels, value)
+    const filled = await fillText(labels, value, { humanTyping })
     if (!filled) return false
     await sleep(500)
     const suggestions = [...document.querySelectorAll('[role="option"]')].filter(visible)
@@ -979,7 +979,9 @@
         key: 'location',
         label: 'Localização',
         run: () =>
-          selectOrFill(fieldLabels('location', ['localizacao', 'location']), vehicle.location),
+          selectOrFill(fieldLabels('location', ['localizacao', 'location']), vehicle.location, {
+            humanTyping: Boolean(selectorConfig.fields?.location?.humanTyping),
+          }),
         critical: true,
       },
       {
@@ -997,7 +999,10 @@
       {
         key: 'model',
         label: 'Modelo',
-        run: () => selectOrFill(fieldLabels('model', ['modelo', 'model']), vehicle.model),
+        run: () =>
+          selectOrFill(fieldLabels('model', ['modelo', 'model']), vehicle.model, {
+            humanTyping: Boolean(selectorConfig.fields?.model?.humanTyping),
+          }),
         critical: true,
       },
       {
