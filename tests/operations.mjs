@@ -403,7 +403,8 @@ try {
           .map(() => '?')
           .join(',')}) ORDER BY id`,
       )
-      .all(...errorJobIds),
+      .all(...errorJobIds)
+      .map((row) => ({ ...row })),
     errorJobIds.map((id) => ({ id, status: 'pending', errorCode: null })),
   )
 
