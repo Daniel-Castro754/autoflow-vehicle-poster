@@ -161,7 +161,7 @@ export function csvVehicles(text: string, maxRows = 2000): Array<Record<string, 
   })
 }
 
-export function findVehicleIdentifierConflict(
+export function findVehicleIdentifierConflicts(
   db: DatabaseSync,
   organizationId: number,
   stockCode: string,
@@ -170,21 +170,33 @@ export function findVehicleIdentifierConflict(
 ) {
   const normalizedStock = normalizeInventoryIdentifier(stockCode)
   const normalizedVin = normalizeInventoryIdentifier(vin)
-  if (!normalizedStock && !normalizedVin) return null
+  if (!normalizedStock && !normalizedVin) return []
   return db
     .prepare(
       `SELECT id,stock_code stockCode,vin FROM vehicles
       WHERE organization_id=? AND id<>? AND (
         (?<>'' AND stock_code<>'' AND stock_code=? COLLATE NOCASE) OR
         (?<>'' AND vin<>'' AND vin=? COLLATE NOCASE)
-      ) LIMIT 1`,
+      ) ORDER BY id`,
     )
-    .get(
+    .all(
       organizationId,
       excludeVehicleId,
       normalizedStock,
       normalizedStock,
       normalizedVin,
       normalizedVin,
-    ) as { id: number; stockCode: string; vin: string } | undefined
+    ) as Array<{ id: number; stockCode: string; vin: string }>
+}
+
+export function findVehicleIdentifierConflict(
+  db: DatabaseSync,
+  organizationId: number,
+  stockCode: string,
+  vin: string,
+  excludeVehicleId = 0,
+) {
+  return (
+    findVehicleIdentifierConflicts(db, organizationId, stockCode, vin, excludeVehicleId)[0] || null
+  )
 }
