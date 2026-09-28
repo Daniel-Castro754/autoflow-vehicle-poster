@@ -374,6 +374,64 @@ try {
   assert.match(metricText, /autoflow_jobs 1\n/)
   assert.match(metricText, /autoflow_jobs_error_24h 0\n/)
   assert(!metricText.includes('Secret'))
+
+  const accountId = Number(
+    sql
+      .prepare(
+        "INSERT INTO social_accounts(organization_id,user_id,label,status,browser_profile) VALUES(?,?,?,'connected',?)",
+      )
+      .run(user.organizationId, user.id, 'Batch retry profile', 'Profile batch').lastInsertRowid,
+  )
+  const errorJobIds = ['first', 'second'].map(() =>
+    Number(
+      sql
+        .prepare(
+          "INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status,error_code) VALUES(?,?,?,'error','fixture')",
+        )
+        .run(user.organizationId, vehicle.id, accountId).lastInsertRowid,
+    ),
+  )
+  const retried = await client('/publications/reprocess-batch', {
+    method: 'PATCH',
+    body: JSON.stringify({ ids: errorJobIds }),
+  })
+  assert.equal(retried.updated, 2)
+  assert.deepEqual(
+    sql
+      .prepare(
+        `SELECT id,status,error_code errorCode FROM publication_jobs WHERE id IN (${errorJobIds
+          .map(() => '?')
+          .join(',')}) ORDER BY id`,
+      )
+      .all(...errorJobIds),
+    errorJobIds.map((id) => ({ id, status: 'pending', errorCode: null })),
+  )
+
+  sql
+    .prepare(
+      "UPDATE social_accounts SET automation_paused=1,automation_pause_reason='selector drift' WHERE id=?",
+    )
+    .run(accountId)
+  const blockedJobId = Number(
+    sql
+      .prepare(
+        "INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status,error_code) VALUES(?,?,?,'error','fixture')",
+      )
+      .run(user.organizationId, vehicle.id, accountId).lastInsertRowid,
+  )
+  await assert.rejects(
+    () =>
+      client('/publications/reprocess-batch', {
+        method: 'PATCH',
+        body: JSON.stringify({ ids: [blockedJobId] }),
+      }),
+    (error) => error.status === 423,
+  )
+  assert.equal(
+    sql.prepare('SELECT status FROM publication_jobs WHERE id=?').get(blockedJobId).status,
+    'error',
+  )
+  sql.prepare('UPDATE social_accounts SET automation_paused=0 WHERE id=?').run(accountId)
   const requests = await Promise.all(
     ['first', 'second'].map((id) =>
       fetch(server.base + '/health', { headers: { 'X-Request-Id': id } }),
