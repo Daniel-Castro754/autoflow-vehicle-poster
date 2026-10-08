@@ -166,6 +166,12 @@ const migrations: Migration[] = [
       ON selector_health_events (organization_id,social_account_id,created_at DESC);
     `,
   },
+  {
+    version: 11,
+    columns: [['users', 'google_subject', 'TEXT']],
+    sql: `CREATE UNIQUE INDEX IF NOT EXISTS uq_users_google_subject
+      ON users (google_subject) WHERE google_subject IS NOT NULL;`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

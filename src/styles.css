@@ -783,6 +783,59 @@ td {
   color: #8b9794;
   margin-top: 15px;
 }
+.password-login-form,
+.google-link-form {
+  display: flex;
+  flex-direction: column;
+}
+.google-sign-in {
+  min-width: 0;
+}
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  color: #74827f;
+  font-size: 12px;
+}
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: #d5dddb;
+}
+.google-sign-in-button {
+  min-height: 40px;
+}
+.google-sign-in-button[inert] {
+  opacity: 0.55;
+}
+.google-sign-in p,
+.google-retry {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #596c65;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.google-retry {
+  display: block;
+  margin: 12px auto 0;
+  padding: 5px;
+  background: transparent;
+  border: 0;
+  text-decoration: underline;
+}
+.theme-dark .google-sign-in p,
+.theme-dark .google-retry {
+  color: #b4c4be;
+}
+.theme-dark .login-divider::before,
+.theme-dark .login-divider::after {
+  background: #3b5149;
+}
 .auth-error {
   background: #fbe9e5;
   color: #a4453c;
