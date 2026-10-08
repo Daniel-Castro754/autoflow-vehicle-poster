@@ -22,6 +22,17 @@ O login aceita por padrão até 5 tentativas por conta/endereço e 30 tentativas
 
 O comando `npm run dev` inicia o painel em `http://localhost:5173` e a API em `http://127.0.0.1:3333`.
 
+## Entrar com Google
+
+O painel também oferece **Entrar com Google** quando `GOOGLE_CLIENT_ID` está configurado.
+O login com e-mail e senha continua disponível. Na primeira conexão, selecione a conta Google
+com o mesmo e-mail cadastrado e confirme a **senha atual do AutoFlow** para vincular as contas.
+Nas próximas entradas, basta usar o Google. O administrador continua cadastrando e desativando
+usuários em **Equipe e contas**; o Google não cria usuários, empresas ou permissões.
+
+Consulte [Configurar o acesso com Google](docs/GOOGLE_SIGN_IN.md) para criar o Client ID,
+autorizar as origens do painel e validar a conexão local ou em produção.
+
 ## Escopo atual
 
 - Dashboard responsivo de veículos
@@ -30,6 +41,7 @@ O comando `npm run dev` inicia o painel em `http://localhost:5173` e a API em `h
 - Cadastro persistente de veículos
 - Importação CSV de estoque com atualização opcional por ID de estoque/VIN e prevenção de duplicidade
 - Login com sessão assinada e senha protegida por scrypt
+- Acesso opcional com Google, com confirmação da senha na primeira vinculação
 - Banco SQLite local com isolamento por empresa
 - Modelos para equipe, contas sociais e fila de publicação
 - Tela de equipe com criação de vendedores

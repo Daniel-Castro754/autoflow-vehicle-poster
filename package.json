@@ -18,7 +18,7 @@
     "test:publish-safety": "node --import=./tests/helpers/offline.mjs tests/publish-safety.mjs",
     "test:backup": "node --import=./tests/helpers/offline.mjs tests/backup.mjs",
     "backup": "node scripts/backup.mjs",
-    "test": "npm run test:stock && npm run test:queue && npm run test:autonomous && npm run test:extension-consumer && npm run test:backup && npm run test:publish-safety && npm run test:audit && npm run test:fipe && npm run test:timezone && npm run test:sessions && npm run test:extension-resilience && npm run test:operations && npm run test:selector-config && npm run test:vehicle-import && npm run test:selector-health",
+    "test": "npm run test:stock && npm run test:queue && npm run test:autonomous && npm run test:extension-consumer && npm run test:backup && npm run test:publish-safety && npm run test:audit && npm run test:fipe && npm run test:timezone && npm run test:sessions && npm run test:extension-resilience && npm run test:operations && npm run test:selector-config && npm run test:vehicle-import && npm run test:selector-health && npm run test:google-auth",
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
@@ -33,9 +33,11 @@
     "build:extension": "node scripts/build-extension.mjs",
     "test:selector-config": "node tests/selector-config.mjs",
     "test:vehicle-import": "node tests/vehicle-import.mjs",
-    "test:selector-health": "node tests/selector-health.mjs"
+    "test:selector-health": "node tests/selector-health.mjs",
+    "test:google-auth": "node --import=./tests/helpers/offline.mjs tests/google-auth.mjs"
   },
   "dependencies": {
+    "google-auth-library": "^11.2.0",
     "lucide-react": "1.31.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -46,16 +48,21 @@
     "@types/node": "26.2.0",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
     "concurrently": "10.0.4",
     "eslint": "^10.8.1",
     "eslint-plugin-react-hooks": "7.1.1",
     "eslint-plugin-react-refresh": "0.5.3",
     "globals": "17.9.0",
     "prettier": "^3.9.9",
-    "typescript-eslint": "8.66.0",
-    "@vitejs/plugin-react": "6.0.5",
     "typescript": "6.0.3",
+    "typescript-eslint": "8.66.0",
     "vite": "8.2.1"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "overrides": {
+    "concurrently": {
+      "shell-quote": "^1.11.0"
+    }
+  }
 }

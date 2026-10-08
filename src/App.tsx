@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import GoogleSignIn from './GoogleSignIn'
 import {
   BarChart3,
   Bell,
@@ -131,7 +132,7 @@ const seed: Vehicle[] = [
   },
 ]
 
-const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:3333/api'
+const API = import.meta.env.VITE_API_URL || '/api'
 class ApiError extends Error {
   constructor(
     message: string,
@@ -472,6 +473,13 @@ export default function App() {
     }
   }
 
+  const acceptGoogleLogin = useCallback((sessionToken: string) => {
+    localStorage.setItem('autoflow_token', sessionToken)
+    setAuthError('')
+    setToken(sessionToken)
+    setLoading(true)
+  }, [])
+
   async function login(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setAuthError('')
@@ -505,7 +513,17 @@ export default function App() {
       })
   }
 
-  if (!token) return <Login onSubmit={login} error={authError} loading={loading} theme={theme} />
+  if (!token)
+    return (
+      <Login
+        onSubmit={login}
+        onGoogleLogin={acceptGoogleLogin}
+        onBusyChange={setLoading}
+        error={authError}
+        loading={loading}
+        theme={theme}
+      />
+    )
   if (loading)
     return (
       <div className={`loading ${theme === 'dark' ? 'theme-dark' : ''}`}>
@@ -1031,11 +1049,15 @@ function TeamView({
 
 function Login({
   onSubmit,
+  onGoogleLogin,
+  onBusyChange,
   error,
   loading,
   theme,
 }: {
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void
+  onGoogleLogin: (token: string) => void
+  onBusyChange: (busy: boolean) => void
   error: string
   loading: boolean
   theme: 'light' | 'dark'
@@ -1060,31 +1082,40 @@ function Login({
         <small>Ambiente local seguro para desenvolvimento</small>
       </section>
       <main className="login-main">
-        <form className="login-card" onSubmit={onSubmit}>
+        <div className="login-card">
           <span className="login-logo">
             <Car />
           </span>
           <h2>Bem-vindo</h2>
           <p>Acesse o painel da sua empresa.</p>
           {error && (
-            <div className="auth-error">
+            <div className="auth-error" role="alert">
               <CircleAlert size={16} />
               {error}
             </div>
           )}
-          <label>
-            E-mail
-            <input name="email" type="email" autoComplete="email" required />
-          </label>
-          <label>
-            Senha
-            <input name="password" type="password" autoComplete="current-password" required />
-          </label>
-          <button className="primary" disabled={loading}>
-            {loading ? 'Entrando...' : 'Entrar no painel'}
-          </button>
+          <form className="password-login-form" onSubmit={onSubmit}>
+            <label>
+              E-mail
+              <input name="email" type="email" autoComplete="email" required />
+            </label>
+            <label>
+              Senha
+              <input name="password" type="password" autoComplete="current-password" required />
+            </label>
+            <button className="primary" disabled={loading}>
+              {loading ? 'Entrando...' : 'Entrar no painel'}
+            </button>
+          </form>
+          <GoogleSignIn
+            apiUrl={API}
+            disabled={loading}
+            theme={theme}
+            onSuccess={onGoogleLogin}
+            onBusyChange={onBusyChange}
+          />
           <small>Use as credenciais definidas na configuração inicial.</small>
-        </form>
+        </div>
       </main>
     </div>
   )

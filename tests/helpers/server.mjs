@@ -76,6 +76,7 @@ export async function startTestServer(overrides = {}) {
       AUTH_SECRET: 'audit-test-secret-at-least-32-characters',
       INITIAL_ADMIN_EMAIL: email,
       INITIAL_ADMIN_PASSWORD: password,
+      GOOGLE_CLIENT_ID: '',
       ...overrides,
     },
     stdio: ['ignore', 'pipe', 'pipe'],

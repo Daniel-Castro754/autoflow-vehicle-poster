@@ -25,6 +25,7 @@ import { handleGroupsRoute } from './routes/groups.ts'
 import { handlePublicationSchedulingRoute } from './routes/publication-scheduling.ts'
 import { handleOrganizationRoute } from './routes/organization.ts'
 import { handleAuthRoute } from './routes/auth.ts'
+import { createGoogleSignIn } from './services/google-sign-in.ts'
 import { createAutomationStatements, handleDashboardRoute } from './routes/dashboard.ts'
 import {
   createVehiclePageStatements,
@@ -132,6 +133,7 @@ const authRouteDependencies = {
   verifyPassword,
   dummyPasswordHash,
   sign,
+  googleSignIn: createGoogleSignIn(),
 }
 function sign(payload: object) {
   const body = Buffer.from(
