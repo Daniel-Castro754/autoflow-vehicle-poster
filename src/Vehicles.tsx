@@ -299,16 +299,36 @@ export default function VehiclesView({
       : 'skip'
     setImporting(true)
     try {
-      const result = await api<{
+      const csv = await file.text()
+      type ImportSummary = {
         total: number
         created: number
         updated: number
         skipped: number
         failed: number
+        previewDigest?: string
         errors: Array<{ row: number; error: string }>
-      }>('/vehicles/import', {
+      }
+      const preview = await api<ImportSummary>('/vehicles/import', {
         method: 'POST',
-        body: JSON.stringify({ csv: await file.text(), mode }),
+        body: JSON.stringify({ csv, mode, dryRun: true }),
+      })
+      const proceed = window.confirm(
+        [
+          'PRÉVIA — nenhuma alteração foi gravada.',
+          `Total: ${preview.total} | Novos: ${preview.created} | Atualizações: ${preview.updated}`,
+          `Ignorados: ${preview.skipped} | Erros: ${preview.failed}`,
+          preview.failed ? 'Há linhas com erro, que serão ignoradas.' : '',
+          'Confirmar sincronização do estoque com estes resultados?',
+        ].filter(Boolean).join('\\n'),
+      )
+      if (!proceed) {
+        notify('Sincronização cancelada: nenhuma alteração realizada.')
+        return
+      }
+      const result = await api<ImportSummary>('/vehicles/import', {
+        method: 'POST',
+        body: JSON.stringify({ csv, mode, previewDigest: preview.previewDigest }),
       })
       notify(
         `CSV processado: ${result.created} novo(s), ${result.updated} atualizado(s), ${result.skipped} ignorado(s), ${result.failed} com erro.`,
