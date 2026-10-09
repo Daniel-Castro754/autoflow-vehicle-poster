@@ -8,15 +8,24 @@ let loadAccountsSeq = 0,
   loadQueueSeq = 0,
   openingJob = false
 async function request(path, options = {}) {
-  const response = await fetch(API + path, {
-    ...options,
-    signal: options.signal || AbortSignal.timeout(15000),
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: 'Bearer ' + token,
-      ...options.headers,
-    },
-  })
+  const send = () =>
+    fetch(API + path, {
+      ...options,
+      signal: options.signal || AbortSignal.timeout(15000),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + token,
+        ...options.headers,
+      },
+    })
+  let response = await send()
+  if (response.status === 401 && path !== '/auth/login') {
+    const renewed = await chrome.runtime.sendMessage({ type: 'AUTOFLOW_REFRESH_SESSION' })
+    if (renewed?.ok && renewed.token) {
+      token = renewed.token
+      response = await send()
+    }
+  }
   const text = await response.text()
   let data
   try {
@@ -172,6 +181,14 @@ async function openJob(jobId) {
   try {
     const accountId = activeAccountId
     tab = await chrome.tabs.create({ url: 'https://www.facebook.com/marketplace/create/vehicle' })
+    const status = await chrome.runtime.sendMessage({
+      type: 'AUTOFLOW_CHECK_MARKETPLACE',
+      tabId: tab.id,
+    })
+    if (!status?.ready) {
+      prepared = true // Leave the tab open for a human to log in or solve a challenge.
+      throw new Error(status?.reason || 'Confirme o acesso ao Marketplace no Brave.')
+    }
     const task = await request('/extension/jobs/' + jobId + '/prepare', {
       method: 'POST',
       body: JSON.stringify({
@@ -210,10 +227,19 @@ $('login').onclick = async () => {
   try {
     const data = await request('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email: $('email').value, password: $('password').value }),
+      body: JSON.stringify({
+        email: $('email').value,
+        password: $('password').value,
+        extensionClient: true,
+      }),
     })
     token = data.token
-    await chrome.storage.local.set({ token, user: data.user })
+    await chrome.storage.local.set({
+      token,
+      refreshToken: data.refreshToken || null,
+      user: data.user,
+      authNeeded: false,
+    })
     setConnected(true, data.user)
     await loadAccounts()
   } catch (error) {
@@ -240,12 +266,15 @@ $('logout').onclick = async () => {
       error instanceof Error ? error.message : String(error),
     )
   }
-  chrome.storage.local.remove(['token', 'user', 'activeAccountId', 'pendingJob', 'autoRun'], () => {
+  chrome.storage.local.remove(
+    ['token', 'refreshToken', 'user', 'activeAccountId', 'pendingJob', 'autoRun', 'facebookSession'],
+    () => {
     token = ''
     activeAccountId = 0
     setConnected(false)
     updateAutoRunButton()
-  })
+  },
+  )
 }
 $('refresh').onclick = loadQueue
 $('autoRun').onclick = () =>
@@ -265,22 +294,18 @@ $('accountSelect').onchange = () => {
     loadQueue()
   })
 }
-chrome.storage.local.get(['token', 'user', 'instanceId'], (data) => {
+chrome.storage.local.get(['token', 'refreshToken', 'user', 'instanceId'], (data) => {
   instanceId =
     data.instanceId ||
     `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`
   if (!data.instanceId) chrome.storage.local.set({ instanceId })
   token = data.token || ''
-  if (token) {
+  if (token || data.refreshToken) {
     request('/me')
       .then(({ user }) => {
         setConnected(true, user)
         loadAccounts()
       })
-      .catch(() =>
-        chrome.storage.local.remove(['token', 'user', 'activeAccountId', 'pendingJob'], () =>
-          setConnected(false),
-        ),
-      )
+      .catch(() => setConnected(false))
   } else setConnected(false)
 })
