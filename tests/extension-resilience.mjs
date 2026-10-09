@@ -140,6 +140,15 @@ function contentFixture() {
 }
 {
   const fixture = contentFixture()
+  fixture.count = 1
+  await assert.rejects(
+    () => fixture.api.uploadImages([{ url: 'photo-1', name: 'photo-1.jpg' }]),
+    /Fotos já presentes sem identificação verificável/,
+    'A reloaded page with unverified photos must not auto-complete publication',
+  )
+}
+{
+  const fixture = contentFixture()
   fixture.chrome.runtime.id = undefined
   await assert.rejects(
     () => fixture.api.runtimeMessage({}),
