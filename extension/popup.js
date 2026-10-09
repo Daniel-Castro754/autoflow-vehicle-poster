@@ -252,14 +252,8 @@ $('login').onclick = async () => {
 $('logout').onclick = async () => {
   loadAccountsSeq++
   loadQueueSeq++
-  const activeToken = token
   try {
-    const response = await fetch(API + '/auth/logout', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + activeToken },
-    })
-    if (!response.ok)
-      console.warn('AutoFlow: a sessão do servidor não foi revogada', response.status)
+    await request('/auth/logout', { method: 'POST' })
   } catch (error) {
     console.warn(
       'AutoFlow: não foi possível revogar a sessão no servidor',
