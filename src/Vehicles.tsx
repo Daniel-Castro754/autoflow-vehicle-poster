@@ -47,7 +47,13 @@ type VehiclePage = {
   vehicles: VehicleRecord[]
   pagination: { totalItems: number; totalPages: number; currentPage: number; pageSize: number }
 }
-type VehicleSummary = { total: number; published: number; readyStatus: number; attention: number }
+type VehicleSummary = {
+  total: number
+  published: number
+  readyStatus: number
+  attention: number
+  noPhotos?: number
+}
 
 export type VehicleRecord = {
   id: number
@@ -170,6 +176,13 @@ export default function VehiclesView({
   const [importing, setImporting] = useState(false)
   const importInputRef = useRef<HTMLInputElement>(null)
   const deferredQuery = useDeferredValue(query)
+
+  function changeStatusFilter(next: string) {
+    setStatus(next)
+    setPage(1)
+    setPageLoading(true)
+    setSelected(new Set())
+  }
 
   useEffect(() => {
     let active = true
@@ -357,8 +370,9 @@ export default function VehiclesView({
     <section className="content vehicles-page">
       <div className="title-row">
         <div>
+          <span className="page-kicker">GESTÃO DE ESTOQUE</span>
           <h1>Veículos</h1>
-          <p>Gerencie dados, fotos e publicações do estoque.</p>
+          <p>Consulte os registros, corrija pendências e prepare os anúncios.</p>
         </div>
         <div className="title-actions">
           <input
@@ -416,11 +430,11 @@ export default function VehiclesView({
             <Clock3 />
           </span>
           <div>
-            <small>Na fila</small>
+            <small>Prontos para publicar</small>
             <strong>
               {summary?.readyStatus ?? vehicles.filter((v) => v.status === 'Pronto').length}
             </strong>
-            <em>aguardando vendedor</em>
+            <em>disponíveis para agendar</em>
           </div>
         </article>
         <article>
@@ -436,7 +450,41 @@ export default function VehiclesView({
           </div>
         </article>
       </div>
-      <div className="panel">
+      <div className="vehicle-filter-section">
+        <div className="vehicle-filter-heading">
+          <div>
+            <h2>Estoque cadastrado</h2>
+            <p>Filtre por etapa e selecione veículos para gerenciar.</p>
+          </div>
+          {summary && (
+            <span className="vehicle-photo-warning">
+              <ImagePlus size={16} />
+              {summary.noPhotos ?? 0} sem fotos no estoque
+            </span>
+          )}
+        </div>
+        <div className="vehicle-status-filters" role="group" aria-label="Filtrar veículos por situação">
+          {[
+            { label: 'Todos', value: 'Todos', count: summary?.total },
+            { label: 'Prontos', value: 'Pronto', count: summary?.readyStatus },
+            { label: 'Publicados', value: 'Publicado', count: summary?.published },
+            { label: 'Atenção', value: 'Atenção', count: summary?.attention },
+            { label: 'Rascunhos', value: 'Rascunho' },
+          ].map((option) => (
+            <button
+              type="button"
+              key={option.value}
+              className={status === option.value ? 'active' : ''}
+              aria-pressed={status === option.value}
+              onClick={() => changeStatusFilter(option.value)}
+            >
+              {option.label}
+              {option.count !== undefined && <span>{option.count}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="panel vehicle-inventory-panel">
         <div className="toolbar">
           <div className="search">
             <Search size={18} />
@@ -448,27 +496,24 @@ export default function VehiclesView({
                 setPageLoading(true)
                 setSelected(new Set())
               }}
-              placeholder="Buscar veículo ou vendedor..."
+              placeholder="Marca, modelo, código ou responsável..."
+              aria-label="Buscar veículos no estoque"
             />
           </div>
           <select
             value={status}
-            onChange={(event) => {
-              setStatus(event.target.value)
-              setPage(1)
-              setPageLoading(true)
-              setSelected(new Set())
-            }}
+            onChange={(event) => changeStatusFilter(event.target.value)}
+            aria-label="Filtrar veículos por status"
           >
             <option>Todos</option>
             {VEHICLE_STATUSES.map((item) => (
               <option key={item}>{item}</option>
             ))}
           </select>
-          <button className="secondary">
-            Todas as lojas
-            <ChevronDown size={15} />
-          </button>
+          <span className="vehicle-scope-note" title="A consulta inclui os veículos da organização atual">
+            <Car size={15} />
+            Organização atual
+          </span>
         </div>
         {selected.size > 0 && (
           <div className="bulk-bar">
@@ -577,14 +622,18 @@ export default function VehiclesView({
             </tbody>
           </table>
           {!filtered.length && (
-            <div className="empty">
-              {pageLoading ? 'Carregando veículos...' : 'Nenhum veículo encontrado.'}
+            <div className="empty" role="status">
+              {pageLoading
+                ? 'Carregando veículos...'
+                : query || status !== 'Todos'
+                  ? 'Nenhum veículo corresponde aos filtros selecionados.'
+                  : 'Seu estoque está vazio. Cadastre o primeiro veículo para começar.'}
             </div>
           )}
         </div>
         <footer className="panel-foot">
-          <span>
-            Mostrando {filtered.length} de {pagination.totalItems} veículos
+          <span role="status">
+            {pageLoading ? 'Atualizando resultados...' : `Exibindo ${filtered.length} de ${pagination.totalItems} veículos`}
           </span>
           <div>
             <button
