@@ -544,7 +544,7 @@ export default function VehiclesView({
             </button>
           </div>
         )}
-        <div className="table-wrap">
+        <div className="table-wrap" role="region" aria-label="Tabela de veículos" tabIndex={0}>
           <table>
             <thead>
               <tr>
