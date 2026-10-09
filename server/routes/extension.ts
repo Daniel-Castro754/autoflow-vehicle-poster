@@ -5,7 +5,7 @@ import { publicationMayExist, readPublicationReport } from '../services/publicat
 import { findBestAccountForVehicle } from '../services/session-manager.ts'
 import { calculateBackoff } from '../lib/retry.ts'
 import { dailyExecutionAttempts } from '../services/daily-capacity.ts'
-import { isRetryableExtensionFailureCode } from '../services/publication-policy.ts'
+import { classifyExtensionFailure } from '../services/publication-policy.ts'
 import { sendCriticalAlert } from '../services/alerting.ts'
 import {
   openSelectorCircuitBreaker,
@@ -777,13 +777,12 @@ export async function handleExtensionRoute(
         })
       }
       const autoRetryActive = Boolean(orgSettings?.autoRetry)
-      const failureCode = isRetryableExtensionFailureCode(b.failureCode)
-        ? String(b.failureCode)
-        : ''
+      const failure = classifyExtensionFailure(b.failureCode)
+      const failureCode = failure.code || ''
       const maxRetries = Math.max(1, Number(job.maxRetries || orgSettings?.maxRetries || 3))
       const retriesUsed = Number(job.retryCount || 0)
 
-      if (autoRetryActive && failureCode && retriesUsed < maxRetries) {
+      if (autoRetryActive && failure.retryable && retriesUsed < maxRetries) {
         const delayMs = calculateBackoff(retriesUsed + 1, 60000, 600000, true)
         const nextScheduledAt = new Date(Date.now() + delayMs).toISOString()
         // A partir da 2ª falha consecutiva, considera mover para uma conta mais saudável em vez
@@ -852,6 +851,8 @@ export async function handleExtensionRoute(
           scheduledAt: nextScheduledAt,
           error,
           failureCode,
+          failureCategory: failure.category,
+          failureDisposition: failure.disposition,
           extensionVersion: String(b.extensionVersion || '').slice(0, 30),
           rerouted: nextPriority !== null,
         })
@@ -861,6 +862,7 @@ export async function handleExtensionRoute(
           autoRetry: true,
           scheduledAt: nextScheduledAt,
           accountId: targetAccountId,
+          failureCategory: failure.category,
         })
       }
 
@@ -870,7 +872,9 @@ export async function handleExtensionRoute(
       recordJobEvent(auth.organizationId, job.id, 'fill_error', null, {
         error,
         failureCode: failureCode || null,
-        retryable: Boolean(failureCode),
+        failureCategory: failure.category,
+        failureDisposition: failure.disposition,
+        retryable: failure.retryable,
         extensionVersion: String(b.extensionVersion || '').slice(0, 30),
         retriesExhausted: retriesUsed >= maxRetries,
       })
@@ -892,6 +896,8 @@ export async function handleExtensionRoute(
         ok: true,
         status: 'error',
         retriesExhausted: retriesUsed >= maxRetries,
+        failureCategory: failure.category,
+        requiresIntervention: failure.disposition === 'intervention',
       })
     }
     const incomingNotFoundFields = Array.isArray(b.notFoundFields)
