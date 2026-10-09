@@ -408,7 +408,15 @@ export function OverviewView({
         api={api}
         vehicles={vehicles}
         navigate={navigate}
-        onOpenMonitoring={() => setMonitoringOpen(true)}
+        onOpenMonitoring={() => {
+          setMonitoringOpen(true)
+          document.getElementById('overview-monitoring')?.scrollIntoView({
+            behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+              ? 'instant'
+              : 'smooth',
+            block: 'start',
+          })
+        }}
       />
       <div className="overview-grid">
         <article className="module-card">
@@ -493,11 +501,13 @@ export function OverviewView({
             {monitoringOpen ? 'Ocultar detalhes' : 'Ver detalhes'}
           </span>
         </summary>
-        <div className="overview-monitoring-content">
-          <OperationalHealth api={api} />
-          <InterventionCenter api={api} canManage={canManage} navigate={navigate} />
-          <SchedulingInsights api={api} />
-        </div>
+        {monitoringOpen && (
+          <div className="overview-monitoring-content">
+            <OperationalHealth api={api} />
+            <InterventionCenter api={api} canManage={canManage} navigate={navigate} />
+            <SchedulingInsights api={api} />
+          </div>
+        )}
       </details>
     </section>
   )
