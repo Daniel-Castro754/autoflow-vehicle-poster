@@ -2,6 +2,91 @@ const API_ORIGIN = 'http://127.0.0.1:3333'
 const API = `${API_ORIGIN}/api`
 const HEARTBEAT_ALARM = 'autoflow-heartbeat'
 let queueConsumerRunning = false
+let refreshInFlight = null
+
+// Only the extension process uses the refresh secret; content scripts never receive it.
+// A single in-flight rotation prevents racing requests from invalidating each other.
+async function refreshSession() {
+  if (refreshInFlight) return refreshInFlight
+  refreshInFlight = (async () => {
+    const { refreshToken } = await chrome.storage.local.get('refreshToken')
+    if (!refreshToken) return null
+    let response
+    try {
+      response = await fetch(`${API}/auth/extension/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      })
+    } catch {
+      // A temporary API outage must not log out the extension.
+      return null
+    }
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        const current = await chrome.storage.local.get('refreshToken')
+        if (current.refreshToken === refreshToken) {
+          await chrome.storage.local.remove(['token', 'refreshToken'])
+          await chrome.storage.local.set({ autoRun: false, authNeeded: true })
+        }
+      }
+      return null
+    }
+    const next = await response.json()
+    if (!next.token || !next.refreshToken) return null
+    await chrome.storage.local.set({
+      token: next.token,
+      refreshToken: next.refreshToken,
+      authNeeded: false,
+    })
+    return next.token
+  })()
+  try {
+    return await refreshInFlight
+  } finally {
+    refreshInFlight = null
+  }
+}
+
+async function authorizedFetch(url, options = {}, retryOptions = { attempts: 1 }) {
+  const state = await chrome.storage.local.get('token')
+  let token = state.token || (await refreshSession())
+  if (!token) return new Response('{}', { status: 401 })
+  const request = (value) =>
+    fetchWithRetry(
+      url,
+      {
+        ...options,
+        headers: { ...(options.headers || {}), Authorization: 'Bearer ' + value },
+      },
+      retryOptions,
+    )
+  let response = await request(token)
+  if (response.status === 401) {
+    token = await refreshSession()
+    if (token) response = await request(token)
+  }
+  return response
+}
+
+async function marketplaceReady(tabId, attempts = 50) {
+  for (let i = 0; i < attempts; i++) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null)
+    if (!tab) return { ready: false, reason: 'A aba do Facebook foi fechada.' }
+    if (tab.status === 'complete') {
+      const state = await new Promise((resolve) =>
+        chrome.tabs.sendMessage(tabId, { type: 'AUTOFLOW_MARKETPLACE_SESSION_STATUS' }, (value) =>
+          resolve(chrome.runtime.lastError ? null : value),
+        ),
+      )
+      if (state?.ready) return state
+      if (state?.blocked) return state
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300))
+  }
+  return { ready: false, reason: 'O formulário do Marketplace não ficou disponível.' }
+}
+
 // Backoff para o reenvio de um resultado pendente: evita bater no servidor a cada
 // batimento (~60s) indefinidamente se ele estiver fora do ar por muito tempo.
 function pendingResultRetryDelayMs(attempts) {
@@ -36,7 +121,7 @@ async function fetchWithRetry(url, options, { attempts = 3, timeoutMs = 8000 } =
 }
 
 function sendFillResult(jobId, token, payload) {
-  return fetchWithRetry(
+  return authorizedFetch(
     `${API}/extension/jobs/${jobId}/fill-result`,
     {
       method: 'PATCH',
@@ -113,15 +198,16 @@ async function consumeQueue() {
       'pendingPublishes',
       'pendingPublish',
     ])
-    if (!state.autoRun || !state.activeAccountId || !state.token || state.pendingJob) return
-    const response = await fetch(
+    if (!state.autoRun || !state.activeAccountId || state.pendingJob) return
+    if (!state.token && !state.refreshToken) return
+    const response = await authorizedFetch(
       `${API}/extension/queue?accountId=${encodeURIComponent(state.activeAccountId)}`,
       {
         headers: { Authorization: 'Bearer ' + state.token },
       },
     )
     if (response.status === 401) {
-      await chrome.storage.local.set({ autoRun: false })
+      await chrome.storage.local.set({ autoRun: false, authNeeded: true })
       return
     }
     if (!response.ok) throw new Error(`Falha ao consultar a fila: HTTP ${response.status}`)
@@ -137,7 +223,19 @@ async function consumeQueue() {
     })
     if (!tab.id) throw new Error('O navegador não retornou o identificador da aba do Marketplace.')
     try {
-      const prepareResponse = await fetch(`${API}/extension/jobs/${job.jobId}/prepare`, {
+      const status = await marketplaceReady(tab.id)
+      if (!status.ready) {
+        await chrome.storage.local.set({
+          facebookSession: { accountId: state.activeAccountId, ready: false, reason: status.reason },
+          autoRun: false,
+        })
+        // Keep the Facebook tab for the human to log in or complete a challenge.
+        return
+      }
+      await chrome.storage.local.set({
+        facebookSession: { accountId: state.activeAccountId, ready: true, checkedAt: Date.now() },
+      })
+      const prepareResponse = await authorizedFetch(`${API}/extension/jobs/${job.jobId}/prepare`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + state.token },
         body: JSON.stringify({
@@ -268,7 +366,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   })
 })
 function reconcilePublishedTab(resultUrl, pending, token) {
-  if (!pending || !token) return
+  if (!pending) return
   const payload = {
     ...pending.report,
     leaseToken: pending.leaseToken,
@@ -350,7 +448,7 @@ async function flushPendingResults() {
   flushingResults = true
   try {
     const { token } = await chrome.storage.local.get('token')
-    if (!token) return
+    if (!token && !(await chrome.storage.local.get('refreshToken')).refreshToken) return
     const due = await changePendingResults((entries) =>
       Object.values(entries).filter((entry) => {
         if (
@@ -370,6 +468,12 @@ async function flushPendingResults() {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === 'AUTOFLOW_REFRESH_SESSION') {
+    void refreshSession()
+      .then((token) => sendResponse(token ? { ok: true, token } : { ok: false }))
+      .catch(() => sendResponse({ ok: false }))
+    return true
+  }
   if (message.type === 'AUTOFLOW_RUN_QUEUE') {
     void consumeQueue().then(() => sendResponse({ ok: true }))
     return true
@@ -392,7 +496,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({ ok: false, error: 'A execução não corresponde a esta aba.' })
         return
       }
-      fetch(`${API}/extension/jobs/${job.jobId}/bind-document`, {
+      authorizedFetch(`${API}/extension/jobs/${job.jobId}/bind-document`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + data.token },
         body: JSON.stringify({
@@ -428,7 +532,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({ ok: false, error: 'A atividade não corresponde ao documento em execução.' })
         return
       }
-      fetch(`${API}/extension/jobs/${pendingJob.jobId}/heartbeat`, {
+      authorizedFetch(`${API}/extension/jobs/${pendingJob.jobId}/heartbeat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({
@@ -467,7 +571,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           sendResponse({ ok: false, error: 'A execução não pode ser conciliada nesta aba.' })
           return
         }
-        fetch(`${API}/extension/jobs/${job.jobId}/publish-not-clicked`, {
+        authorizedFetch(`${API}/extension/jobs/${job.jobId}/publish-not-clicked`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + data.token },
           body: JSON.stringify({
@@ -500,7 +604,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({ ok: false, error: 'A execução não está mais ativa.' })
         return
       }
-      fetchWithRetry(`${API}/extension/jobs/${pendingJob.jobId}/publish-check`, {
+      authorizedFetch(`${API}/extension/jobs/${pendingJob.jobId}/publish-check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({
@@ -551,7 +655,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
               sendResponse({ ok: false, error: 'A execução não está mais ativa.' })
               return
             }
-            fetch(`${API}/extension/jobs/${message.jobId}/publish-started`, {
+            authorizedFetch(`${API}/extension/jobs/${message.jobId}/publish-started`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
               body: JSON.stringify({
