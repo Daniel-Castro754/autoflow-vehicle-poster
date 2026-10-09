@@ -275,8 +275,11 @@ try {
   })
   await call(`/publications/${unsold.jobId}`, 'PATCH', { status: 'removed' })
   assert.equal((await getVehicle(unsold.vehicleId)).status, 'Pronto')
+  // A migration 12 rejeita duplicidades; simule um banco legado para este teste
+  // de compatibilidade com anúncios historicamente duplicados.
   // Se houver anúncios legados adicionais ativos, remover um deles não despublica o veículo.
   const db = new DatabaseSync(join(dataDir, 'autoflow.db'))
+  db.exec('DROP INDEX IF EXISTS uq_publication_jobs_open_vehicle')
   db.prepare("UPDATE vehicles SET status='Publicado' WHERE id=?").run(unsold.vehicleId)
   const insert = db.prepare(
     "INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status) VALUES (?,?,?,'completed')",

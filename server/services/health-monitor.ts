@@ -94,8 +94,9 @@ export async function runHealthCheck(
         if (publicationMayExist(job)) {
           db.exec('BEGIN IMMEDIATE')
           try {
-            const updated = db.prepare(
-              `
+            const updated = db
+              .prepare(
+                `
               UPDATE publication_jobs
               SET status = 'awaiting_confirmation', paused = 1, extension_visible = 0, error_code = NULL,
                 fill_report = ?, last_lease_token = COALESCE(lease_token,last_lease_token),
@@ -104,12 +105,13 @@ export async function runHealthCheck(
                 AND status='filling' AND lease_token IS ?
                 AND (lease_expires_at IS NULL OR datetime(lease_expires_at)<=CURRENT_TIMESTAMP)
             `,
-            ).run(
-              JSON.stringify(ambiguousPublicationReport(job.fillReport)),
-              job.id,
-              job.organizationId,
-              job.leaseToken,
-            )
+              )
+              .run(
+                JSON.stringify(ambiguousPublicationReport(job.fillReport)),
+                job.id,
+                job.organizationId,
+                job.leaseToken,
+              )
             if (updated.changes !== 1) {
               db.exec('ROLLBACK')
               continue
@@ -160,8 +162,9 @@ export async function runHealthCheck(
         db.exec('BEGIN IMMEDIATE')
         try {
           if (exhausted) {
-            const updated = db.prepare(
-              `
+            const updated = db
+              .prepare(
+                `
               UPDATE publication_jobs
               SET status = 'error', error_code = 'Travado repetidamente sem confirmação da extensão.',
                 last_lease_token = NULL, publish_attempt_at = NULL, lease_token = NULL,
@@ -170,7 +173,8 @@ export async function runHealthCheck(
                 AND status='filling' AND lease_token IS ?
                 AND (lease_expires_at IS NULL OR datetime(lease_expires_at)<=CURRENT_TIMESTAMP)
             `,
-            ).run(job.id, job.organizationId, job.leaseToken)
+              )
+              .run(job.id, job.organizationId, job.leaseToken)
             if (updated.changes !== 1) {
               db.exec('ROLLBACK')
               continue
@@ -191,8 +195,9 @@ export async function runHealthCheck(
               }),
             )
           } else {
-            const updated = db.prepare(
-              `
+            const updated = db
+              .prepare(
+                `
               UPDATE publication_jobs
               SET status = 'pending', paused = 0, extension_visible = 1, error_code = NULL,
                 fill_report = '', started_at = NULL, filled_at = NULL, last_lease_token = NULL,
@@ -202,7 +207,8 @@ export async function runHealthCheck(
                 AND status='filling' AND lease_token IS ?
                 AND (lease_expires_at IS NULL OR datetime(lease_expires_at)<=CURRENT_TIMESTAMP)
             `,
-            ).run(job.id, job.organizationId, job.leaseToken)
+              )
+              .run(job.id, job.organizationId, job.leaseToken)
             if (updated.changes !== 1) {
               db.exec('ROLLBACK')
               continue

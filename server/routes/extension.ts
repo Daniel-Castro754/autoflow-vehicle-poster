@@ -294,8 +294,7 @@ export async function handleExtensionRoute(
         `SELECT MAX(CASE WHEN status IN ('completed','removed') THEN updated_at END) lastCompletedAt
         FROM publication_jobs WHERE organization_id=? AND social_account_id=?`,
       )
-      .get(auth.organizationId, accountId) as
-      { lastCompletedAt?: string | null } | undefined
+      .get(auth.organizationId, accountId) as { lastCompletedAt?: string | null } | undefined
     if (executionCount >= dailyLimit)
       return send(res, 409, {
         error: `O limite diário deste perfil foi atingido (${dailyLimit} execuções).`,
@@ -407,7 +406,10 @@ export async function handleExtensionRoute(
         )
       acquired = result.changes === 1
       if (acquired)
-        recordJobEvent(auth.organizationId, job.id, 'filling_started', null, { accountId, instanceId })
+        recordJobEvent(auth.organizationId, job.id, 'filling_started', null, {
+          accountId,
+          instanceId,
+        })
       db.exec('COMMIT')
     } catch (error) {
       db.exec('ROLLBACK')

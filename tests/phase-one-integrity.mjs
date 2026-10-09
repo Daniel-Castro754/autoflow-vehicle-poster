@@ -18,7 +18,9 @@ try {
     INSERT INTO vehicles(id,organization_id,year,make,model) VALUES (1,1,2022,'Toyota','Corolla');
   `)
   const create = (status) =>
-    isolated.prepare("INSERT INTO publication_jobs(organization_id,vehicle_id,status) VALUES(1,1,?)").run(status)
+    isolated
+      .prepare('INSERT INTO publication_jobs(organization_id,vehicle_id,status) VALUES(1,1,?)')
+      .run(status)
   create('pending')
   assert.throws(() => create('error'), /UNIQUE constraint failed/)
   isolated.exec("UPDATE publication_jobs SET status='removed'")
@@ -48,24 +50,41 @@ try {
   })
   await api('/settings', {
     method: 'PATCH',
-    body: JSON.stringify({ organizationName: 'Integrity Test', dailyLimit: 10, executionIntervalMinutes: 0 }),
+    body: JSON.stringify({
+      organizationName: 'Integrity Test',
+      dailyLimit: 10,
+      executionIntervalMinutes: 0,
+    }),
   })
 
   async function readyVehicle(n) {
     const vehicle = await api('/vehicles', {
       method: 'POST',
       body: JSON.stringify({
-        year: 2023, make: 'Toyota', model: `Corolla ${n}`, trim: 'XEi',
-        price: 119900, km: 42000, status: 'Pronto', vehicleType: 'Carro/picape',
-        location: 'São Paulo, SP', transmission: 'Automático', fuelType: 'Flex',
-        bodyType: 'Sedã', condition: 'Excelente', exteriorColor: 'Prateado',
-        interiorColor: 'Preto', description: `Veículo de teste para integridade ${n}.`,
+        year: 2023,
+        make: 'Toyota',
+        model: `Corolla ${n}`,
+        trim: 'XEi',
+        price: 119900,
+        km: 42000,
+        status: 'Pronto',
+        vehicleType: 'Carro/picape',
+        location: 'São Paulo, SP',
+        transmission: 'Automático',
+        fuelType: 'Flex',
+        bodyType: 'Sedã',
+        condition: 'Excelente',
+        exteriorColor: 'Prateado',
+        interiorColor: 'Preto',
+        description: `Veículo de teste para integridade ${n}.`,
       }),
     })
     await api(`/vehicles/${vehicle.id}/images`, {
       method: 'POST',
       body: JSON.stringify({
-        name: `integrity-${n}.jpg`, mimeType: 'image/jpeg', dataBase64: jpegBase64(`phase1-${n}`),
+        name: `integrity-${n}.jpg`,
+        mimeType: 'image/jpeg',
+        dataBase64: jpegBase64(`phase1-${n}`),
       }),
     })
     return vehicle.id
@@ -84,16 +103,23 @@ try {
   // Duplicate writes are blocked at the DB layer, including across API clients.
   const orgId = db.prepare('SELECT organization_id id FROM vehicles WHERE id=?').get(vehicleA).id
   assert.throws(
-    () => db.prepare(
-      "INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status) VALUES(?,?,?,'pending')",
-    ).run(orgId, vehicleA, account.id),
+    () =>
+      db
+        .prepare(
+          "INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status) VALUES(?,?,?,'pending')",
+        )
+        .run(orgId, vehicleA, account.id),
     /UNIQUE constraint failed/,
   )
 
   // Both jobs were created today. A daily limit of one must still allow the FIRST claim.
   await api('/settings', {
     method: 'PATCH',
-    body: JSON.stringify({ organizationName: 'Integrity Test', dailyLimit: 1, executionIntervalMinutes: 0 }),
+    body: JSON.stringify({
+      organizationName: 'Integrity Test',
+      dailyLimit: 1,
+      executionIntervalMinutes: 0,
+    }),
   })
   const prepared = await api(`/extension/jobs/${firstJob.id}/prepare`, {
     method: 'POST',
@@ -111,9 +137,11 @@ try {
     }),
     (error) => error.status === 409 && error.body?.capacity?.used === 1,
   )
-  const claims = db.prepare(
-    "SELECT COUNT(*) n FROM publication_job_events WHERE organization_id=? AND event_type='filling_started'",
-  ).get(orgId).n
+  const claims = db
+    .prepare(
+      "SELECT COUNT(*) n FROM publication_job_events WHERE organization_id=? AND event_type='filling_started'",
+    )
+    .get(orgId).n
   assert.equal(claims, 1, 'A successful claim must have exactly one durable event')
 
   // Interleave a stale monitor read with a different worker renewing ownership.
@@ -125,26 +153,42 @@ try {
     let interleaved = false
     const monitorDb = {
       prepare(sql) {
-        if (!interleaved && String(sql).includes('SELECT id, organization_id organizationId FROM publication_jobs')) {
+        if (
+          !interleaved &&
+          String(sql).includes('SELECT id, organization_id organizationId FROM publication_jobs')
+        ) {
           interleaved = true
-          other.prepare(
-            "UPDATE publication_jobs SET lease_token='new-token',lease_owner='new-worker',lease_expires_at=datetime('now','+3 minutes') WHERE id=?",
-          ).run(firstJob.id)
+          other
+            .prepare(
+              "UPDATE publication_jobs SET lease_token='new-token',lease_owner='new-worker',lease_expires_at=datetime('now','+3 minutes') WHERE id=?",
+            )
+            .run(firstJob.id)
         }
         return db.prepare(sql)
       },
-      exec(sql) { return db.exec(sql) },
+      exec(sql) {
+        return db.exec(sql)
+      },
     }
     const result = await runHealthCheck(monitorDb, { autoRecover: true })
     assert(interleaved, 'O teste precisa simular a troca de lease após a leitura')
     assert.equal(result.recoveredCount, 0)
     assert.deepEqual(
-      { ...db.prepare('SELECT status,lease_token token FROM publication_jobs WHERE id=?').get(firstJob.id) },
+      {
+        ...db
+          .prepare('SELECT status,lease_token token FROM publication_jobs WHERE id=?')
+          .get(firstJob.id),
+      },
       { status: 'filling', token: 'new-token' },
     )
-    assert.equal(db.prepare(
-      "SELECT COUNT(*) n FROM publication_job_events WHERE publication_job_id=? AND event_type IN ('stalled_recovered','stalled_exhausted','stalled_publish_ambiguous')",
-    ).get(firstJob.id).n, 0)
+    assert.equal(
+      db
+        .prepare(
+          "SELECT COUNT(*) n FROM publication_job_events WHERE publication_job_id=? AND event_type IN ('stalled_recovered','stalled_exhausted','stalled_publish_ambiguous')",
+        )
+        .get(firstJob.id).n,
+      0,
+    )
   } finally {
     other.close()
   }
