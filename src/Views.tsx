@@ -2340,16 +2340,20 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
         api<ReportPerformance>(
           `/reports/performance?period=${period}&seller=${encodeURIComponent(seller)}`,
         ),
-      ]).then(([issueReport, inventory, reportPerformance]) => {
-        setIssues(issueReport.issues)
-        setIssueCursor(issueReport.page.nextCursor)
-        setIssuesHaveMore(issueReport.page.hasMore)
-        setInventorySummary(inventory)
-        setPerformance(reportPerformance)
-        setReportError('')
-      }).catch((error) => {
-        setReportError(error instanceof Error ? error.message : 'Não foi possível atualizar os relatórios.')
-      }),
+      ])
+        .then(([issueReport, inventory, reportPerformance]) => {
+          setIssues(issueReport.issues)
+          setIssueCursor(issueReport.page.nextCursor)
+          setIssuesHaveMore(issueReport.page.hasMore)
+          setInventorySummary(inventory)
+          setPerformance(reportPerformance)
+          setReportError('')
+        })
+        .catch((error) => {
+          setReportError(
+            error instanceof Error ? error.message : 'Não foi possível atualizar os relatórios.',
+          )
+        }),
     [api, period, seller],
   )
   async function loadMoreIssues() {
@@ -2541,7 +2545,9 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
   if (loading)
     return (
       <section className="content">
-        <div className="empty" role="status">Carregando relatórios...</div>
+        <div className="empty" role="status">
+          Carregando relatórios...
+        </div>
       </section>
     )
   if (reportError && !performance && !inventorySummary)
@@ -2622,7 +2628,12 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
           <BarChart3 />
           Desempenho e estoque
         </button>
-        <button type="button" aria-pressed={view === 'issues'} className={view === 'issues' ? 'active' : ''} onClick={() => setView('issues')}>
+        <button
+          type="button"
+          aria-pressed={view === 'issues'}
+          className={view === 'issues' ? 'active' : ''}
+          onClick={() => setView('issues')}
+        >
           <CircleAlert />
           Erros e avisos
           {issues.filter((issue) => issue.active).length > 0 && (
@@ -2747,7 +2758,9 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
                     <div>
                       <strong>{item.label}</strong>
                       <small>
-                        {reportJobTotal ? `${Math.round((item.count / reportJobTotal) * 100)}% dos trabalhos no recorte` : 'Sem trabalhos no período'}
+                        {reportJobTotal
+                          ? `${Math.round((item.count / reportJobTotal) * 100)}% dos trabalhos no recorte`
+                          : 'Sem trabalhos no período'}
                       </small>
                     </div>
                     <b>{item.count}</b>
@@ -3451,7 +3464,10 @@ export function SettingsView({
       <div className="settings-section-header">
         <div>
           <strong>Organize as configurações por assunto</strong>
-          <p>Use a navegação abaixo para localizar cada opção. As alterações só serão aplicadas quando você salvar.</p>
+          <p>
+            Use a navegação abaixo para localizar cada opção. As alterações só serão aplicadas
+            quando você salvar.
+          </p>
         </div>
         <span>{groups.filter((group) => group.active).length} grupos ativos</span>
       </div>

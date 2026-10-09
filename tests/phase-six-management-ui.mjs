@@ -16,7 +16,11 @@ assert.deepEqual(calculateTeamSummary([], []), {
 })
 assert.deepEqual(
   calculateTeamSummary(
-    [{ id: 1, active: 1 }, { id: 2, active: 0 }, { id: 3, active: 1 }],
+    [
+      { id: 1, active: 1 },
+      { id: 2, active: 0 },
+      { id: 3, active: 1 },
+    ],
     [
       { userId: 1, automationPaused: 0 },
       { userId: 2, automationPaused: 1 },
@@ -34,7 +38,12 @@ const app = read('src/App.tsx')
 const css = read('src/management-workspaces.css')
 const main = read('src/main.tsx')
 
-for (const token of ['report-context', 'report-fetch-error', 'aria-pressed={view ===', 'formatRate(completed, reportJobTotal)'])
+for (const token of [
+  'report-context',
+  'report-fetch-error',
+  'aria-pressed={view ===',
+  'formatRate(completed, reportJobTotal)',
+])
   assert(view.includes(token), `Reports: missing ${token}`)
 assert(view.includes('Sem trabalhos no período'))
 assert(view.includes('return'), 'Report load states should return meaningful UI')
@@ -53,11 +62,21 @@ for (const key of sections) {
   assert(view.includes(`id: '${key}'`), `Missing settings navigation entry: ${key}`)
 }
 assert(view.includes('scrollIntoView'), 'Category navigator should have working destinations')
-assert(view.includes('<form onSubmit={save}>'), 'Existing unified save operation must remain intact')
+assert(
+  view.includes('<form onSubmit={save}>'),
+  'Existing unified save operation must remain intact',
+)
 assert(view.includes('settings-save-copy'))
-assert(view.includes('type="password"\n                  autoComplete="off"\n                  value={alertTelegramToken}'))
+assert(
+  view.includes(
+    'type="password"\n                  autoComplete="off"\n                  value={alertTelegramToken}',
+  ),
+)
 assert(view.includes('aria-pressed={theme ==='))
-assert(!view.includes('hidden={settingsSection'), 'Required inputs must not be hidden for form validation')
+assert(
+  !view.includes('hidden={settingsSection'),
+  'Required inputs must not be hidden for form validation',
+)
 
 for (const label of ['team-summary', 'team-summary-card', 'team-people', 'team-profiles']) {
   assert(app.includes(label), `Team summary missing: ${label}`)
@@ -73,7 +92,8 @@ for (const selector of [
   '.settings-page .toggle-label',
   '.team-page .team-summary',
   '.settings-page .settings-card',
-]) assert(css.includes(selector), `Missing design rule: ${selector}`)
+])
+  assert(css.includes(selector), `Missing design rule: ${selector}`)
 assert(css.includes('@media (max-width: 1180px)'))
 assert(css.includes('@media (max-width: 740px)'))
 assert(css.includes('prefers-reduced-motion'))

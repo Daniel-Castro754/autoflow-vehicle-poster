@@ -835,10 +835,7 @@ function TeamView({
   onSetAccountAutomation: (account: SocialAccount, paused: boolean) => Promise<void>
 }) {
   const [modal, setModal] = useState<'user' | 'account' | null>(null)
-  const { activeMembers, pausedProfiles, unassignedProfiles } = calculateTeamSummary(
-    team,
-    accounts,
-  )
+  const { activeMembers, pausedProfiles, unassignedProfiles } = calculateTeamSummary(team, accounts)
   return (
     <section className="content team-page">
       <div className="title-row">
@@ -943,7 +940,12 @@ function TeamView({
               <span>{accounts.length} associados</span>
             </div>
             {canManage && (
-              <button type="button" className="small-add" aria-label="Associar novo perfil do Brave" onClick={() => setModal('account')}>
+              <button
+                type="button"
+                className="small-add"
+                aria-label="Associar novo perfil do Brave"
+                onClick={() => setModal('account')}
+              >
                 <Plus size={16} />
               </button>
             )}
