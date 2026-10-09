@@ -23,10 +23,11 @@ for (const part of [
   "drawer.setAttribute('aria-label', label)",
   "event.key === 'Escape'",
   "event.key !== 'Tab'",
-  "last.focus()",
-  "first.focus()",
-  "previouslyFocused.focus()",
-]) assert(guard.includes(part), `Drawer focus management missing: ${part}`)
+  'last.focus()',
+  'first.focus()',
+  'previouslyFocused.focus()',
+])
+  assert(guard.includes(part), `Drawer focus management missing: ${part}`)
 
 // Mobile menu does not leave an invisible keyboard navigation trap behind.
 for (const part of [
@@ -40,7 +41,8 @@ for (const part of [
   'aria-label="Fechar menu"',
   'aria-label="Sair da conta"',
   'role="status" aria-live="polite"',
-]) assert(app.includes(part), `Mobile navigation or feedback missing: ${part}`)
+])
+  assert(app.includes(part), `Mobile navigation or feedback missing: ${part}`)
 
 // Wide tables are scrollable and focusable without changing selection/actions.
 assert.equal((views.match(/className="table-wrap" role="region" aria-label=/g) || []).length, 3)
@@ -64,10 +66,21 @@ for (const part of [
   'height: 100dvh;',
   'width: 100vw;',
   '.app-shell .title-row .primary',
-]) assert(css.includes(part), `Final polish missing: ${part}`)
-assert(/\.app-shell \.title-row \.primary,\s*\.app-shell \.title-row \.secondary\s*\{\s*font-size: 13px;/.test(css))
-assert(main.indexOf("import './final-polish.css'") > main.indexOf("import './management-workspaces.css'"))
-assert(packageJson.scripts['test:design-final'], 'Final visual regression must be in package scripts')
+])
+  assert(css.includes(part), `Final polish missing: ${part}`)
+assert(
+  /\.app-shell \.title-row \.primary,\s*\.app-shell \.title-row \.secondary\s*\{\s*font-size: 13px;/.test(
+    css,
+  ),
+)
+assert(
+  main.indexOf("import './final-polish.css'") >
+    main.indexOf("import './management-workspaces.css'"),
+)
+assert(
+  packageJson.scripts['test:design-final'],
+  'Final visual regression must be in package scripts',
+)
 
 // The final palette must pass standard text contrast on neutral surfaces.
 function rgb(hex) {
@@ -81,7 +94,8 @@ function luminance(hex) {
   return r * 0.2126 + g * 0.7152 + b * 0.0722
 }
 function contrast(a, b) {
-  const x = luminance(a), y = luminance(b)
+  const x = luminance(a),
+    y = luminance(b)
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
 }
 for (const [fg, bg, name] of [
@@ -91,6 +105,7 @@ for (const [fg, bg, name] of [
   ['#5a6d72', '#ffffff', 'Light muted text'],
   ['#ffffff', '#117f65', 'Light primary button'],
   ['#081c18', '#25b98b', 'Dark primary button'],
-]) assert(contrast(fg, bg) >= 4.5, `${name} contrast too low: ${contrast(fg, bg)}`)
+])
+  assert(contrast(fg, bg) >= 4.5, `${name} contrast too low: ${contrast(fg, bg)}`)
 
 console.log('✓ Fase 6.4: modal focus, menu teclado, rolagem, responsividade e contraste')

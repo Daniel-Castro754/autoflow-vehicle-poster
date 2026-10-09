@@ -2,13 +2,7 @@ import { useEffect, useRef } from 'react'
 
 // Preserva os formulários e a lógica de cada drawer; gerencia apenas a experiência
 // de teclado: foco inicial, Escape, ciclo Tab e retorno ao controle de origem.
-export function DrawerFocusGuard({
-  label,
-  onClose,
-}: {
-  label: string
-  onClose: () => void
-}) {
+export function DrawerFocusGuard({ label, onClose }: { label: string; onClose: () => void }) {
   const marker = useRef<HTMLSpanElement>(null)
   const onCloseRef = useRef(onClose)
   useEffect(() => {
@@ -19,21 +13,21 @@ export function DrawerFocusGuard({
     const drawer = marker.current?.closest<HTMLElement>('.drawer')
     if (!drawer) return
 
-    const previouslyFocused = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
     drawer.setAttribute('role', 'dialog')
     drawer.setAttribute('aria-modal', 'true')
     drawer.setAttribute('aria-label', label)
     drawer.setAttribute('tabindex', '-1')
 
     const tabbable = () =>
-      [...drawer.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
-      )].filter((element) => element.getClientRects().length > 0 && !element.hasAttribute('inert'))
+      [
+        ...drawer.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+        ),
+      ].filter((element) => element.getClientRects().length > 0 && !element.hasAttribute('inert'))
 
-    const start = tabbable().find((element) => element.classList.contains('close'))
-      || tabbable()[0]
+    const start = tabbable().find((element) => element.classList.contains('close')) || tabbable()[0]
     ;(start || drawer).focus()
 
     function keydown(event: KeyboardEvent) {
@@ -53,10 +47,16 @@ export function DrawerFocusGuard({
       const first = items[0]
       const last = items[items.length - 1]
       if (!first || !last) return
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === drawer)) {
+      if (
+        event.shiftKey &&
+        (document.activeElement === first || document.activeElement === drawer)
+      ) {
         event.preventDefault()
         last.focus()
-      } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === drawer)) {
+      } else if (
+        !event.shiftKey &&
+        (document.activeElement === last || document.activeElement === drawer)
+      ) {
         event.preventDefault()
         first.focus()
       }

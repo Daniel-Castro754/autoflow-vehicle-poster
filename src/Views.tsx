@@ -1481,7 +1481,12 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
               </button>
             </div>
           )}
-          <div className="table-wrap" role="region" aria-label="Tabela da fila de publicações" tabIndex={0}>
+          <div
+            className="table-wrap"
+            role="region"
+            aria-label="Tabela da fila de publicações"
+            tabIndex={0}
+          >
             <table>
               <thead>
                 <tr>
@@ -1758,7 +1763,11 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
         <div className="overlay" onMouseDown={() => setOpen(false)}>
           <aside className="drawer" onMouseDown={(e) => e.stopPropagation()}>
             <DrawerFocusGuard label="Adicionar publicação à fila" onClose={() => setOpen(false)} />
-            <button className="close" aria-label="Fechar nova publicação" onClick={() => setOpen(false)}>
+            <button
+              className="close"
+              aria-label="Fechar nova publicação"
+              onClick={() => setOpen(false)}
+            >
               <X />
             </button>
             <span className="eyebrow">NOVA PUBLICAÇÃO</span>
@@ -1840,7 +1849,11 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
             onMouseDown={(event) => event.stopPropagation()}
           >
             <DrawerFocusGuard label="Agendar sequência" onClose={() => setBatchScheduleIds(null)} />
-            <button className="close" aria-label="Fechar agendamento em lote" onClick={() => setBatchScheduleIds(null)}>
+            <button
+              className="close"
+              aria-label="Fechar agendamento em lote"
+              onClick={() => setBatchScheduleIds(null)}
+            >
               <X />
             </button>
             <span className="eyebrow">PROGRAMAÇÃO DA FILA</span>
@@ -1935,7 +1948,11 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
             onMouseDown={(event) => event.stopPropagation()}
           >
             <DrawerFocusGuard label="Agendar publicação" onClose={() => setScheduleJob(null)} />
-            <button className="close" aria-label="Fechar agendamento" onClick={() => setScheduleJob(null)}>
+            <button
+              className="close"
+              aria-label="Fechar agendamento"
+              onClick={() => setScheduleJob(null)}
+            >
               <X />
             </button>
             <span className="eyebrow">CONTROLE DA FILA</span>
@@ -1982,8 +1999,15 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
             className="drawer schedule-drawer"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <DrawerFocusGuard label="Trocar perfil responsável" onClose={() => setReassignIds(null)} />
-            <button className="close" aria-label="Fechar troca de perfil" onClick={() => setReassignIds(null)}>
+            <DrawerFocusGuard
+              label="Trocar perfil responsável"
+              onClose={() => setReassignIds(null)}
+            />
+            <button
+              className="close"
+              aria-label="Fechar troca de perfil"
+              onClick={() => setReassignIds(null)}
+            >
               <X />
             </button>
             <span className="eyebrow">DISTRIBUIÇÃO DA FILA</span>
@@ -2049,8 +2073,15 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
             className="drawer timeline-drawer"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <DrawerFocusGuard label="Linha do tempo da publicação" onClose={() => setTimelineJob(null)} />
-            <button className="close" aria-label="Fechar linha do tempo" onClick={() => setTimelineJob(null)}>
+            <DrawerFocusGuard
+              label="Linha do tempo da publicação"
+              onClose={() => setTimelineJob(null)}
+            />
+            <button
+              className="close"
+              aria-label="Fechar linha do tempo"
+              onClick={() => setTimelineJob(null)}
+            >
               <X />
             </button>
             <span className="eyebrow">RASTREABILIDADE</span>
@@ -2942,7 +2973,12 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
               </div>
               <span className="source-freshness">Atualizado com os dados do painel</span>
             </div>
-            <div className="table-wrap" role="region" aria-label="Tabela de desempenho dos perfis" tabIndex={0}>
+            <div
+              className="table-wrap"
+              role="region"
+              aria-label="Tabela de desempenho dos perfis"
+              tabIndex={0}
+            >
               <table>
                 <thead>
                   <tr>
@@ -3161,7 +3197,12 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
                 {activeIssues} pendente{activeIssues === 1 ? '' : 's'}
               </span>
             </div>
-            <div className="table-wrap" role="region" aria-label="Tabela de erros e avisos" tabIndex={0}>
+            <div
+              className="table-wrap"
+              role="region"
+              aria-label="Tabela de erros e avisos"
+              tabIndex={0}
+            >
               <table>
                 <thead>
                   <tr>
