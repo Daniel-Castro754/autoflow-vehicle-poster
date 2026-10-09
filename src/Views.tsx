@@ -996,12 +996,12 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
     return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
   }
   return (
-    <section className="content">
+    <section className="content publications-page">
       <div className="title-row">
         <div>
-          <span className="page-kicker">CONTROLE DE SAÍDA</span>
+          <span className="page-kicker">OPERAÇÃO E ACOMPANHAMENTO</span>
           <h1>Publicações</h1>
-          <p>Organize o que cada perfil deve publicar no Brave.</p>
+          <p>Controle a fila, acompanhe os perfis Brave e revise cada resultado.</p>
         </div>
         <div className="action-with-help">
           <button className="primary" onClick={() => setOpen(true)}>
@@ -1064,16 +1064,79 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
           </div>
         </article>
       </div>
-      <div className="publication-view-tabs">
-        <button className={view === 'central' ? 'active' : ''} onClick={() => setView('central')}>
+      <section className="publication-workflow" aria-label="Organização das publicações">
+        <div className="publication-workflow-heading">
+          <div>
+            <h2>Operação de publicações</h2>
+            <p>Acompanhe a execução ou filtre os trabalhos que precisam de ação.</p>
+          </div>
+          <div className="publication-workflow-status">
+            <span className={onlineProfiles > 0 ? 'online' : 'offline'} />
+            {onlineProfiles} de {profiles.length} perfis online
+          </div>
+        </div>
+        {profiles.length === 0 && (
+          <div className="publication-setup-note" role="status">
+            <CircleAlert size={18} />
+            <span>Nenhum perfil local do Brave associado. Cadastre um em Equipe e contas antes de publicar.</span>
+          </div>
+        )}
+        <div className="publication-quick-filters" aria-label="Acessos rápidos à fila">
+          <button
+            type="button"
+            onClick={() => {
+              setView('queue')
+              setQueueStatus('pending')
+              setQueuePage(1)
+              setSelected(new Set())
+            }}
+          >
+            <Clock3 size={16} /> Ver pendentes <strong>{pending}</strong>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setView('queue')
+              setQueueStatus('error')
+              setQueuePage(1)
+              setSelected(new Set())
+            }}
+          >
+            <CircleAlert size={16} /> Revisar erros <strong>{errors}</strong>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setView('queue')
+              setQueueStatus('all')
+              setQueuePage(1)
+              setSelected(new Set())
+            }}
+          >
+            <ListChecks size={16} /> Todos os trabalhos
+          </button>
+        </div>
+      </section>
+      <div className="publication-view-tabs" role="group" aria-label="Modo de visualização das publicações">
+        <button
+          type="button"
+          className={view === 'central' ? 'active' : ''}
+          aria-pressed={view === 'central'}
+          onClick={() => setView('central')}
+        >
           <Activity />
           Central de automação
         </button>
-        <button className={view === 'queue' ? 'active' : ''} onClick={() => setView('queue')}>
+        <button
+          type="button"
+          className={view === 'queue' ? 'active' : ''}
+          aria-pressed={view === 'queue'}
+          onClick={() => setView('queue')}
+        >
           <ListChecks />
           Fila e histórico
         </button>
-        <button className="refresh-view" onClick={() => load()}>
+        <button type="button" className="refresh-view" onClick={() => void load()} aria-label="Atualizar dados das publicações">
           <RotateCcw />
           Atualizar
         </button>
@@ -1332,11 +1395,9 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
             )}
           </div>
           <div className="pub-tabs">
-            <strong>
-              {filteredJobs.length === queuePagination.totalItems ? 'Todas' : 'Resultados'}
-            </strong>
-            <span>
-              {filteredJobs.length} de {queuePagination.totalItems} registros
+            <strong>Trabalhos encontrados</strong>
+            <span role="status">
+              {queuePageLoading ? 'Atualizando...' : `Exibindo ${filteredJobs.length} de ${queuePagination.totalItems} registros`}
             </span>
             <small>{publicationStats.extensionAvailable} disponíveis na extensão</small>
             <small>
