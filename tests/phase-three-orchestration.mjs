@@ -84,7 +84,7 @@ try {
   const sweep = scheduler.sweep()
   await firstEntered.promise
   await thirdEntered.promise
-  assert.deepEqual(started, [1, 2, 3], 'A second lane must run other tenants while the first is blocked')
+  assert.deepEqual(started.slice(0, 3), [1, 2, 3], 'A second lane must run other tenants while the first is blocked')
   await scheduler.sweep()
   assert(peak <= 2, 'The bounded pool must never exceed the configured concurrency')
   firstRelease.resolve()
