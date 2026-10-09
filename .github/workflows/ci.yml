@@ -20,6 +20,7 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - run: npx prettier --write README.md scripts/doctor.mjs tests/login-diagnostics.mjs && git diff -- README.md scripts/doctor.mjs tests/login-diagnostics.mjs
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
