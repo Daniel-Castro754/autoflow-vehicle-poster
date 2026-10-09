@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, Camera, CheckCircle2, ChevronRight, ClipboardList, Send } from 'lucide-react'
+import { overviewActionCounts } from './overview-priorities'
 
 type VehicleSummary = { id: number; status: string; imageCount?: number }
 type Insight = { totals: { open: number; acknowledged: number; critical: number } }
@@ -42,11 +43,10 @@ export function OverviewPriorities({
     }
   }, [api])
 
-  const noPhotos = vehicles.filter((vehicle) => vehicle.imageCount === 0 && vehicle.status !== 'Vendido').length
-  const attention = vehicles.filter((vehicle) => vehicle.status === 'Atenção').length
-  const ready = vehicles.filter((vehicle) => vehicle.status === 'Pronto').length
-  const openIncidents = (incidents?.open || 0) + (incidents?.acknowledged || 0)
-  const critical = incidents?.critical || 0
+  const { noPhotos, attention, ready, openIncidents, critical } = overviewActionCounts(
+    vehicles,
+    incidents,
+  )
 
   const priorities = [
     ...(critical > 0
@@ -126,7 +126,11 @@ export function OverviewPriorities({
       {priorities.length === 0 ? (
         <div className="overview-empty-state">
           <CheckCircle2 size={19} />
-          <span>Nenhuma prioridade identificada nos dados disponíveis.</span>
+          <span>
+            {!incidents && !failed
+              ? 'Consultando ocorrências operacionais…'
+              : 'Nenhuma prioridade identificada nos dados disponíveis.'}
+          </span>
         </div>
       ) : (
         <div className="overview-priority-list">
