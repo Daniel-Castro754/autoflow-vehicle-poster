@@ -46,6 +46,7 @@ try {
     dayOfWeek: 1,
     hour: 12 + i,
     successCount: 10 - i,
+    attemptCount: 12,
   }))
   const historical = calculateOptimalSchedule({
     referenceDate: new Date('2026-06-15T15:00:00Z'),
@@ -58,7 +59,7 @@ try {
   )
   assert.throws(() => calculateOptimalSchedule({ minDelayMinutes: -1 }))
   const db = new DatabaseSync(':memory:')
-  db.exec('CREATE TABLE publication_jobs (organization_id INTEGER,status TEXT,filled_at TEXT)')
+  db.exec('CREATE TABLE publication_jobs (organization_id INTEGER,status TEXT,started_at TEXT)')
   const yesterday = new Date(Date.now() - 86400000)
   const midnightUTC = new Date(
     Date.UTC(yesterday.getUTCFullYear(), yesterday.getUTCMonth(), yesterday.getUTCDate(), 1),
@@ -72,6 +73,7 @@ try {
       dayOfWeek: new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay(),
       hour: 22,
       successCount: 1,
+      attemptCount: 1,
     },
   ])
   db.close()

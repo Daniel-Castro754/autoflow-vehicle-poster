@@ -214,6 +214,8 @@ export async function handleVehicleMutationRoute(
       return true
     }
     const mode = body.mode === 'update' ? 'update' : 'skip'
+    const dryRun = body.dryRun === true
+    const previewDigest = typeof body.previewDigest === 'string' ? body.previewDigest : ''
     let rows: Array<Record<string, unknown>>
     try {
       rows = csvVehicles(csv, 2000)
@@ -229,8 +231,30 @@ export async function handleVehicleMutationRoute(
       updated = 0,
       skipped = 0
     const errors: Array<{ row: number; error: string }> = []
-    db.exec('BEGIN')
+    // The preview and commit use a snapshot of the relevant organization's stock
+    // and publication state. This prevents confirming a stale preview.
+    db.exec('BEGIN IMMEDIATE')
+    let digest: string
     try {
+      const snapshot = db
+        .prepare(
+          `SELECT v.id,v.stock_code stockCode,v.vin,v.status,v.updated_at updatedAt,
+          v.year,v.make,v.model,v.price,v.km,
+          (SELECT group_concat(j.id || ':' || j.status || ':' || j.updated_at, ',')
+           FROM publication_jobs j WHERE j.organization_id=v.organization_id AND j.vehicle_id=v.id) jobs
+         FROM vehicles v WHERE v.organization_id=? ORDER BY v.id`,
+        )
+        .all(auth.organizationId)
+      digest = createHash('sha256')
+        .update(JSON.stringify({ organizationId: auth.organizationId, csv, mode, snapshot }))
+        .digest('hex')
+      if (!dryRun && previewDigest && previewDigest !== digest) {
+        db.exec('ROLLBACK')
+        send(res, 409, {
+          error: 'O estoque mudou após a prévia. Gere uma nova prévia antes de importar.',
+        })
+        return true
+      }
       for (let index = 0; index < rows.length; index++) {
         const rowNumber = index + 2
         const vehicleInput = applyVehicleDefaults(db, rows[index], auth.organizationId)
@@ -274,6 +298,24 @@ export async function handleVehicleMutationRoute(
             .get(duplicate.id, auth.organizationId) as { status: string } | undefined
           if (!current || terminalVehicleStatuses.has(current.status)) {
             skipped++
+            continue
+          }
+          // Do not silently rewrite stock referenced by any active publication;
+          // a human must first reconcile that job safely.
+          const activePublication = db
+            .prepare(
+              `SELECT 1 FROM publication_jobs
+             WHERE organization_id=? AND vehicle_id=?
+             AND status IN ('pending','filling','error','awaiting_confirmation','completed')
+             LIMIT 1`,
+            )
+            .get(auth.organizationId, duplicate.id)
+          if (activePublication) {
+            skipped++
+            errors.push({
+              row: rowNumber,
+              error: 'Veículo com publicação ativa: revise o trabalho antes de sincronizar.',
+            })
             continue
           }
           db.prepare(
@@ -331,12 +373,14 @@ export async function handleVehicleMutationRoute(
         )
         created++
       }
-      db.exec('COMMIT')
+      db.exec(dryRun ? 'ROLLBACK' : 'COMMIT')
     } catch (error) {
       db.exec('ROLLBACK')
       throw error
     }
     send(res, 200, {
+      dryRun,
+      previewDigest: dryRun ? digest : undefined,
       total: rows.length,
       created,
       updated,

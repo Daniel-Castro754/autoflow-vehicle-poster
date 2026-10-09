@@ -4,6 +4,7 @@ export interface HistoricalEngagement {
   dayOfWeek: number
   hour: number
   successCount: number
+  attemptCount?: number
 }
 
 export interface ScheduleOptions {
@@ -68,7 +69,7 @@ export function calculateOptimalSchedule(options: ScheduleOptions = {}): Optimal
   })
   const history = (options.historicalData || []).filter(
     (h) =>
-      h.successCount > 0 &&
+      h.successCount >= 0 &&
       Number.isInteger(h.dayOfWeek) &&
       h.dayOfWeek >= 0 &&
       h.dayOfWeek < 7 &&
@@ -76,22 +77,39 @@ export function calculateOptimalSchedule(options: ScheduleOptions = {}): Optimal
       h.hour >= 0 &&
       h.hour < 24,
   )
-  if (history.length >= 5) {
-    const best = [...history].sort((a, b) => b.successCount - a.successCount)[0]
-    const targetDay = new Date(day)
-    targetDay.setUTCDate(targetDay.getUTCDate() + ((best.dayOfWeek - day.getUTCDay() + 7) % 7))
-    const jitter = Math.floor(Math.random() * 21) - 10
-    let candidate = localInstant(targetDay, best.hour * 60 + 15 + jitter, timezone)
-    if (candidate.getTime() < earliest) {
-      targetDay.setUTCDate(targetDay.getUTCDate() + 7)
-      candidate = localInstant(targetDay, best.hour * 60 + 15 + jitter, timezone)
+  // Rate with Bayesian smoothing, not raw completed volume. Require a meaningful
+  // organization-wide sample AND support in the winning day/hour bucket.
+  const eligibleHistory = history.filter(
+    (h) =>
+      Number.isInteger(h.attemptCount) && h.attemptCount! >= h.successCount && h.attemptCount! >= 4,
+  )
+  const totalSamples = history.reduce((sum, h) => sum + (h.attemptCount || 0), 0)
+  if (totalSamples >= 20 && eligibleHistory.length > 0) {
+    const ranked = [...eligibleHistory].sort((a, b) => {
+      const rateA = (a.successCount + 2) / (a.attemptCount! + 4)
+      const rateB = (b.successCount + 2) / (b.attemptCount! + 4)
+      return rateB - rateA || b.attemptCount! - a.attemptCount!
+    })
+    // Prefer best supported hour *available in the next 72h*, rather than
+    // delaying new stock almost a week to chase a misleading high score.
+    for (const best of ranked) {
+      const targetDay = new Date(day)
+      targetDay.setUTCDate(targetDay.getUTCDate() + ((best.dayOfWeek - day.getUTCDay() + 7) % 7))
+      const jitter = Math.floor(Math.random() * 21) - 10
+      let candidate = localInstant(targetDay, best.hour * 60 + 15 + jitter, timezone)
+      if (candidate.getTime() < earliest) {
+        targetDay.setUTCDate(targetDay.getUTCDate() + 7)
+        candidate = localInstant(targetDay, best.hour * 60 + 15 + jitter, timezone)
+      }
+      const free = freeTime(candidate.getTime())
+      if (free >= earliest && free - earliest <= 72 * 60 * 60000)
+        return result(
+          new Date(free),
+          'historical',
+          `Dia ${best.dayOfWeek} às ${best.hour}h`,
+          jitter,
+        )
     }
-    return result(
-      new Date(freeTime(candidate.getTime())),
-      'historical',
-      `Dia ${best.dayOfWeek} às ${best.hour}h`,
-      jitter,
-    )
   }
   for (let offset = 0; offset < 7; offset++) {
     const targetDay = new Date(day)
