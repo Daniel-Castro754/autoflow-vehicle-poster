@@ -32,4 +32,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t autoflow:test .
+      - name: Build Docker image (mirror fallback if Docker Hub rate-limits)
+        run: |
+          if ! docker build -t autoflow:test .; then
+            echo "::warning::Docker Hub unavailable; attempting verified public AWS ECR mirror"
+            sed 's|node:24-alpine|public.ecr.aws/docker/library/node:24-alpine|g' Dockerfile > Dockerfile.ci-mirror
+            docker build -f Dockerfile.ci-mirror -t autoflow:test .
+          fi
