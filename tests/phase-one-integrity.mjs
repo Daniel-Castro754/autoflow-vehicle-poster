@@ -139,7 +139,7 @@ try {
     assert(interleaved, 'O teste precisa simular a troca de lease após a leitura')
     assert.equal(result.recoveredCount, 0)
     assert.deepEqual(
-      db.prepare('SELECT status,lease_token token FROM publication_jobs WHERE id=?').get(firstJob.id),
+      { ...db.prepare('SELECT status,lease_token token FROM publication_jobs WHERE id=?').get(firstJob.id) },
       { status: 'filling', token: 'new-token' },
     )
     assert.equal(db.prepare(
