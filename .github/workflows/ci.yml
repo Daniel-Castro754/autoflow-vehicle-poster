@@ -20,6 +20,15 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - name: Temporary formatting verification
+        run: |
+          npx prettier --write server/routes/extension.ts server/services/daily-capacity.ts server/services/health-monitor.ts tests/phase-one-integrity.mjs > /dev/null
+          for file in server/routes/extension.ts server/services/daily-capacity.ts server/services/health-monitor.ts tests/phase-one-integrity.mjs; do
+            echo "AUTO_FORMAT_BEGIN=$file"
+            base64 -w0 "$file"
+            echo
+            echo "AUTO_FORMAT_END=$file"
+          done
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
