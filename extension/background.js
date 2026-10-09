@@ -229,7 +229,11 @@ async function consumeQueue() {
       const status = await marketplaceReady(tab.id)
       if (!status.ready) {
         await chrome.storage.local.set({
-          facebookSession: { accountId: state.activeAccountId, ready: false, reason: status.reason },
+          facebookSession: {
+            accountId: state.activeAccountId,
+            ready: false,
+            reason: status.reason,
+          },
           autoRun: false,
         })
         // Keep the Facebook tab for the human to log in or complete a challenge.
@@ -483,7 +487,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ready: false, reason: 'Aba inválida.' })
       return
     }
-    void chrome.tabs.get(tabId)
+    void chrome.tabs
+      .get(tabId)
       .then((tab) => {
         if (!/^https:\/\/www\.facebook\.com\/marketplace\/create\/vehicle/.test(tab.url || ''))
           return { ready: false, reason: 'Abra o formulário de veículo no Facebook.' }

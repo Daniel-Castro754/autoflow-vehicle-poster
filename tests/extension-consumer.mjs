@@ -65,7 +65,10 @@ async function runConsumer(queue, network = {}) {
         const reply = typeof options === 'function' ? options : callback
         reply?.(
           message.type === 'AUTOFLOW_MARKETPLACE_SESSION_STATUS'
-            ? { ready: network.marketplaceReady !== false, blocked: network.marketplaceBlocked === true }
+            ? {
+                ready: network.marketplaceReady !== false,
+                blocked: network.marketplaceBlocked === true,
+              }
             : { active: network.contentActive !== false },
         )
       },

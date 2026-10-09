@@ -261,13 +261,21 @@ $('logout').onclick = async () => {
     )
   }
   chrome.storage.local.remove(
-    ['token', 'refreshToken', 'user', 'activeAccountId', 'pendingJob', 'autoRun', 'facebookSession'],
+    [
+      'token',
+      'refreshToken',
+      'user',
+      'activeAccountId',
+      'pendingJob',
+      'autoRun',
+      'facebookSession',
+    ],
     () => {
-    token = ''
-    activeAccountId = 0
-    setConnected(false)
-    updateAutoRunButton()
-  },
+      token = ''
+      activeAccountId = 0
+      setConnected(false)
+      updateAutoRunButton()
+    },
   )
 }
 $('refresh').onclick = loadQueue

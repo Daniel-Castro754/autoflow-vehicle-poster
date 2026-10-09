@@ -557,7 +557,9 @@
     // After reload, a count alone does not prove the identity of existing photos.
     // Never resume blindly or let auto-publish treat a partial previous upload as verified.
     if (!state && initial > 0)
-      throw new Error('Fotos já presentes sem identificação verificável. Revise o formulário antes de publicar.')
+      throw new Error(
+        'Fotos já presentes sem identificação verificável. Revise o formulário antes de publicar.',
+      )
     if (initial >= target.length) return initial
     if (!state) {
       state = { completed: new Set(), awaiting: null }
@@ -747,7 +749,11 @@
   function marketplaceSessionStatus() {
     const page = normalize(document.body?.innerText || '')
     if (hasHumanChallenge())
-      return { ready: false, blocked: true, reason: 'Confirme a verificação de segurança do Facebook.' }
+      return {
+        ready: false,
+        blocked: true,
+        reason: 'Confirme a verificação de segurança do Facebook.',
+      }
     if (
       document.querySelector('input[type="password"]') ||
       page.includes('entrar no facebook') ||

@@ -255,16 +255,17 @@ export async function handleAuthRoute(
     const nextSecret = randomBytes(32).toString('base64url')
     db.exec('BEGIN IMMEDIATE')
     try {
-      const row = db.prepare(
-        `SELECT s.id sessionId,s.user_id userId,s.organization_id organizationId
+      const row = db
+        .prepare(
+          `SELECT s.id sessionId,s.user_id userId,s.organization_id organizationId
          FROM auth_sessions s
          JOIN extension_refresh_sessions e ON e.session_id=s.id
          JOIN users u ON u.id=s.user_id AND u.organization_id=s.organization_id
          WHERE s.id=? AND e.secret_hash=? AND s.revoked_at IS NULL AND u.active=1
            AND datetime(e.expires_at)>CURRENT_TIMESTAMP`,
-      ).get(match[1], refreshHash(match[2])) as
-        | { sessionId: string; userId: number; organizationId: number }
-        | undefined
+        )
+        .get(match[1], refreshHash(match[2])) as
+        { sessionId: string; userId: number; organizationId: number } | undefined
       if (!row) {
         db.exec('ROLLBACK')
         send(res, 401, { error: 'Renovação expirada ou revogada. Entre novamente.' })
@@ -274,9 +275,9 @@ export async function handleAuthRoute(
         `UPDATE extension_refresh_sessions SET secret_hash=?,rotated_at=CURRENT_TIMESTAMP
          WHERE session_id=? AND secret_hash=?`,
       ).run(refreshHash(nextSecret), row.sessionId, refreshHash(match[2]))
-      db.prepare(
-        "UPDATE auth_sessions SET expires_at=datetime('now','+12 hours') WHERE id=?",
-      ).run(row.sessionId)
+      db.prepare("UPDATE auth_sessions SET expires_at=datetime('now','+12 hours') WHERE id=?").run(
+        row.sessionId,
+      )
       db.exec('COMMIT')
       send(res, 200, {
         token: sign({
@@ -339,7 +340,12 @@ export async function handleAuthRoute(
       )
     }
     loginBuckets.delete(accountKey)
-    startSession(row, res, dependencies, extensionClient === true && EXTENSION_ORIGIN.test(String(req.headers.origin || '')))
+    startSession(
+      row,
+      res,
+      dependencies,
+      extensionClient === true && EXTENSION_ORIGIN.test(String(req.headers.origin || '')),
+    )
     return true
   }
   if (!auth) return false

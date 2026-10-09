@@ -12,8 +12,7 @@ const loginPayload = JSON.stringify({
   extensionClient: true,
 })
 const anon = createApiClient(server.base, '')
-const fail = (operation, status) =>
-  assert.rejects(operation, (error) => error.status === status)
+const fail = (operation, status) => assert.rejects(operation, (error) => error.status === status)
 
 try {
   const ordinary = await anon('/auth/login', { method: 'POST', body: loginPayload })
@@ -25,13 +24,19 @@ try {
     body: loginPayload,
   })
   assert.match(extension.refreshToken, /^[a-f0-9]{48}\.[a-zA-Z0-9_-]{43}$/)
-  assert.equal((await createApiClient(server.base, extension.token)('/me')).user.email, server.email)
+  assert.equal(
+    (await createApiClient(server.base, extension.token)('/me')).user.email,
+    server.email,
+  )
   const sessionId = extension.refreshToken.split('.')[0]
   const stored = db
     .prepare('SELECT secret_hash secretHash FROM extension_refresh_sessions WHERE session_id=?')
     .get(sessionId)
   assert(stored.secretHash)
-  assert(!stored.secretHash.includes(extension.refreshToken.split('.')[1]), 'The grant must be hashed')
+  assert(
+    !stored.secretHash.includes(extension.refreshToken.split('.')[1]),
+    'The grant must be hashed',
+  )
 
   const refresh = (grant, headers = { Origin: origin }) =>
     anon('/auth/extension/refresh', {
