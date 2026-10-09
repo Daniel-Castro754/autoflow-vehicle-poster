@@ -151,6 +151,7 @@ try {
     release = deferred(),
     entered = deferred()
   const guardedWorker = createAutonomousScheduler(db, {
+    maxConcurrentOrganizations: 1,
     run: async (_db, id) => {
       called.push(id)
       if (id === 1) {
