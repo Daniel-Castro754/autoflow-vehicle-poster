@@ -133,6 +133,13 @@ body,
 .app-shell .table-wrap table {
   width: 100%;
 }
+.app-shell .table-wrap[tabindex='0']:focus-visible {
+  outline: 3px solid var(--af-focus);
+  outline-offset: -3px;
+}
+.app-shell .table-wrap[tabindex='0'] {
+  scroll-padding-inline: 12px;
+}
 .app-shell :is(.vehicles-page, .publications-page, .reports-page) table th {
   font-size: 11px;
   line-height: 1.5;
