@@ -1,10 +1,38 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { vehicleOptions } from './vehicle-input.ts'
 
-const retryableExtensionFailureCodes = new Set(['marketplace_form_timeout'])
+type FailureDisposition = 'retry' | 'intervention' | 'terminal'
+type FailureCategory = 'transient' | 'authentication' | 'safety' | 'validation' | 'unknown'
+
+// Only explicit, reviewed codes can trigger retries. Never infer retryability
+// from arbitrary Facebook text or from a failed publishing acknowledgement.
+const failurePolicy: Record<
+  string,
+  { category: FailureCategory; disposition: FailureDisposition }
+> = {
+  marketplace_form_timeout: { category: 'transient', disposition: 'retry' },
+  marketplace_navigation_timeout: { category: 'transient', disposition: 'retry' },
+  facebook_auth_required: { category: 'authentication', disposition: 'intervention' },
+  facebook_checkpoint_required: { category: 'authentication', disposition: 'intervention' },
+  photo_identity_unverified: { category: 'safety', disposition: 'intervention' },
+  selector_layout_drift: { category: 'safety', disposition: 'intervention' },
+  publish_outcome_unknown: { category: 'safety', disposition: 'intervention' },
+  vehicle_data_invalid: { category: 'validation', disposition: 'terminal' },
+}
+
+export function classifyExtensionFailure(value: unknown) {
+  const code = typeof value === 'string' ? value : ''
+  const policy = Object.hasOwn(failurePolicy, code) ? failurePolicy[code] : undefined
+  return {
+    code: policy ? code : null,
+    category: policy?.category || ('unknown' as const),
+    disposition: policy?.disposition || ('intervention' as const),
+    retryable: policy?.disposition === 'retry',
+  }
+}
 
 export function isRetryableExtensionFailureCode(value: unknown) {
-  return typeof value === 'string' && retryableExtensionFailureCodes.has(value)
+  return classifyExtensionFailure(value).retryable
 }
 
 export function publicationReadinessIssues(
