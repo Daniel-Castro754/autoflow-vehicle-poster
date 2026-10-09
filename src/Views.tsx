@@ -1481,7 +1481,7 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
               </button>
             </div>
           )}
-          <div className="table-wrap">
+          <div className="table-wrap" role="region" aria-label="Tabela da fila de publicações" tabIndex={0}>
             <table>
               <thead>
                 <tr>
@@ -2942,7 +2942,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
               </div>
               <span className="source-freshness">Atualizado com os dados do painel</span>
             </div>
-            <div className="table-wrap">
+            <div className="table-wrap" role="region" aria-label="Tabela de desempenho dos perfis" tabIndex={0}>
               <table>
                 <thead>
                   <tr>
@@ -3161,7 +3161,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
                 {activeIssues} pendente{activeIssues === 1 ? '' : 's'}
               </span>
             </div>
-            <div className="table-wrap">
+            <div className="table-wrap" role="region" aria-label="Tabela de erros e avisos" tabIndex={0}>
               <table>
                 <thead>
                   <tr>
