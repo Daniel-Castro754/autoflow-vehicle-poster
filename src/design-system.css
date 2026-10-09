@@ -1,0 +1,508 @@
+/* Fase 6 · Fundamentos visuais
+ * Valores semânticos usados por painéis existentes e novos componentes.
+ * Importado após styles.css: migração incremental, sem reescrever fluxos legados.
+ */
+:root {
+  --af-bg: #f4f7f7;
+  --af-surface: #ffffff;
+  --af-surface-raised: #ffffff;
+  --af-surface-muted: #eef3f3;
+  --af-border: #dce5e6;
+  --af-text: #192c31;
+  --af-muted: #5a6d72;
+  --af-primary: #117f65;
+  --af-primary-hover: #0c6953;
+  --af-primary-text: #ffffff;
+  --af-focus: #139b7b;
+  --af-success: #16795c;
+  --af-warning: #996114;
+  --af-danger: #b64148;
+  --af-radius: 12px;
+  --af-radius-sm: 9px;
+  --af-shadow: 0 2px 12px rgba(20, 40, 46, 0.035);
+  --surface: var(--af-surface);
+  --border: var(--af-border);
+  --text-muted: var(--af-muted);
+}
+
+.theme-dark {
+  --af-bg: #0d1519;
+  --af-surface: #172228;
+  --af-surface-raised: #1b2930;
+  --af-surface-muted: #202f36;
+  --af-border: #32434a;
+  --af-text: #edf4f5;
+  --af-muted: #b5c3c6;
+  --af-primary: #25b98b;
+  --af-primary-hover: #42cda0;
+  --af-primary-text: #081c18;
+  --af-focus: #55d7ad;
+  --af-success: #62d5ad;
+  --af-warning: #f0bf78;
+  --af-danger: #ff989e;
+  --af-shadow: none;
+}
+
+/* Estrutura: navegação escura sóbria, superfícies neutras, área útil fluida. */
+body {
+  min-width: 0;
+}
+.app-shell {
+  grid-template-columns: 238px minmax(0, 1fr);
+  color: var(--af-text);
+  background: var(--af-bg);
+}
+.app-shell main,
+.theme-dark.app-shell main {
+  min-width: 0;
+  background: var(--af-bg);
+}
+.app-shell header,
+.theme-dark.app-shell header {
+  background: var(--af-surface);
+  border-color: var(--af-border);
+  padding-inline: clamp(16px, 2vw, 32px);
+}
+.app-shell .content {
+  color: var(--af-text);
+  max-width: 1536px;
+  padding: clamp(20px, 2.5vw, 36px);
+}
+.app-shell .sidebar {
+  background: #111e23;
+  color: #d1dddf;
+}
+.app-shell .workspace {
+  background: #1b3034;
+  border-color: #335057;
+}
+.app-shell .workspace small,
+.app-shell .profile small {
+  color: #b3c7cb;
+}
+.app-shell .sidebar nav button,
+.app-shell .sidebar-foot > button {
+  color: #bdcfd1;
+  font-size: 14px;
+}
+.app-shell .sidebar nav button.active,
+.app-shell .sidebar-foot > button.active {
+  background: #25483f;
+  color: #ffffff;
+}
+.app-shell .sidebar nav button:hover,
+.app-shell .sidebar-foot > button:hover {
+  background: #1e3439;
+  color: #ffffff;
+}
+.app-shell .title-row h1 {
+  color: var(--af-text);
+  font-size: clamp(25px, 2.1vw, 30px);
+  letter-spacing: -0.025em;
+}
+.app-shell .title-row p {
+  font-size: 14px;
+  color: var(--af-muted);
+}
+.app-shell .page-kicker {
+  color: var(--af-success);
+  font-size: 11px;
+  letter-spacing: 0.13em;
+}
+.app-shell .crumb,
+.app-shell .sync,
+.app-shell .module-head span {
+  color: var(--af-muted);
+}
+.app-shell .crumb strong,
+.app-shell .module-head h2,
+.app-shell .compact-list strong {
+  color: var(--af-text);
+}
+
+/* Superfícies e controles partilhados pelas telas existentes. */
+.app-shell .stats article,
+.app-shell .module-card,
+.app-shell .panel,
+.app-shell .team-panel,
+.app-shell .settings-card,
+.app-shell .report-kpis article,
+.app-shell .ai-kpi-card,
+.app-shell .ai-card {
+  background: var(--af-surface);
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius);
+  box-shadow: var(--af-shadow);
+}
+.app-shell .module-head,
+.app-shell .toolbar,
+.app-shell .panel-heading,
+.app-shell .pub-tabs {
+  border-color: var(--af-border);
+}
+.app-shell .module-head h2 {
+  font-size: 16px;
+  line-height: 1.4;
+}
+.app-shell .module-head span,
+.app-shell .compact-list small,
+.app-shell .quick-card > button small,
+.app-shell .stats em {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--af-muted);
+}
+.app-shell .compact-list strong,
+.app-shell .quick-card > button strong {
+  font-size: 14px;
+  line-height: 1.45;
+}
+.app-shell .stats small {
+  font-size: 13px;
+  color: var(--af-muted);
+}
+.app-shell .simple-status {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 9px;
+  border-radius: 999px;
+}
+.app-shell .primary {
+  background: var(--af-primary);
+  color: var(--af-primary-text);
+  border-radius: var(--af-radius-sm);
+  min-height: 40px;
+  box-shadow: none;
+}
+.app-shell .primary:hover {
+  background: var(--af-primary-hover);
+}
+.app-shell .secondary {
+  border-color: var(--af-border);
+  background: var(--af-surface);
+  color: var(--af-text);
+  border-radius: var(--af-radius-sm);
+  min-height: 40px;
+}
+.app-shell .quick-card > button,
+.theme-dark .quick-card > button {
+  background: var(--af-surface);
+  border-color: var(--af-border);
+  color: var(--af-text);
+  padding: 12px;
+  margin-block: 9px;
+}
+.app-shell .quick-card > button:hover {
+  background: var(--af-surface-muted);
+}
+.app-shell .settings-content input,
+.app-shell .settings-content textarea,
+.app-shell .search,
+.app-shell .toolbar select {
+  border-color: var(--af-border);
+  border-radius: var(--af-radius-sm);
+}
+.app-shell :is(input, select, textarea) {
+  font-size: max(14px, 1em);
+}
+.app-shell :is(button, a, input, select, textarea, summary):focus-visible {
+  outline: 3px solid var(--af-focus);
+  outline-offset: 3px;
+}
+.app-shell :is(button, input, select, textarea):disabled {
+  cursor: not-allowed;
+}
+.app-shell .theme-quick,
+.app-shell .icon-btn {
+  color: var(--af-text);
+  background: var(--af-surface);
+  border-color: var(--af-border);
+}
+
+/* Resumo de estoque: remove o hero em altura integral da versão anterior. */
+.overview-inventory-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  margin-bottom: 16px;
+  padding: 20px 24px;
+  background: var(--af-surface);
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius);
+  box-shadow: var(--af-shadow);
+}
+.overview-inventory-summary > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+.overview-inventory-summary span,
+.overview-inventory-summary small {
+  color: var(--af-muted);
+  font-size: 13px;
+}
+.overview-inventory-summary strong {
+  font: 700 clamp(24px, 2.2vw, 32px) / 1.25 Manrope, sans-serif;
+  color: var(--af-text);
+  letter-spacing: -0.025em;
+}
+.overview-publication-progress {
+  width: min(280px, 35%);
+  min-width: 175px;
+  display: grid;
+  gap: 10px;
+}
+.overview-publication-progress > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.overview-publication-progress strong {
+  color: var(--af-success);
+  font-size: 20px;
+}
+.overview-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--af-surface-muted);
+  overflow: hidden;
+}
+.overview-progress-track span {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: var(--af-primary);
+}
+.app-shell .overview-stats {
+  margin-bottom: 24px;
+}
+.app-shell .overview-stats article {
+  padding: 16px;
+}
+
+/* Prioridade é informativa e acionável: nenhum número fictício. */
+.overview-priorities {
+  margin-bottom: 22px;
+  padding: 20px;
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius);
+  background: var(--af-surface);
+  box-shadow: var(--af-shadow);
+}
+.overview-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.overview-section-heading h2 {
+  font: 700 19px / 1.3 Manrope, sans-serif;
+  margin: 4px 0 5px;
+  color: var(--af-text);
+}
+.overview-section-heading p {
+  font-size: 13px;
+  color: var(--af-muted);
+  margin: 0;
+}
+.overview-priority-counter {
+  font-size: 12px;
+  white-space: nowrap;
+  border-radius: 999px;
+  padding: 6px 12px;
+  color: var(--af-muted);
+  background: var(--af-surface-muted);
+}
+.overview-priority-list {
+  display: grid;
+  gap: 9px;
+}
+.overview-priority-item {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius-sm);
+}
+.overview-priority-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: var(--af-surface-muted);
+  color: var(--af-text);
+}
+.overview-priority-item.tone-danger .overview-priority-icon {
+  color: var(--af-danger);
+  background: color-mix(in srgb, var(--af-danger) 12%, transparent);
+}
+.overview-priority-item.tone-warning .overview-priority-icon {
+  color: var(--af-warning);
+  background: color-mix(in srgb, var(--af-warning) 12%, transparent);
+}
+.overview-priority-item.tone-info .overview-priority-icon {
+  color: var(--af-success);
+  background: color-mix(in srgb, var(--af-success) 12%, transparent);
+}
+.overview-priority-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.overview-priority-copy strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--af-text);
+}
+.overview-priority-copy small {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--af-muted);
+}
+.overview-priority-item button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--af-primary);
+  background: transparent;
+  border: 0;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  min-height: 36px;
+}
+.overview-priority-item button:hover {
+  text-decoration: underline;
+}
+.overview-priority-error {
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--af-danger) 35%, var(--af-border));
+  border-radius: var(--af-radius-sm);
+  color: var(--af-danger);
+  font-size: 13px;
+}
+.overview-empty-state {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 18px;
+  border: 1px dashed var(--af-border);
+  border-radius: var(--af-radius-sm);
+  color: var(--af-muted);
+  font-size: 13px;
+}
+.overview-empty-state svg {
+  color: var(--af-success);
+}
+
+/* Diagnósticos intactos, mas fora do primeiro foco visual. */
+.overview-monitoring {
+  margin-top: 22px;
+  border-radius: var(--af-radius);
+  border: 1px solid var(--af-border);
+  background: var(--af-surface);
+}
+.overview-monitoring > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 19px 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.overview-monitoring > summary::-webkit-details-marker {
+  display: none;
+}
+.overview-monitoring > summary > span:first-child {
+  display: grid;
+  gap: 4px;
+}
+.overview-monitoring strong {
+  color: var(--af-text);
+  font-size: 15px;
+}
+.overview-monitoring small {
+  font-size: 12px;
+  color: var(--af-muted);
+}
+.overview-monitoring-hint {
+  font-weight: 700;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--af-primary);
+}
+.overview-monitoring[open] > summary {
+  border-bottom: 1px solid var(--af-border);
+}
+.overview-monitoring-content {
+  padding: 18px;
+}
+.overview-monitoring-content .operational-health,
+.overview-monitoring-content .intervention-panel,
+.overview-monitoring-content > .module-card {
+  margin: 0 0 16px;
+}
+.overview-monitoring-content > :last-child {
+  margin-bottom: 0;
+}
+
+/* Só a fundação nesta etapa: manter telas legadas funcionais no celular. */
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 660px) {
+  .app-shell .content {
+    padding: 18px 14px;
+  }
+  .app-shell .title-row {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .overview-inventory-summary {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 18px;
+    gap: 16px;
+  }
+  .overview-publication-progress {
+    width: 100%;
+  }
+  .overview-priorities {
+    padding: 16px;
+  }
+  .overview-priority-item {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+  .overview-priority-icon {
+    width: 34px;
+    height: 34px;
+  }
+  .overview-priority-item button {
+    grid-column: 2;
+    justify-self: start;
+    padding: 0;
+  }
+  .overview-monitoring > summary {
+    padding: 16px;
+  }
+  .overview-monitoring-content {
+    padding: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell *,
+  .app-shell *::before,
+  .app-shell *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
