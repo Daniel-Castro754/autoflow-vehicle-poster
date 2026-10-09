@@ -45,8 +45,18 @@ for (const part of [
   assert(app.includes(part), `Mobile navigation or feedback missing: ${part}`)
 
 // Wide tables are scrollable and focusable without changing selection/actions.
-assert.equal((views.match(/className="table-wrap" role="region" aria-label=/g) || []).length, 3)
-assert.equal((vehicles.match(/className="table-wrap" role="region" aria-label=/g) || []).length, 1)
+for (const [component, expected] of [
+  [views, 3],
+  [vehicles, 1],
+]) {
+  const tableRegions = [...component.matchAll(/<div\s+className="table-wrap"[\s\S]*?>/g)]
+  assert.equal(tableRegions.length, expected)
+  for (const [markup] of tableRegions) {
+    assert(markup.includes('role="region"'))
+    assert(markup.includes('aria-label='))
+    assert(markup.includes('tabIndex={0}'))
+  }
+}
 assert(views.includes('confirmNoPublication'), 'Duplicate publication protection must remain')
 assert(vehicles.includes('onChange={toggleAll}'), 'Bulk selection must remain')
 assert(css.includes(".table-wrap[tabindex='0']:focus-visible"))
