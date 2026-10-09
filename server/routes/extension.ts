@@ -382,29 +382,29 @@ export async function handleExtensionRoute(
         })
       }
       const result = db
-      .prepare(
-        `UPDATE publication_jobs SET status='filling',attempt_count=attempt_count+1,error_code=NULL,started_at=CURRENT_TIMESTAMP,
-        lease_token=?,lease_owner=?,execution_tab_id=?,execution_document=?,execution_document_id=NULL,lease_expires_at=datetime('now',?),updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?
-        AND social_account_id=? AND paused=0 AND publish_attempt_at IS NULL AND status IN ('pending','filling','error','awaiting_confirmation')
-        AND (scheduled_at IS NULL OR datetime(scheduled_at)<=CURRENT_TIMESTAMP)
-        AND (lease_expires_at IS NULL OR datetime(lease_expires_at)<=CURRENT_TIMESTAMP)
-        AND NOT EXISTS (SELECT 1 FROM publication_jobs active WHERE active.organization_id=? AND active.id<>? AND active.status='filling'
-          AND datetime(active.lease_expires_at)>CURRENT_TIMESTAMP AND (active.social_account_id=? OR active.lease_owner=?))`,
-      )
-      .run(
-        leaseToken,
-        instanceId,
-        tabId,
-        document,
-        `+${leaseSeconds} seconds`,
-        job.id,
-        auth.organizationId,
-        accountId,
-        auth.organizationId,
-        job.id,
-        accountId,
-        instanceId,
-      )
+        .prepare(
+          `UPDATE publication_jobs SET status='filling',attempt_count=attempt_count+1,error_code=NULL,started_at=CURRENT_TIMESTAMP,
+          lease_token=?,lease_owner=?,execution_tab_id=?,execution_document=?,execution_document_id=NULL,lease_expires_at=datetime('now',?),updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?
+          AND social_account_id=? AND paused=0 AND publish_attempt_at IS NULL AND status IN ('pending','filling','error','awaiting_confirmation')
+          AND (scheduled_at IS NULL OR datetime(scheduled_at)<=CURRENT_TIMESTAMP)
+          AND (lease_expires_at IS NULL OR datetime(lease_expires_at)<=CURRENT_TIMESTAMP)
+          AND NOT EXISTS (SELECT 1 FROM publication_jobs active WHERE active.organization_id=? AND active.id<>? AND active.status='filling'
+            AND datetime(active.lease_expires_at)>CURRENT_TIMESTAMP AND (active.social_account_id=? OR active.lease_owner=?))`,
+        )
+        .run(
+          leaseToken,
+          instanceId,
+          tabId,
+          document,
+          `+${leaseSeconds} seconds`,
+          job.id,
+          auth.organizationId,
+          accountId,
+          auth.organizationId,
+          job.id,
+          accountId,
+          instanceId,
+        )
       acquired = result.changes === 1
       if (acquired)
         recordJobEvent(auth.organizationId, job.id, 'filling_started', null, { accountId, instanceId })
