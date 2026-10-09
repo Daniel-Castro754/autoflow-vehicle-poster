@@ -50,6 +50,7 @@ export function DrawerFocusGuard({
       }
       const first = items[0]
       const last = items[items.length - 1]
+      if (!first || !last) return
       if (event.shiftKey && (document.activeElement === first || document.activeElement === drawer)) {
         event.preventDefault()
         last.focus()
