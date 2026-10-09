@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom'
 import {
   Car,
   Check,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
