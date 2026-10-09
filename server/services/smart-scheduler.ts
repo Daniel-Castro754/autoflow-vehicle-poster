@@ -69,7 +69,7 @@ export function calculateOptimalSchedule(options: ScheduleOptions = {}): Optimal
   })
   const history = (options.historicalData || []).filter(
     (h) =>
-      h.successCount > 0 &&
+      h.successCount >= 0 &&
       Number.isInteger(h.dayOfWeek) &&
       h.dayOfWeek >= 0 &&
       h.dayOfWeek < 7 &&
