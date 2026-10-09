@@ -2329,6 +2329,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
     [issuesLoadingMore, setIssuesLoadingMore] = useState(false)
   const [inventorySummary, setInventorySummary] = useState<InventoryStats | null>(null)
   const [performance, setPerformance] = useState<ReportPerformance | null>(null)
+  const [reportError, setReportError] = useState('')
   const [reportNow] = useState(() => Date.now())
   const loadReports = useCallback(
     () =>
@@ -2344,6 +2345,9 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
         setIssuesHaveMore(issueReport.page.hasMore)
         setInventorySummary(inventory)
         setPerformance(reportPerformance)
+        setReportError('')
+      }).catch((error) => {
+        setReportError(error instanceof Error ? error.message : 'Não foi possível atualizar os relatórios.')
       }),
     [api, period, seller],
   )
@@ -2408,7 +2412,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
   const completed = Number(reportSummary?.completed || 0)
   const errors = Number(reportSummary?.errors || 0)
   const active = Number(reportSummary?.active || 0)
-  const successRate = reportJobTotal ? Math.round((completed / reportJobTotal) * 100) : 0
+  const successRate = reportJobTotal ? Math.round((completed / reportJobTotal) * 100) : null
   const automatic = Number(reportSummary?.automatic || 0)
   const groupsSelected = Number(reportSummary?.groupsSelected || 0)
   const byStatus = [
@@ -2536,7 +2540,28 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
   if (loading)
     return (
       <section className="content">
-        <div className="empty">Carregando relatórios...</div>
+        <div className="empty" role="status">Carregando relatórios...</div>
+      </section>
+    )
+  if (reportError && !performance && !inventorySummary)
+    return (
+      <section className="content reports-page">
+        <div className="title-row">
+          <div>
+            <span className="page-kicker">INTELIGÊNCIA OPERACIONAL</span>
+            <h1>Relatórios</h1>
+          </div>
+        </div>
+        <div className="report-fetch-error" role="alert">
+          <CircleAlert size={20} />
+          <div>
+            <strong>Não foi possível carregar os relatórios.</strong>
+            <p>{reportError}</p>
+          </div>
+          <button className="secondary" type="button" onClick={() => void loadReports()}>
+            <RotateCcw size={16} /> Tentar novamente
+          </button>
+        </div>
       </section>
     )
   return (
@@ -2560,22 +2585,50 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
           </button>
         </div>
       )}
-      <div className="report-view-tabs">
+      {reportError && (
+        <div className="report-fetch-error" role="alert">
+          <CircleAlert size={18} />
+          <div>
+            <strong>Dados não atualizados</strong>
+            <p>{reportError} Os números abaixo podem estar desatualizados.</p>
+          </div>
+          <button className="secondary" type="button" onClick={() => void loadReports()}>
+            Tentar novamente
+          </button>
+        </div>
+      )}
+      <div className="report-context">
+        <div>
+          <strong>Estoque</strong>
+          <span>Posição atual da organização</span>
+        </div>
+        <div>
+          <strong>Publicações</strong>
+          <span>{periodLabel}</span>
+        </div>
+        <div>
+          <strong>Resultados</strong>
+          <span>Conclusões registradas no AutoFlow, não vendas ou alcance</span>
+        </div>
+      </div>
+      <div className="report-view-tabs" role="group" aria-label="Tipo de relatório">
         <button
+          type="button"
+          aria-pressed={view === 'performance'}
           className={view === 'performance' ? 'active' : ''}
           onClick={() => setView('performance')}
         >
           <BarChart3 />
           Desempenho e estoque
         </button>
-        <button className={view === 'issues' ? 'active' : ''} onClick={() => setView('issues')}>
+        <button type="button" aria-pressed={view === 'issues'} className={view === 'issues' ? 'active' : ''} onClick={() => setView('issues')}>
           <CircleAlert />
           Erros e avisos
           {issues.filter((issue) => issue.active).length > 0 && (
             <span>{issues.filter((issue) => issue.active).length}</span>
           )}
         </button>
-        <button className="refresh-view" onClick={() => loadReports()}>
+        <button type="button" className="refresh-view" onClick={() => void loadReports()}>
           <RotateCcw />
           Atualizar
         </button>
@@ -2602,7 +2655,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
             ))}
           </select>
         </label>
-        <small>Estoque: posição atual · Publicações: {periodLabel}</small>
+        <small>Filtros de período não alteram a posição atual do estoque.</small>
       </div>
       {view === 'performance' ? (
         <>
@@ -2635,7 +2688,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
               </span>
               <div>
                 <span>Estoque publicado</span>
-                <strong>{total ? Math.round((publishedVehicles / total) * 100) : 0}%</strong>
+                <strong>{total ? `${Math.round((publishedVehicles / total) * 100)}%` : 'Sem dados'}</strong>
                 <small>
                   {publishedVehicles} publicado{publishedVehicles === 1 ? '' : 's'} ·{' '}
                   {attentionVehicles} em atenção
@@ -2648,7 +2701,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
               </span>
               <div>
                 <span>Cobertura de fotos</span>
-                <strong>{photoCoverage}%</strong>
+                <strong>{total ? `${photoCoverage}%` : 'Sem dados'}</strong>
                 <small>
                   {withPhotos} de {total} com pelo menos uma foto
                 </small>
@@ -2660,7 +2713,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
               </span>
               <div>
                 <span>Taxa de conclusão</span>
-                <strong>{successRate}%</strong>
+                <strong>{successRate === null ? 'Sem dados' : `${successRate}%`}</strong>
                 <small>
                   {completed} concluída{completed === 1 ? '' : 's'} em {reportJobTotal} trabalho
                   {reportJobTotal === 1 ? '' : 's'}
@@ -2693,8 +2746,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
                     <div>
                       <strong>{item.label}</strong>
                       <small>
-                        {reportJobTotal ? Math.round((item.count / reportJobTotal) * 100) : 0}% dos
-                        trabalhos no recorte
+                        {reportJobTotal ? `${Math.round((item.count / reportJobTotal) * 100)}% dos trabalhos no recorte` : 'Sem trabalhos no período'}
                       </small>
                     </div>
                     <b>{item.count}</b>
@@ -2738,7 +2790,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
                   style={{ '--coverage': `${photoCoverage * 3.6}deg` } as React.CSSProperties}
                 >
                   <span>
-                    <strong>{photoCoverage}%</strong>
+                    <strong>{total ? `${photoCoverage}%` : '—'}</strong>
                     <small>cobertura</small>
                   </span>
                 </div>
