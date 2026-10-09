@@ -200,6 +200,19 @@ export default function App() {
   const mobileSidebarRef = useRef<HTMLElement>(null)
   useEffect(() => {
     if (!mobileMenuOpen) return
+    const wide = window.matchMedia('(min-width: 901px)')
+    if (wide.matches) {
+      setMobileMenuOpen(false)
+      return
+    }
+    const onResize = () => {
+      if (wide.matches) setMobileMenuOpen(false)
+    }
+    wide.addEventListener('change', onResize)
+    return () => wide.removeEventListener('change', onResize)
+  }, [mobileMenuOpen])
+  useEffect(() => {
+    if (!mobileMenuOpen) return
     const sidebar = mobileSidebarRef.current
     if (!sidebar) return
     const oldOverflow = document.body.style.overflow
@@ -792,7 +805,7 @@ export default function App() {
         )}
       </main>
       {toast && (
-        <div className="toast">
+        <div className="toast" role="status" aria-live="polite">
           <Check size={17} />
           {toast}
         </div>
@@ -820,7 +833,17 @@ function NotificationCenter({
 }) {
   const unread = notifications.filter((item) => !readIds.includes(item.id)).length
   return (
-    <div className="notification-panel">
+    <div
+      className="notification-panel"
+      role="region"
+      aria-label="Central de notificações"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.stopPropagation()
+          onClose()
+        }
+      }}
+    >
       <div className="notification-head">
         <div>
           <strong>Notificações</strong>
