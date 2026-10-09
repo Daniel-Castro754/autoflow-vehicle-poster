@@ -250,7 +250,7 @@ const migrations: Migration[] = [
       SELECT 1 FROM operational_incident_actions a
       WHERE a.incident_id=i.id AND a.organization_id=i.organization_id
         AND a.action='opened' AND a.note='Importado do estado atual durante a migração.'
-    );`
+    );`,
   },
 ]
 
