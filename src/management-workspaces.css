@@ -1,0 +1,479 @@
+/* Fase 6, etapa 3: painéis gerenciais. Tokens da etapa 1, estilos locais.
+ * Elementos de formulário permanecem montados para reter alterações não salvas.
+ */
+
+/* Relatórios: a origem e o recorte dos dados são visíveis. */
+.reports-page .report-context {
+  display: grid;
+  grid-template-columns: 1fr 1fr minmax(0, 1.4fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.reports-page .report-context > div {
+  display: grid;
+  gap: 5px;
+  padding: 14px 16px;
+  background: var(--af-surface);
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius);
+}
+.reports-page .report-context strong {
+  font: 700 13px/1.3 Manrope, sans-serif;
+  color: var(--af-text);
+}
+.reports-page .report-context span {
+  color: var(--af-muted);
+  line-height: 1.5;
+  font-size: 12px;
+}
+.report-fetch-error {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 16px;
+  margin: 0 0 16px;
+  border-radius: var(--af-radius);
+  border: 1px solid color-mix(in srgb, var(--af-danger) 32%, var(--af-border));
+  color: var(--af-danger);
+  background: color-mix(in srgb, var(--af-danger) 6%, var(--af-surface));
+}
+.report-fetch-error > div {
+  min-width: 0;
+  flex: 1;
+}
+.report-fetch-error strong {
+  font-size: 14px;
+}
+.report-fetch-error p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--af-text);
+}
+.report-fetch-error button {
+  flex-shrink: 0;
+}
+.app-shell .reports-page .report-view-tabs {
+  background: var(--af-surface-muted);
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius);
+  padding: 6px;
+  gap: 7px;
+}
+.reports-page .report-view-tabs button {
+  min-height: 40px;
+  padding: 8px 14px;
+  color: var(--af-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.app-shell .reports-page .report-view-tabs button.active {
+  background: var(--af-surface);
+  color: var(--af-text);
+  border: 1px solid var(--af-border);
+  box-shadow: var(--af-shadow);
+}
+.app-shell .reports-page .report-filters {
+  background: var(--af-surface);
+  border-color: var(--af-border);
+  border-radius: var(--af-radius);
+  padding: 15px 16px;
+  gap: 13px;
+  flex-wrap: wrap;
+}
+.reports-page .report-filters span,
+.reports-page .report-filters label,
+.reports-page .report-filters small {
+  color: var(--af-muted);
+  font-size: 12px;
+}
+.app-shell .reports-page .report-filters select {
+  min-height: 40px;
+  font-size: 13px;
+  color: var(--af-text);
+  background: var(--af-surface);
+  border-color: var(--af-border);
+  border-radius: var(--af-radius-sm);
+}
+.app-shell .reports-page .rich-kpis {
+  gap: 12px;
+}
+.app-shell .reports-page .rich-kpis article {
+  background: var(--af-surface);
+  border-color: var(--af-border);
+  border-radius: var(--af-radius);
+  padding: 18px;
+  box-shadow: var(--af-shadow);
+}
+.app-shell .reports-page .rich-kpis strong {
+  font: 700 clamp(19px, 1.9vw, 26px)/1.3 Manrope, sans-serif;
+  color: var(--af-text);
+  overflow-wrap: anywhere;
+}
+.app-shell .reports-page .rich-kpis :is(span, small) {
+  color: var(--af-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.reports-page .report-grid,
+.reports-page .primary-report-grid,
+.reports-page .secondary-report-grid {
+  gap: 16px;
+}
+.app-shell .reports-page .module-card {
+  min-width: 0;
+  background: var(--af-surface);
+  border-color: var(--af-border);
+}
+.app-shell .reports-page :is(.funnel-list, .photo-quality, .bars) {
+  color: var(--af-text);
+}
+.app-shell .reports-page .funnel-list small {
+  font-size: 12px;
+  color: var(--af-muted);
+}
+.app-shell .reports-page .table-wrap {
+  overflow-x: auto;
+}
+.reports-page table {
+  min-width: 850px;
+}
+.app-shell .reports-page th {
+  font-size: 11px;
+  color: var(--af-muted);
+  background: var(--af-surface-muted);
+  border-color: var(--af-border);
+}
+.app-shell .reports-page td {
+  color: var(--af-text);
+  font-size: 13px;
+  border-color: var(--af-border);
+}
+
+/* Configurações: navegação na mesma página, sem esconder campos requeridos. */
+.settings-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 20px;
+  border: 1px solid var(--af-border);
+  background: var(--af-surface);
+  border-radius: var(--af-radius);
+  margin-bottom: 12px;
+}
+.settings-section-header strong {
+  color: var(--af-text);
+  font-size: 15px;
+}
+.settings-section-header p {
+  color: var(--af-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 5px 0 0;
+}
+.settings-section-header > span {
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: var(--af-surface-muted);
+  color: var(--af-success);
+  font-size: 12px;
+  font-weight: 700;
+}
+.settings-section-nav {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  margin-bottom: 17px;
+  overflow-x: auto;
+  border-radius: var(--af-radius);
+  border: 1px solid var(--af-border);
+  background: var(--af-surface-muted);
+}
+.settings-section-nav button {
+  display: grid;
+  gap: 5px;
+  flex: 1 0 145px;
+  text-align: left;
+  min-height: 63px;
+  padding: 10px 13px;
+  border: 1px solid transparent;
+  border-radius: var(--af-radius-sm);
+  background: transparent;
+  color: var(--af-muted);
+  cursor: pointer;
+}
+.settings-section-nav button:hover {
+  background: var(--af-surface);
+}
+.settings-section-nav button.active {
+  background: var(--af-surface);
+  color: var(--af-text);
+  border-color: var(--af-primary);
+  box-shadow: var(--af-shadow);
+}
+.settings-section-nav strong {
+  font-size: 13px;
+  line-height: 1.25;
+}
+.settings-section-nav small {
+  color: var(--af-muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+.settings-page .settings-card {
+  scroll-margin-top: 96px;
+  border-color: var(--af-border);
+  background: var(--af-surface);
+  border-radius: var(--af-radius);
+  box-shadow: var(--af-shadow);
+  padding: 22px;
+  gap: 19px;
+}
+.app-shell .settings-page .settings-content h2 {
+  color: var(--af-text);
+  font: 700 18px/1.35 Manrope, sans-serif;
+}
+.app-shell .settings-page .settings-content > p {
+  font-size: 13px;
+  color: var(--af-muted);
+  line-height: 1.55;
+}
+.app-shell .settings-page .settings-icon {
+  background: var(--af-surface-muted);
+  color: var(--af-success);
+}
+.app-shell .settings-page .settings-content :is(label, .toggle-label) {
+  font-size: 13px;
+  color: var(--af-text);
+}
+.app-shell .settings-page .settings-content :is(label > small, .toggle-label small) {
+  color: var(--af-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.app-shell .settings-page .settings-content :is(input:not([type='checkbox']), select, textarea) {
+  background: var(--af-surface);
+  color: var(--af-text);
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius-sm);
+  font-size: 13px;
+  min-height: 39px;
+}
+.app-shell .settings-page .toggle-label {
+  gap: 15px;
+  border-color: var(--af-border);
+}
+.app-shell .settings-page .toggle-label > input[type='checkbox'] {
+  flex-shrink: 0;
+  width: 37px;
+  height: 21px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--af-border);
+  border-radius: 999px;
+  background: var(--af-surface-muted);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.app-shell .settings-page .toggle-label > input[type='checkbox']::before {
+  content: '';
+  width: 15px;
+  height: 15px;
+  top: 2px;
+  left: 2px;
+  position: absolute;
+  background: var(--af-surface);
+  border: 1px solid var(--af-border);
+  border-radius: 50%;
+  transition: transform 0.15s ease;
+}
+.app-shell .settings-page .toggle-label > input[type='checkbox']:checked {
+  background: var(--af-primary);
+  border-color: var(--af-primary);
+}
+.app-shell .settings-page .toggle-label > input[type='checkbox']:checked::before {
+  transform: translateX(16px);
+  background: var(--af-primary-text);
+  border-color: transparent;
+}
+.app-shell .settings-page .toggle-label > input[type='checkbox']:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.app-shell .settings-page .toggle-label > input[type='checkbox']:focus-visible {
+  outline: 3px solid var(--af-focus);
+  outline-offset: 3px;
+}
+.app-shell .settings-page .group-manager {
+  border-color: var(--af-border);
+  background: var(--af-surface-muted);
+}
+.settings-page .settings-save {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 17px 20px;
+  background: var(--af-surface);
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius);
+}
+.settings-page .settings-save-copy {
+  display: grid;
+  gap: 5px;
+}
+.settings-page .settings-save-copy strong {
+  font-size: 14px;
+  color: var(--af-text);
+}
+.settings-page .settings-save-copy small {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--af-muted);
+}
+.settings-page .settings-save .primary {
+  flex-shrink: 0;
+}
+
+/* Equipe e contas: distinguir perfis associados da presença real da extensão. */
+.team-page .team-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 17px;
+}
+.team-page .team-summary-card {
+  display: grid;
+  gap: 5px;
+  padding: 16px;
+  text-decoration: none;
+  border-radius: var(--af-radius);
+  border: 1px solid var(--af-border);
+  background: var(--af-surface);
+  box-shadow: var(--af-shadow);
+}
+.team-page .team-summary-card:hover {
+  border-color: var(--af-primary);
+}
+.team-page .team-summary-card span,
+.team-page .team-summary-card small {
+  color: var(--af-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.team-page .team-summary-card strong {
+  color: var(--af-text);
+  font: 700 24px/1.25 Manrope, sans-serif;
+}
+.team-page .team-grid {
+  align-items: start;
+  gap: 16px;
+}
+.team-page .team-panel {
+  min-width: 0;
+  scroll-margin-top: 90px;
+  border-color: var(--af-border);
+  background: var(--af-surface);
+  border-radius: var(--af-radius);
+  box-shadow: var(--af-shadow);
+}
+.team-page .panel-heading {
+  background: var(--af-surface);
+  border-color: var(--af-border);
+}
+.team-page .panel-heading h2 {
+  font-size: 17px;
+  color: var(--af-text);
+}
+.team-page .panel-heading span {
+  font-size: 12px;
+  color: var(--af-muted);
+}
+.team-page .person-row,
+.team-page .account-card {
+  gap: 11px;
+  color: var(--af-text);
+  border-color: var(--af-border);
+}
+.team-page :is(.person-row strong, .account-card strong) {
+  font-size: 13px;
+  color: var(--af-text);
+}
+.team-page :is(.person-row small, .account-card small) {
+  font-size: 12px;
+  color: var(--af-muted);
+}
+.team-page .team-user-toggle,
+.team-page .small-add {
+  border-radius: var(--af-radius-sm);
+  min-height: 34px;
+  font-size: 12px;
+}
+.team-page .security-note {
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius);
+  background: var(--af-surface-muted);
+  color: var(--af-text);
+  padding: 15px 18px;
+  margin-bottom: 16px;
+}
+.team-page .security-note strong {
+  color: var(--af-text);
+  font-size: 13px;
+}
+.team-page .security-note p {
+  color: var(--af-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Tamanhos menores */
+@media (max-width: 1180px) {
+  .team-page .team-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .reports-page .report-context {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .reports-page .report-context > div:last-child {
+    grid-column: 1/-1;
+  }
+}
+@media (max-width: 740px) {
+  .reports-page .report-context,
+  .team-page .team-summary {
+    grid-template-columns: 1fr;
+  }
+  .reports-page .report-context > div:last-child {
+    grid-column: auto;
+  }
+  .report-fetch-error,
+  .settings-section-header,
+  .settings-page .settings-save {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .settings-page .settings-card {
+    padding: 16px;
+    gap: 13px;
+  }
+  .settings-section-nav button {
+    flex-basis: 135px;
+  }
+  .reports-page .report-view-tabs {
+    flex-wrap: wrap;
+  }
+  .reports-page .report-view-tabs .refresh-view {
+    margin-left: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-page .toggle-label > input[type='checkbox'],
+  .settings-page .toggle-label > input[type='checkbox']::before {
+    transition: none;
+  }
+}
