@@ -543,8 +543,8 @@ try {
       'O grupo com histórico ruim deveria ter sido desativado pela curadoria automática.',
     )
 
-  // 6. O agendamento inteligente deve usar o histórico real de sucesso quando houver dados
-  //    suficientes (5+ combinações dia/hora), em vez de sempre cair na heurística estática.
+  // 6. O agendamento só deve usar histórico com amostra terminal suficiente
+  //    e um horário acessível nas próximas 72 horas.
   const vehicleE = await createReadyVehicle(adminToken)
   const publicationE = await call('/publications', adminToken, {
     method: 'POST',
@@ -553,7 +553,7 @@ try {
   const vehicleEOrgId = testDb
     .prepare('SELECT organization_id organizationId FROM vehicles WHERE id=?')
     .get(vehicleE.id).organizationId
-  for (let dayOffset = 10; dayOffset < 15; dayOffset++) {
+  for (let attempt = 0; attempt < 25; attempt++) {
     const historicalVehicle = testDb
       .prepare(
         'INSERT INTO vehicles(organization_id,year,make,model) SELECT organization_id,year,make,model FROM vehicles WHERE id=?',
@@ -561,9 +561,14 @@ try {
       .run(vehicleE.id)
     testDb
       .prepare(
-        `INSERT INTO publication_jobs (organization_id,vehicle_id,status,filled_at) VALUES (?,?,'completed',datetime('now','-${dayOffset} days'))`,
+        `INSERT INTO publication_jobs (organization_id,vehicle_id,status,started_at)
+         VALUES (?,?,?,datetime('now','-7 days','+3 hours'))`,
       )
-      .run(vehicleEOrgId, Number(historicalVehicle.lastInsertRowid))
+      .run(
+        vehicleEOrgId,
+        Number(historicalVehicle.lastInsertRowid),
+        attempt < 20 ? 'completed' : 'error',
+      )
   }
   const smartScheduled = await call(`/publications/${publicationE.id}/smart-schedule`, adminToken, {
     method: 'POST',
