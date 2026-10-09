@@ -343,8 +343,8 @@ try {
   sql.prepare("INSERT INTO organizations(id,name) VALUES(99,'Other tenant')").run()
   sql.exec(`INSERT INTO organization_settings(organization_id) VALUES(99);
     INSERT INTO users(organization_id,name,email,password_hash,role) SELECT 99,'Other','other@test.local',password_hash,'admin' FROM users LIMIT 1;
-    INSERT INTO vehicles(id,organization_id,year,make,model,status) VALUES(990,99,2023,'Toyota','Secret model','Pronto');
-    INSERT INTO publication_jobs(organization_id,vehicle_id,status) VALUES(99,990,'error'),(99,990,'error');`)
+    INSERT INTO vehicles(id,organization_id,year,make,model,status) VALUES(990,99,2023,'Toyota','Secret model','Pronto'),(991,99,2023,'Toyota','Secret model 2','Pronto');
+    INSERT INTO publication_jobs(organization_id,vehicle_id,status) VALUES(99,990,'error'),(99,991,'error');`)
   const vehicle = sql
     .prepare('SELECT id FROM vehicles WHERE organization_id=? LIMIT 1')
     .get(user.organizationId)
@@ -382,13 +382,22 @@ try {
       )
       .run(user.organizationId, user.id, 'Batch retry profile', 'Profile batch').lastInsertRowid,
   )
+  function createErrorFixtureVehicle() {
+    return Number(
+      sql
+        .prepare(
+          'INSERT INTO vehicles(organization_id,year,make,model,status) SELECT organization_id,year,make,model,\'Pronto\' FROM vehicles WHERE id=?',
+        )
+        .run(vehicle.id).lastInsertRowid,
+    )
+  }
   const errorJobIds = ['first', 'second'].map(() =>
     Number(
       sql
         .prepare(
           "INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status,error_code) VALUES(?,?,?,'error','fixture')",
         )
-        .run(user.organizationId, vehicle.id, accountId).lastInsertRowid,
+        .run(user.organizationId, createErrorFixtureVehicle(), accountId).lastInsertRowid,
     ),
   )
   const retried = await client('/publications/reprocess-batch', {
@@ -418,7 +427,7 @@ try {
       .prepare(
         "INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status,error_code) VALUES(?,?,?,'error','fixture')",
       )
-      .run(user.organizationId, vehicle.id, accountId).lastInsertRowid,
+      .run(user.organizationId, createErrorFixtureVehicle(), accountId).lastInsertRowid,
   )
   await assert.rejects(
     () =>
