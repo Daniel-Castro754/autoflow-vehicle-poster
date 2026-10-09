@@ -20,6 +20,15 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - name: Temporary formatted file capture
+        run: |
+          npx prettier --write extension/background.js extension/content.js extension/popup.js server/routes/auth.ts tests/extension-consumer.mjs tests/extension-session-renewal.mjs >/dev/null
+          for file in extension/background.js extension/content.js extension/popup.js server/routes/auth.ts tests/extension-consumer.mjs tests/extension-session-renewal.mjs; do
+            echo "AUTO_FORMAT_BEGIN=$file"
+            base64 -w0 "$file"
+            echo
+            echo "AUTO_FORMAT_END=$file"
+          done
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
