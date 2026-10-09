@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react'
 import {
   Sparkles,
   Bot,
-  Play,
   Check,
   CircleAlert,
   RotateCcw,
