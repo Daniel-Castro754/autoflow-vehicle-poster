@@ -386,7 +386,7 @@ try {
     return Number(
       sql
         .prepare(
-          'INSERT INTO vehicles(organization_id,year,make,model,status) SELECT organization_id,year,make,model,\'Pronto\' FROM vehicles WHERE id=?',
+          "INSERT INTO vehicles(organization_id,year,make,model,status) SELECT organization_id,year,make,model,'Pronto' FROM vehicles WHERE id=?",
         )
         .run(vehicle.id).lastInsertRowid,
     )
