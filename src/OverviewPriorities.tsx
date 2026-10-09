@@ -55,7 +55,7 @@ export function OverviewPriorities({
           tone: 'danger',
           icon: AlertTriangle,
           title: `${critical} ocorrência${critical === 1 ? '' : 's'} crítica${critical === 1 ? '' : 's'}`,
-          detail: 'Verifique publicações incertas antes de qualquer nova tentativa.',
+          detail: 'Revise os trabalhos críticos antes de retomar a automação.',
           action: 'Revisar',
           onClick: onOpenMonitoring,
         }]
