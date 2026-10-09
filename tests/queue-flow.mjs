@@ -104,7 +104,7 @@ try {
     .all()
   migrationDb.close()
   if (
-    migrations.length !== 11 ||
+    migrations.length !== 12 ||
     migrations.map((item) => item.version).join(',') !== '1,2,3,4,5,6,7,8,9,10,11' ||
     migrations.some((item) => !/^[a-f0-9]{64}$/.test(item.checksum))
   )
