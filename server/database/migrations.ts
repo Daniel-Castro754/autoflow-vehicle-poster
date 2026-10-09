@@ -180,6 +180,19 @@ const migrations: Migration[] = [
       ON publication_jobs (organization_id,vehicle_id)
       WHERE status IN ('pending','filling','error','awaiting_confirmation','completed');`,
   },
+  {
+    version: 13,
+    columns: [],
+    sql: `CREATE TABLE IF NOT EXISTS extension_refresh_sessions (
+      session_id TEXT PRIMARY KEY REFERENCES auth_sessions(id) ON DELETE CASCADE,
+      secret_hash TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      rotated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_extension_refresh_expiry
+      ON extension_refresh_sessions (expires_at);`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

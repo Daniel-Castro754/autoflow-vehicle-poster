@@ -1,7 +1,7 @@
 import { hashPassword, passwordNeedsUpgrade } from '../lib/passwords.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { GoogleSignInError, type createGoogleSignIn } from '../services/google-sign-in.ts'
 
 type AuthContext = { userId: number; organizationId: number; sessionId?: string }
@@ -52,20 +52,41 @@ function reserveLoginAttempt(key: string, limit: number) {
   return 0
 }
 
-function startSession(row: UserRow, res: ServerResponse, dependencies: Dependencies) {
+const EXTENSION_REFRESH_DAYS = 30
+const EXTENSION_ORIGIN = /^chrome-extension:\/\/[a-p]{32}$/
+const refreshHash = (secret: string) => createHash('sha256').update(secret).digest('hex')
+
+function startSession(
+  row: UserRow,
+  res: ServerResponse,
+  dependencies: Dependencies,
+  extensionClient = false,
+) {
   const { db, send, sign, userById } = dependencies
   const sessionId = randomBytes(24).toString('hex')
   const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString()
   db.prepare(
-    "DELETE FROM auth_sessions WHERE datetime(expires_at)<=CURRENT_TIMESTAMP OR (revoked_at IS NOT NULL AND datetime(revoked_at)<=datetime('now','-30 days'))",
+    `DELETE FROM auth_sessions
+     WHERE (datetime(expires_at)<=CURRENT_TIMESTAMP AND NOT EXISTS (
+       SELECT 1 FROM extension_refresh_sessions e WHERE e.session_id=auth_sessions.id
+         AND datetime(e.expires_at)>CURRENT_TIMESTAMP
+     )) OR (revoked_at IS NOT NULL AND datetime(revoked_at)<=datetime('now','-30 days'))`,
   ).run()
   db.prepare(
     'INSERT INTO auth_sessions (id,user_id,organization_id,expires_at) VALUES (?,?,?,?)',
   ).run(sessionId, Number(row.id), Number(row.organization_id), expiresAt)
+  const secret = extensionClient ? randomBytes(32).toString('base64url') : null
+  if (secret) {
+    db.prepare(
+      `INSERT INTO extension_refresh_sessions(session_id,secret_hash,expires_at)
+       VALUES(?,?,datetime('now','+${EXTENSION_REFRESH_DAYS} days'))`,
+    ).run(sessionId, refreshHash(secret))
+  }
   res.setHeader('Cache-Control', 'no-store')
   send(res, 200, {
     token: sign({ userId: row.id, organizationId: row.organization_id, sessionId }),
     user: userById(Number(row.id)),
+    ...(secret ? { refreshToken: `${sessionId}.${secret}` } : {}),
   })
 }
 
@@ -206,7 +227,72 @@ export async function handleAuthRoute(
   auth: AuthContext | undefined,
   dependencies: Dependencies,
 ): Promise<boolean> {
-  const { db, send, jsonBody, userById, verifyPassword, dummyPasswordHash } = dependencies
+  const { db, send, jsonBody, userById, verifyPassword, dummyPasswordHash, sign } = dependencies
+  if (req.method === 'POST' && url.pathname === '/api/auth/extension/refresh') {
+    res.setHeader('Cache-Control', 'no-store')
+    if (!EXTENSION_ORIGIN.test(String(req.headers.origin || ''))) {
+      send(res, 403, { error: 'Esta renovação é exclusiva da extensão.' })
+      return true
+    }
+    if (req.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') {
+      send(res, 415, { error: 'Envie um corpo JSON.' })
+      return true
+    }
+    const body = (await jsonBody(req)) as Record<string, unknown> | null
+    const value = typeof body?.refreshToken === 'string' ? body.refreshToken : ''
+    const match = /^([a-f0-9]{48})\.([A-Za-z0-9_-]{43})$/.exec(value)
+    const client = String(req.socket.remoteAddress || 'unknown')
+    const delay = reserveLoginAttempt(`extension-refresh:${client}`, 120)
+    if (delay) {
+      res.setHeader('Retry-After', String(delay))
+      send(res, 429, { error: 'Muitas tentativas de renovação.' })
+      return true
+    }
+    if (!match) {
+      send(res, 401, { error: 'Renovação inválida. Entre novamente.' })
+      return true
+    }
+    const nextSecret = randomBytes(32).toString('base64url')
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const row = db
+        .prepare(
+          `SELECT s.id sessionId,s.user_id userId,s.organization_id organizationId
+         FROM auth_sessions s
+         JOIN extension_refresh_sessions e ON e.session_id=s.id
+         JOIN users u ON u.id=s.user_id AND u.organization_id=s.organization_id
+         WHERE s.id=? AND e.secret_hash=? AND s.revoked_at IS NULL AND u.active=1
+           AND datetime(e.expires_at)>CURRENT_TIMESTAMP`,
+        )
+        .get(match[1], refreshHash(match[2])) as
+        { sessionId: string; userId: number; organizationId: number } | undefined
+      if (!row) {
+        db.exec('ROLLBACK')
+        send(res, 401, { error: 'Renovação expirada ou revogada. Entre novamente.' })
+        return true
+      }
+      db.prepare(
+        `UPDATE extension_refresh_sessions SET secret_hash=?,rotated_at=CURRENT_TIMESTAMP
+         WHERE session_id=? AND secret_hash=?`,
+      ).run(refreshHash(nextSecret), row.sessionId, refreshHash(match[2]))
+      db.prepare("UPDATE auth_sessions SET expires_at=datetime('now','+12 hours') WHERE id=?").run(
+        row.sessionId,
+      )
+      db.exec('COMMIT')
+      send(res, 200, {
+        token: sign({
+          userId: row.userId,
+          organizationId: row.organizationId,
+          sessionId: row.sessionId,
+        }),
+        refreshToken: `${row.sessionId}.${nextSecret}`,
+      })
+      return true
+    } catch (error) {
+      db.exec('ROLLBACK')
+      throw error
+    }
+  }
   if (url.pathname.startsWith('/api/auth/google'))
     return handleGoogleRoute(req, res, url, dependencies)
   if (req.method === 'GET' && url.pathname === '/api/health') {
@@ -214,7 +300,11 @@ export async function handleAuthRoute(
     return true
   }
   if (req.method === 'POST' && url.pathname === '/api/auth/login') {
-    const { email, password } = (await jsonBody(req)) as { email?: string; password?: string }
+    const { email, password, extensionClient } = (await jsonBody(req)) as {
+      email?: string
+      password?: string
+      extensionClient?: boolean
+    }
     const normalizedEmail = String(email || '')
       .trim()
       .toLowerCase()
@@ -250,7 +340,12 @@ export async function handleAuthRoute(
       )
     }
     loginBuckets.delete(accountKey)
-    startSession(row, res, dependencies)
+    startSession(
+      row,
+      res,
+      dependencies,
+      extensionClient === true && EXTENSION_ORIGIN.test(String(req.headers.origin || '')),
+    )
     return true
   }
   if (!auth) return false

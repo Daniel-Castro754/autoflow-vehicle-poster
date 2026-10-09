@@ -61,9 +61,16 @@ async function runConsumer(queue, network = {}) {
           status: 'complete',
           url: `https://www.facebook.com${stored.pendingJob?.document || ''}`,
         }),
-      sendMessage: (_id, _message, options, callback) => {
-        if (typeof options === 'function') options()
-        else callback?.({ active: network.contentActive !== false })
+      sendMessage: (_id, message, options, callback) => {
+        const reply = typeof options === 'function' ? options : callback
+        reply?.(
+          message.type === 'AUTOFLOW_MARKETPLACE_SESSION_STATUS'
+            ? {
+                ready: network.marketplaceReady !== false,
+                blocked: network.marketplaceBlocked === true,
+              }
+            : { active: network.contentActive !== false },
+        )
       },
       onUpdated: { addListener: () => {}, removeListener: () => {} },
       remove: async () => {},
@@ -199,6 +206,20 @@ async function runConsumer(queue, network = {}) {
     result.requests.some((request) => request.url.includes('/prepare')),
     false,
   )
+}
+
+{
+  const blocked = await runConsumer(
+    { jobs: [{ jobId: 22, jobStatus: 'pending', locked: false }] },
+    { marketplaceReady: false, marketplaceBlocked: true },
+  )
+  assert.equal(
+    blocked.requests.some((request) => request.url.includes('/prepare')),
+    false,
+    'A login challenge must not reserve a job',
+  )
+  assert.equal(blocked.stored.autoRun, false)
+  assert.equal(blocked.stored.facebookSession.ready, false)
 }
 
 console.log('✓ Queue consumer ignores non-retryable errors and uncertain publications.')
