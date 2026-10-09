@@ -234,7 +234,7 @@ export async function handleVehicleMutationRoute(
     // The preview and commit use a snapshot of the relevant organization's stock
     // and publication state. This prevents confirming a stale preview.
     db.exec('BEGIN IMMEDIATE')
-    let digest = ''
+    let digest: string
     try {
       const snapshot = db.prepare(
         `SELECT v.id,v.stock_code stockCode,v.vin,v.status,v.updated_at updatedAt,
