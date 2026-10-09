@@ -193,6 +193,7 @@ async function consumeQueue() {
       'autoRun',
       'activeAccountId',
       'token',
+      'refreshToken',
       'instanceId',
       'pendingJob',
       'pendingPublishes',
@@ -472,6 +473,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     void refreshSession()
       .then((token) => sendResponse(token ? { ok: true, token } : { ok: false }))
       .catch(() => sendResponse({ ok: false }))
+    return true
+  }
+  if (message.type === 'AUTOFLOW_CHECK_MARKETPLACE') {
+    const tabId = Number(message.tabId)
+    if (!Number.isInteger(tabId) || tabId < 1) {
+      sendResponse({ ready: false, reason: 'Aba inválida.' })
+      return
+    }
+    void chrome.tabs.get(tabId)
+      .then((tab) => {
+        if (!/^https:\/\/www\.facebook\.com\/marketplace\/create\/vehicle/.test(tab.url || ''))
+          return { ready: false, reason: 'Abra o formulário de veículo no Facebook.' }
+        return marketplaceReady(tabId)
+      })
+      .then(sendResponse)
+      .catch(() => sendResponse({ ready: false, reason: 'A aba do Facebook não está acessível.' }))
     return true
   }
   if (message.type === 'AUTOFLOW_RUN_QUEUE') {
