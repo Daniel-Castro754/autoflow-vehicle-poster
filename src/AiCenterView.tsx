@@ -137,13 +137,17 @@ export function AiCenterView({
   // Batch optimize state
   const [optimizingBatch, setOptimizingBatch] = useState(false)
   const [message, setMessage] = useState('')
+  const [auditError, setAuditError] = useState(false)
 
   const loadAudit = useCallback(async () => {
     try {
       const res = await api<{ ok: boolean; audit: InventoryAudit }>('/ai/audit')
-      if (res.ok) setAudit(res.audit)
+      if (res.ok) {
+        setAudit(res.audit)
+        setAuditError(false)
+      } else setAuditError(true)
     } catch {
-      // Ignora falha de conexão inicial
+      setAuditError(true)
     } finally {
       setLoadingAudit(false)
     }
@@ -153,9 +157,15 @@ export function AiCenterView({
     let active = true
     api<{ ok: boolean; audit: InventoryAudit }>('/ai/audit')
       .then((res) => {
-        if (active && res.ok) setAudit(res.audit)
+        if (!active) return
+        if (res.ok) {
+          setAudit(res.audit)
+          setAuditError(false)
+        } else setAuditError(true)
       })
-      .catch(() => {})
+      .catch(() => {
+        if (active) setAuditError(true)
+      })
       .finally(() => {
         if (active) setLoadingAudit(false)
       })
@@ -338,13 +348,9 @@ export function AiCenterView({
           <p>Leitura de anúncios, piloto automático de publicações e orquestração inteligente.</p>
         </div>
         <div className="title-actions">
-          <button className="secondary" onClick={() => void loadAudit()} disabled={loadingAudit}>
+          <button type="button" className="secondary" onClick={() => void loadAudit()} disabled={loadingAudit}>
             <RotateCcw size={16} />
-            Atualizar auditoria
-          </button>
-          <button className="primary" onClick={handleRunAutopilot} disabled={runningAutopilot}>
-            <Play size={16} />
-            {runningAutopilot ? 'Executando...' : 'Executar Piloto Automático'}
+            {loadingAudit ? 'Consultando...' : 'Atualizar diagnóstico'}
           </button>
         </div>
       </div>
@@ -357,6 +363,23 @@ export function AiCenterView({
         </div>
       )}
 
+      <div className="ai-workflow-intro">
+        <div>
+          <span className="page-kicker">FLUXO DE TRABALHO</span>
+          <h2>Prepare, agende e acompanhe</h2>
+          <p>Confira os requisitos do estoque antes de iniciar a automação. A publicação respeita as configurações e confirmações existentes.</p>
+        </div>
+        <div className="ai-workflow-steps" aria-label="Etapas do fluxo">
+          <span><strong>01</strong> Preparar</span>
+          <span><strong>02</strong> Agendar</span>
+          <span><strong>03</strong> Acompanhar</span>
+        </div>
+      </div>
+      {auditError && (
+        <p className="ai-audit-warning" role="status">
+          Não foi possível atualizar o diagnóstico do estoque. Confira a conexão com o servidor antes de iniciar o piloto.
+        </p>
+      )}
       {/* KPI Cards */}
       <div className="ai-kpi-grid">
         <article className="ai-kpi-card">
@@ -365,10 +388,12 @@ export function AiCenterView({
             <Gauge size={20} className="ai-icon-green" />
           </div>
           <div className="ai-kpi-val">
-            <strong>{audit?.healthScore ?? 100}%</strong>
-            <span className={`ai-badge ${(audit?.healthScore ?? 100) >= 80 ? 'good' : 'warning'}`}>
-              {(audit?.healthScore ?? 100) >= 80 ? 'Excelente' : 'Requer Atenção'}
-            </span>
+            <strong>{audit ? `${audit.healthScore}%` : '—'}</strong>
+            {audit && (
+              <span className={`ai-badge ${audit.healthScore >= 80 ? 'good' : 'warning'}`}>
+                {audit.healthScore >= 80 ? 'Em dia' : 'Requer atenção'}
+              </span>
+            )}
           </div>
           <small>{audit?.totalVehicles ?? vehicles.length} veículos cadastrados na base</small>
         </article>
@@ -382,22 +407,22 @@ export function AiCenterView({
             <strong>
               {audit?.readyVehicles ?? vehicles.filter((v) => v.status === 'Pronto').length}
             </strong>
-            <span className="ai-sub-info">{audit?.readyUnscheduled ?? 0} fora da fila</span>
+            <span className="ai-sub-info">{audit ? `${audit.readyUnscheduled} fora da fila` : 'Verificar fila'}</span>
           </div>
           <small>Prontos para envio autônomo</small>
         </article>
 
         <article className="ai-kpi-card">
           <div className="ai-kpi-head">
-            <span className="ai-kpi-label">Próxima Janela de Pico</span>
+            <span className="ai-kpi-label">Janela sugerida</span>
             <Clock size={20} className="ai-icon-purple" />
           </div>
           <div className="ai-kpi-val">
             <strong style={{ fontSize: '18px' }}>
-              {audit?.peakWindowAvailable || 'Pico Automotivo'}
+              {audit?.peakWindowAvailable || 'Aguardando dados'}
             </strong>
           </div>
-          <small>Tráfego máximo no Facebook Marketplace</small>
+          <small>Sugestão de horário, não previsão de alcance</small>
         </article>
 
         <article className="ai-kpi-card">
@@ -406,13 +431,29 @@ export function AiCenterView({
             <Bot size={20} className="ai-icon-teal" />
           </div>
           <div className="ai-kpi-val">
-            <strong>{audit?.activeAccounts ?? 1}</strong>
+            <strong>{audit?.activeAccounts ?? '—'}</strong>
             <span className="ai-sub-info">Perfis locais</span>
           </div>
-          <small>Sessões do Brave balanceadas por IA</small>
+          <small>Perfis cadastrados para automação</small>
         </article>
       </div>
 
+      {audit && (
+        <div className="ai-preflight" role="status">
+          <div>
+            <strong>Antes de executar</strong>
+            <span>Revise os pontos abaixo; o piloto não substitui a confirmação exigida pelo Marketplace.</span>
+          </div>
+          <div className="ai-preflight-indicators">
+            <span className={audit.activeAccounts > 0 ? 'is-ready' : 'needs-attention'}>
+              <Check size={15} /> {audit.activeAccounts > 0 ? 'Perfil disponível' : 'Conecte um perfil Brave'}
+            </span>
+            <span className={audit.readyVehicles > 0 ? 'is-ready' : 'needs-attention'}>
+              <Check size={15} /> {audit.readyVehicles > 0 ? `${audit.readyVehicles} veículo(s) pronto(s)` : 'Nenhum veículo pronto'}
+            </span>
+          </div>
+        </div>
+      )}
       {/* Main Grid: Autopilot + Command Agent */}
       <div className="ai-two-column-grid">
         {/* Left Column: Autopilot Console & Quick Actions */}
@@ -422,24 +463,18 @@ export function AiCenterView({
               <div>
                 <h2>
                   <Zap size={18} style={{ color: '#10b981', display: 'inline', marginRight: 6 }} />
-                  Piloto Automático (1 Clique)
+                  Piloto automático
                 </h2>
-                <span>Pipeline 100% autônomo de publicação</span>
+                <span>Preparação e agendamento conforme suas regras</span>
               </div>
             </div>
 
-            <p className="ai-desc-text">
-              O piloto automático realiza 4 ações em sequência:
-              <br />
-              <b>1.</b> Enriquece veículos prontos que estão sem descrição usando IA e hashtags de
-              conversão.
-              <br />
-              <b>2.</b> Seleciona todos os carros prontos que ainda não estão em publicação.
-              <br />
-              <b>3.</b> Associa automaticamente ao perfil local do Brave mais adequado.
-              <br />
-              <b>4.</b> Agenda nas melhores janelas de pico brasileiras com jitter anti-bloqueio.
-            </p>
+            <ol className="ai-pipeline-steps">
+              <li><strong>Preparar textos</strong><span>Enriquecer as descrições elegíveis conforme as configurações.</span></li>
+              <li><strong>Selecionar estoque</strong><span>Identificar veículos prontos e ainda não programados.</span></li>
+              <li><strong>Distribuir perfis</strong><span>Respeitar os perfis e limites de automação disponíveis.</span></li>
+              <li><strong>Agendar publicações</strong><span>Aplicar as janelas sugeridas sem ignorar confirmações de segurança.</span></li>
+            </ol>
 
             <div className="ai-actions-bar">
               <button
@@ -449,7 +484,7 @@ export function AiCenterView({
                 disabled={runningAutopilot}
               >
                 <Sparkles size={18} />
-                {runningAutopilot ? 'Executando pipeline...' : 'Disparar Piloto Automático'}
+                {runningAutopilot ? 'Executando piloto...' : 'Executar piloto automático'}
               </button>
 
               <button
@@ -496,8 +531,8 @@ export function AiCenterView({
           <article className="module-card ai-card">
             <div className="module-head">
               <div>
-                <h2>Diagnósticos & Oportunidades do Estoque</h2>
-                <span>Recomendações geradas em tempo real</span>
+                <h2>Diagnósticos e oportunidades</h2>
+                <span>Pontos de atenção identificados na auditoria</span>
               </div>
             </div>
 
@@ -533,8 +568,14 @@ export function AiCenterView({
               ))}
               {(!audit?.recommendations || audit.recommendations.length === 0) && (
                 <div className="ai-empty-rec">
-                  <CheckCircle2 size={24} style={{ color: '#10b981' }} />
-                  <p>Tudo perfeito! O estoque está otimizado e pronto para vendas.</p>
+                  <CheckCircle2 size={24} />
+                  <p>
+                    {loadingAudit
+                      ? 'Consultando os diagnósticos...'
+                      : audit
+                        ? 'Nenhuma recomendação pendente nesta auditoria.'
+                        : 'Auditoria indisponível. Use Atualizar diagnóstico para tentar novamente.'}
+                  </p>
                 </div>
               )}
             </div>
@@ -548,9 +589,9 @@ export function AiCenterView({
               <div>
                 <h2>
                   <Bot size={18} style={{ color: '#3b82f6', display: 'inline', marginRight: 6 }} />
-                  Agente de Comandos em Linguagem Natural
+                  Assistente de operações
                 </h2>
-                <span>Controle o AutoFlow conversando com a IA</span>
+                <span>Comandos e respostas da operação em um só lugar</span>
               </div>
             </div>
 
@@ -572,7 +613,7 @@ export function AiCenterView({
                 🔍 Auditar Estoque
               </button>
               <button
-                onClick={() => void handleSendCommand('Reordenar grupos por taxa de conversão')}
+                onClick={() => void handleSendCommand('Revisar a organização dos grupos')}
               >
                 🎯 Curar Grupos
               </button>
@@ -635,7 +676,7 @@ export function AiCenterView({
           <div>
             <h2>
               <Copy size={18} style={{ color: '#f59e0b', display: 'inline', marginRight: 6 }} />
-              Leitor Inteligente de Veículos (Texto Cru ➔ Estoque)
+              Importar veículo a partir de texto
             </h2>
             <span>
               Cole textos de WhatsApp, notas de compra ou anúncios externos para cadastro automático
