@@ -7,6 +7,7 @@ import {
 } from './description-generator.ts'
 import { generateVehicleHashtags } from './trending-hashtags.ts'
 import { calculateOptimalSchedule } from './smart-scheduler.ts'
+import { organizationScheduleHistory } from './schedule-history.ts'
 import { findBestAccountForVehicle } from './session-manager.ts'
 import { coordinateAutopilot, skippedAutopilot } from './autopilot-coordinator.ts'
 import { curateMarketplaceGroups } from './group-curator.ts'
@@ -672,6 +673,7 @@ async function planAutopilotJobs(
       }
     }
 
+    const historicalData = organizationScheduleHistory(db, organizationId)
     for (const candidate of eligibleVehicles) {
       const vehicle = db
         .prepare(
@@ -734,6 +736,7 @@ async function planAutopilotJobs(
         existingTimestamps,
         accountId: targetAccountId,
         referenceDate: new Date(referenceTime),
+        historicalData,
       })
       accountSchedules.set(targetAccountId, [...existingTimestamps, optimal.scheduledAt.getTime()])
       accountNextAllowedAt.set(
