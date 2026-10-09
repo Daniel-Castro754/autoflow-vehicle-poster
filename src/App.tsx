@@ -201,10 +201,6 @@ export default function App() {
   useEffect(() => {
     if (!mobileMenuOpen) return
     const wide = window.matchMedia('(min-width: 901px)')
-    if (wide.matches) {
-      setMobileMenuOpen(false)
-      return
-    }
     const onResize = () => {
       if (wide.matches) setMobileMenuOpen(false)
     }
@@ -215,6 +211,7 @@ export default function App() {
     if (!mobileMenuOpen) return
     const sidebar = mobileSidebarRef.current
     if (!sidebar) return
+    const opener = mobileMenuButtonRef.current
     const oldOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const controls = () =>
@@ -245,7 +242,7 @@ export default function App() {
     return () => {
       sidebar.removeEventListener('keydown', handleKey)
       document.body.style.overflow = oldOverflow
-      mobileMenuButtonRef.current?.focus()
+      opener?.focus()
     }
   }, [mobileMenuOpen])
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>(() =>
