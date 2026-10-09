@@ -26,6 +26,7 @@ import {
   X,
 } from 'lucide-react'
 import { OverviewView, PublicationsView, ReportsView, SettingsView } from './Views'
+import { calculateTeamSummary } from './management-metrics'
 import VehiclesView, { type VehicleRecord } from './Vehicles'
 import { AiCenterView } from './AiCenterView'
 
@@ -834,12 +835,14 @@ function TeamView({
   onSetAccountAutomation: (account: SocialAccount, paused: boolean) => Promise<void>
 }) {
   const [modal, setModal] = useState<'user' | 'account' | null>(null)
+  const { activeMembers, pausedProfiles, unassignedProfiles } = calculateTeamSummary(team, accounts)
   return (
     <section className="content team-page">
       <div className="title-row">
         <div>
+          <span className="page-kicker">ACESSOS E PERFIS LOCAIS</span>
           <h1>Equipe e contas</h1>
-          <p>Defina quem publica e qual perfil local do Brave cada pessoa utiliza.</p>
+          <p>Gerencie pessoas, atribuições e perfis Brave sem compartilhar credenciais pessoais.</p>
         </div>
         {canManage && (
           <div className="title-actions">
@@ -854,6 +857,28 @@ function TeamView({
           </div>
         )}
       </div>
+      <div className="team-summary" aria-label="Resumo da equipe e perfis">
+        <a href="#team-people" className="team-summary-card">
+          <span>Pessoas ativas</span>
+          <strong>{activeMembers}</strong>
+          <small>de {team.length} acessos cadastrados</small>
+        </a>
+        <a href="#team-profiles" className="team-summary-card">
+          <span>Perfis associados</span>
+          <strong>{accounts.length}</strong>
+          <small>associados à organização, não necessariamente online</small>
+        </a>
+        <a href="#team-profiles" className="team-summary-card">
+          <span>Automação pausada</span>
+          <strong>{pausedProfiles}</strong>
+          <small>perfis com pausa ativa</small>
+        </a>
+        <a href="#team-profiles" className="team-summary-card">
+          <span>Revisar responsáveis</span>
+          <strong>{unassignedProfiles}</strong>
+          <small>perfis sem responsável ativo</small>
+        </a>
+      </div>
       <div className="security-note">
         <ShieldCheck />
         <div>
@@ -865,7 +890,7 @@ function TeamView({
         </div>
       </div>
       <div className="team-grid">
-        <article className="team-panel">
+        <article id="team-people" className="team-panel">
           <div className="panel-heading">
             <div>
               <h2>Pessoas</h2>
@@ -895,7 +920,12 @@ function TeamView({
                   {user.role === 'admin' ? 'Administrador' : 'Vendedor'}
                 </span>
                 {canManage && (
-                  <button className="team-user-toggle" onClick={() => void onToggleUser(user)}>
+                  <button
+                    type="button"
+                    className="team-user-toggle"
+                    onClick={() => void onToggleUser(user)}
+                    aria-label={`${user.active === 1 ? 'Desativar' : 'Reativar'} acesso de ${user.name}`}
+                  >
                     {user.active === 1 ? 'Desativar' : 'Reativar'}
                   </button>
                 )}
@@ -903,14 +933,19 @@ function TeamView({
             ))}
           </div>
         </article>
-        <article className="team-panel">
+        <article id="team-profiles" className="team-panel">
           <div className="panel-heading">
             <div>
               <h2>Perfis de publicação</h2>
               <span>{accounts.length} associados</span>
             </div>
             {canManage && (
-              <button className="small-add" onClick={() => setModal('account')}>
+              <button
+                type="button"
+                className="small-add"
+                aria-label="Associar novo perfil do Brave"
+                onClick={() => setModal('account')}
+              >
                 <Plus size={16} />
               </button>
             )}
@@ -970,7 +1005,7 @@ function TeamView({
       {modal && (
         <div className="overlay" onMouseDown={() => setModal(null)}>
           <aside className="drawer" onMouseDown={(e) => e.stopPropagation()}>
-            <button className="close" onClick={() => setModal(null)}>
+            <button className="close" aria-label="Fechar formulário" onClick={() => setModal(null)}>
               <X />
             </button>
             {modal === 'user' ? (

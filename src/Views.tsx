@@ -46,6 +46,7 @@ import { FieldLabel, HelpTip } from './HelpTip'
 import { OperationalHealth } from './OperationalHealth'
 import { InterventionCenter } from './InterventionCenter'
 import { SchedulingInsights } from './SchedulingInsights'
+import { formatRate } from './management-metrics'
 import { OverviewPriorities } from './OverviewPriorities'
 
 type ApiFn = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
@@ -2329,6 +2330,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
     [issuesLoadingMore, setIssuesLoadingMore] = useState(false)
   const [inventorySummary, setInventorySummary] = useState<InventoryStats | null>(null)
   const [performance, setPerformance] = useState<ReportPerformance | null>(null)
+  const [reportError, setReportError] = useState('')
   const [reportNow] = useState(() => Date.now())
   const loadReports = useCallback(
     () =>
@@ -2338,13 +2340,20 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
         api<ReportPerformance>(
           `/reports/performance?period=${period}&seller=${encodeURIComponent(seller)}`,
         ),
-      ]).then(([issueReport, inventory, reportPerformance]) => {
-        setIssues(issueReport.issues)
-        setIssueCursor(issueReport.page.nextCursor)
-        setIssuesHaveMore(issueReport.page.hasMore)
-        setInventorySummary(inventory)
-        setPerformance(reportPerformance)
-      }),
+      ])
+        .then(([issueReport, inventory, reportPerformance]) => {
+          setIssues(issueReport.issues)
+          setIssueCursor(issueReport.page.nextCursor)
+          setIssuesHaveMore(issueReport.page.hasMore)
+          setInventorySummary(inventory)
+          setPerformance(reportPerformance)
+          setReportError('')
+        })
+        .catch((error) => {
+          setReportError(
+            error instanceof Error ? error.message : 'Não foi possível atualizar os relatórios.',
+          )
+        }),
     [api, period, seller],
   )
   async function loadMoreIssues() {
@@ -2408,7 +2417,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
   const completed = Number(reportSummary?.completed || 0)
   const errors = Number(reportSummary?.errors || 0)
   const active = Number(reportSummary?.active || 0)
-  const successRate = reportJobTotal ? Math.round((completed / reportJobTotal) * 100) : 0
+  const successRate = formatRate(completed, reportJobTotal)
   const automatic = Number(reportSummary?.automatic || 0)
   const groupsSelected = Number(reportSummary?.groupsSelected || 0)
   const byStatus = [
@@ -2536,7 +2545,30 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
   if (loading)
     return (
       <section className="content">
-        <div className="empty">Carregando relatórios...</div>
+        <div className="empty" role="status">
+          Carregando relatórios...
+        </div>
+      </section>
+    )
+  if (reportError && !performance && !inventorySummary)
+    return (
+      <section className="content reports-page">
+        <div className="title-row">
+          <div>
+            <span className="page-kicker">INTELIGÊNCIA OPERACIONAL</span>
+            <h1>Relatórios</h1>
+          </div>
+        </div>
+        <div className="report-fetch-error" role="alert">
+          <CircleAlert size={20} />
+          <div>
+            <strong>Não foi possível carregar os relatórios.</strong>
+            <p>{reportError}</p>
+          </div>
+          <button className="secondary" type="button" onClick={() => void loadReports()}>
+            <RotateCcw size={16} /> Tentar novamente
+          </button>
+        </div>
       </section>
     )
   return (
@@ -2560,22 +2592,55 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
           </button>
         </div>
       )}
-      <div className="report-view-tabs">
+      {reportError && (
+        <div className="report-fetch-error" role="alert">
+          <CircleAlert size={18} />
+          <div>
+            <strong>Dados não atualizados</strong>
+            <p>{reportError} Os números abaixo podem estar desatualizados.</p>
+          </div>
+          <button className="secondary" type="button" onClick={() => void loadReports()}>
+            Tentar novamente
+          </button>
+        </div>
+      )}
+      <div className="report-context">
+        <div>
+          <strong>Estoque</strong>
+          <span>Posição atual da organização</span>
+        </div>
+        <div>
+          <strong>Publicações</strong>
+          <span>{periodLabel}</span>
+        </div>
+        <div>
+          <strong>Resultados</strong>
+          <span>Conclusões registradas no AutoFlow, não vendas ou alcance</span>
+        </div>
+      </div>
+      <div className="report-view-tabs" role="group" aria-label="Tipo de relatório">
         <button
+          type="button"
+          aria-pressed={view === 'performance'}
           className={view === 'performance' ? 'active' : ''}
           onClick={() => setView('performance')}
         >
           <BarChart3 />
           Desempenho e estoque
         </button>
-        <button className={view === 'issues' ? 'active' : ''} onClick={() => setView('issues')}>
+        <button
+          type="button"
+          aria-pressed={view === 'issues'}
+          className={view === 'issues' ? 'active' : ''}
+          onClick={() => setView('issues')}
+        >
           <CircleAlert />
           Erros e avisos
           {issues.filter((issue) => issue.active).length > 0 && (
             <span>{issues.filter((issue) => issue.active).length}</span>
           )}
         </button>
-        <button className="refresh-view" onClick={() => loadReports()}>
+        <button type="button" className="refresh-view" onClick={() => void loadReports()}>
           <RotateCcw />
           Atualizar
         </button>
@@ -2602,7 +2667,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
             ))}
           </select>
         </label>
-        <small>Estoque: posição atual · Publicações: {periodLabel}</small>
+        <small>Filtros de período não alteram a posição atual do estoque.</small>
       </div>
       {view === 'performance' ? (
         <>
@@ -2635,7 +2700,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
               </span>
               <div>
                 <span>Estoque publicado</span>
-                <strong>{total ? Math.round((publishedVehicles / total) * 100) : 0}%</strong>
+                <strong>{formatRate(publishedVehicles, total)}</strong>
                 <small>
                   {publishedVehicles} publicado{publishedVehicles === 1 ? '' : 's'} ·{' '}
                   {attentionVehicles} em atenção
@@ -2648,7 +2713,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
               </span>
               <div>
                 <span>Cobertura de fotos</span>
-                <strong>{photoCoverage}%</strong>
+                <strong>{formatRate(withPhotos, total)}</strong>
                 <small>
                   {withPhotos} de {total} com pelo menos uma foto
                 </small>
@@ -2660,7 +2725,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
               </span>
               <div>
                 <span>Taxa de conclusão</span>
-                <strong>{successRate}%</strong>
+                <strong>{successRate}</strong>
                 <small>
                   {completed} concluída{completed === 1 ? '' : 's'} em {reportJobTotal} trabalho
                   {reportJobTotal === 1 ? '' : 's'}
@@ -2693,8 +2758,9 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
                     <div>
                       <strong>{item.label}</strong>
                       <small>
-                        {reportJobTotal ? Math.round((item.count / reportJobTotal) * 100) : 0}% dos
-                        trabalhos no recorte
+                        {reportJobTotal
+                          ? `${Math.round((item.count / reportJobTotal) * 100)}% dos trabalhos no recorte`
+                          : 'Sem trabalhos no período'}
                       </small>
                     </div>
                     <b>{item.count}</b>
@@ -2738,7 +2804,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
                   style={{ '--coverage': `${photoCoverage * 3.6}deg` } as React.CSSProperties}
                 >
                   <span>
-                    <strong>{photoCoverage}%</strong>
+                    <strong>{total ? `${photoCoverage}%` : '—'}</strong>
                     <small>cobertura</small>
                   </span>
                 </div>
@@ -3200,6 +3266,24 @@ export function SettingsView({
     [aiProvider, setAiProvider] = useState('auto')
   const [testingKey, setTestingKey] = useState<'gemini' | 'openai' | null>(null),
     [testKeyStatus, setTestKeyStatus] = useState('')
+  const [settingsSection, setSettingsSection] = useState('company')
+  const settingsSections = [
+    { id: 'company', label: 'Empresa', detail: 'Identificação e localização' },
+    { id: 'marketplace', label: 'Marketplace', detail: 'Grupos e publicações' },
+    { id: 'intelligence', label: 'Inteligência artificial', detail: 'Provedores e chaves' },
+    { id: 'notifications', label: 'Notificações', detail: 'Telegram e webhooks' },
+    { id: 'appearance', label: 'Aparência', detail: 'Tema da interface' },
+    { id: 'security', label: 'Segurança', detail: 'Políticas de sessão' },
+  ]
+  function jumpToSection(sectionId: string) {
+    setSettingsSection(sectionId)
+    document.getElementById(`settings-${sectionId}`)?.scrollIntoView({
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 'instant'
+        : 'smooth',
+      block: 'start',
+    })
+  }
 
   useEffect(() => {
     api<SettingsData>('/settings').then((result) => {
@@ -3377,8 +3461,32 @@ export function SettingsView({
           </button>
         </div>
       )}
+      <div className="settings-section-header">
+        <div>
+          <strong>Organize as configurações por assunto</strong>
+          <p>
+            Use a navegação abaixo para localizar cada opção. As alterações só serão aplicadas
+            quando você salvar.
+          </p>
+        </div>
+        <span>{groups.filter((group) => group.active).length} grupos ativos</span>
+      </div>
+      <nav className="settings-section-nav" aria-label="Seções de configurações">
+        {settingsSections.map((section) => (
+          <button
+            key={section.id}
+            type="button"
+            className={settingsSection === section.id ? 'active' : ''}
+            aria-label={`Ir para ${section.label}`}
+            onClick={() => jumpToSection(section.id)}
+          >
+            <strong>{section.label}</strong>
+            <small>{section.detail}</small>
+          </button>
+        ))}
+      </nav>
       <form onSubmit={save}>
-        <article className="settings-card">
+        <article id="settings-company" className="settings-card">
           <div className="settings-icon">
             <Settings />
           </div>
@@ -3401,7 +3509,7 @@ export function SettingsView({
             </div>
           </div>
         </article>
-        <article className="settings-card">
+        <article id="settings-marketplace" className="settings-card">
           <div className="settings-icon">
             <Send />
           </div>
@@ -3709,7 +3817,7 @@ export function SettingsView({
             </label>
           </div>
         </article>
-        <article className="settings-card">
+        <article id="settings-intelligence" className="settings-card">
           <div className="settings-icon">
             <Bot />
           </div>
@@ -3828,7 +3936,7 @@ export function SettingsView({
             )}
           </div>
         </article>
-        <article className="settings-card">
+        <article id="settings-notifications" className="settings-card">
           <div className="settings-icon">
             <Bell />
           </div>
@@ -3845,6 +3953,8 @@ export function SettingsView({
                 </FieldLabel>
                 <input
                   name="alertTelegramToken"
+                  type="password"
+                  autoComplete="off"
                   value={alertTelegramToken}
                   onChange={(e) => setAlertTelegramToken(e.target.value)}
                   placeholder="123456:ABC-DEF..."
@@ -3891,7 +4001,7 @@ export function SettingsView({
             </div>
           </div>
         </article>
-        <article className="settings-card">
+        <article id="settings-appearance" className="settings-card">
           <div className="settings-icon">
             <Palette />
           </div>
@@ -3902,6 +4012,7 @@ export function SettingsView({
               <button
                 type="button"
                 className={theme === 'light' ? 'selected' : ''}
+                aria-pressed={theme === 'light'}
                 onClick={() => onThemeChange('light')}
               >
                 <span>
@@ -3916,6 +4027,7 @@ export function SettingsView({
               <button
                 type="button"
                 className={theme === 'dark' ? 'selected' : ''}
+                aria-pressed={theme === 'dark'}
                 onClick={() => onThemeChange('dark')}
               >
                 <span>
@@ -3930,7 +4042,7 @@ export function SettingsView({
             </div>
           </div>
         </article>
-        <article className="settings-card security-settings">
+        <article id="settings-security" className="settings-card security-settings">
           <div className="settings-icon">
             <ShieldCheck />
           </div>
@@ -3951,7 +4063,11 @@ export function SettingsView({
           </div>
         </article>
         <div className="settings-save">
-          <button className="primary">
+          <div className="settings-save-copy">
+            <strong>Aplicar alterações da organização</strong>
+            <small>As mudanças feitas em qualquer seção são salvas juntas.</small>
+          </div>
+          <button className="primary" type="submit">
             <Save size={17} />
             Salvar configurações
           </button>
