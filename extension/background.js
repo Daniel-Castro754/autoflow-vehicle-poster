@@ -71,7 +71,9 @@ async function authorizedFetch(url, options = {}, retryOptions = { attempts: 1 }
 
 async function marketplaceReady(tabId, attempts = 50) {
   for (let i = 0; i < attempts; i++) {
-    const tab = await chrome.tabs.get(tabId).catch(() => null)
+    const tab = await new Promise((resolve) =>
+      chrome.tabs.get(tabId, (item) => resolve(chrome.runtime.lastError ? null : item)),
+    )
     if (!tab) return { ready: false, reason: 'A aba do Facebook foi fechada.' }
     if (tab.status === 'complete') {
       const state = await new Promise((resolve) =>
