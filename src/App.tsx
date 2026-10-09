@@ -680,7 +680,7 @@ export default function App() {
           </div>
         </header>
         {active === 'Visão geral' ? (
-          <OverviewView api={api} vehicles={vehicles} navigate={setActive} />
+          <OverviewView api={api} vehicles={vehicles} navigate={setActive} canManage={currentUser?.role === 'admin'} />
         ) : active === 'Central de IA' ? (
           <AiCenterView
             api={api}
