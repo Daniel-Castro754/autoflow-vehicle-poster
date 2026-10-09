@@ -234,7 +234,15 @@ const migrations: Migration[] = [
       CASE WHEN status='awaiting_confirmation'
         THEN 'Publicação pendente de confirmação: verifique o Facebook antes de repetir.'
         ELSE 'Trabalho em erro: revise a causa e decida se deve repetir.' END
-    FROM publication_jobs WHERE status IN ('error','awaiting_confirmation');
+    FROM publication_jobs
+    WHERE status='error' OR (
+      status='awaiting_confirmation' AND (
+        publish_attempt_at IS NOT NULL OR
+        CASE WHEN json_valid(fill_report)
+          THEN json_extract(fill_report,'$.publishAttempted') = 1
+          ELSE 0 END
+      )
+    );
     INSERT INTO operational_incident_actions (organization_id,incident_id,action,note)
     SELECT organization_id,id,'opened','Importado do estado atual durante a migração.'
     FROM operational_incidents;`,
