@@ -45,7 +45,10 @@ for (const part of [
   assert(app.includes(part), `Mobile navigation or feedback missing: ${part}`)
 
 // Wide tables are scrollable and focusable without changing selection/actions.
-for (const [component, expected] of [[views, 3], [vehicles, 1]]) {
+for (const [component, expected] of [
+  [views, 3],
+  [vehicles, 1],
+]) {
   const tableRegions = [...component.matchAll(/<div\s+className="table-wrap"[\s\S]*?>/g)]
   assert.equal(tableRegions.length, expected)
   for (const [markup] of tableRegions) {
