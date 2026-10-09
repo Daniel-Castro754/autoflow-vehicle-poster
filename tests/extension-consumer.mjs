@@ -61,9 +61,13 @@ async function runConsumer(queue, network = {}) {
           status: 'complete',
           url: `https://www.facebook.com${stored.pendingJob?.document || ''}`,
         }),
-      sendMessage: (_id, _message, options, callback) => {
-        if (typeof options === 'function') options()
-        else callback?.({ active: network.contentActive !== false })
+      sendMessage: (_id, message, options, callback) => {
+        const reply = typeof options === 'function' ? options : callback
+        reply?.(
+          message.type === 'AUTOFLOW_MARKETPLACE_SESSION_STATUS'
+            ? { ready: network.marketplaceReady !== false, blocked: network.marketplaceBlocked === true }
+            : { active: network.contentActive !== false },
+        )
       },
       onUpdated: { addListener: () => {}, removeListener: () => {} },
       remove: async () => {},
