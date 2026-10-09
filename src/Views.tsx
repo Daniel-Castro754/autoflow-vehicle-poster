@@ -1078,7 +1078,10 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
         {profiles.length === 0 && (
           <div className="publication-setup-note" role="status">
             <CircleAlert size={18} />
-            <span>Nenhum perfil local do Brave associado. Cadastre um em Equipe e contas antes de publicar.</span>
+            <span>
+              Nenhum perfil local do Brave associado. Cadastre um em Equipe e contas antes de
+              publicar.
+            </span>
           </div>
         )}
         <div className="publication-quick-filters" aria-label="Acessos rápidos à fila">
@@ -1117,7 +1120,11 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
           </button>
         </div>
       </section>
-      <div className="publication-view-tabs" role="group" aria-label="Modo de visualização das publicações">
+      <div
+        className="publication-view-tabs"
+        role="group"
+        aria-label="Modo de visualização das publicações"
+      >
         <button
           type="button"
           className={view === 'central' ? 'active' : ''}
@@ -1136,7 +1143,12 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
           <ListChecks />
           Fila e histórico
         </button>
-        <button type="button" className="refresh-view" onClick={() => void load()} aria-label="Atualizar dados das publicações">
+        <button
+          type="button"
+          className="refresh-view"
+          onClick={() => void load()}
+          aria-label="Atualizar dados das publicações"
+        >
           <RotateCcw />
           Atualizar
         </button>
@@ -1397,7 +1409,9 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
           <div className="pub-tabs">
             <strong>Trabalhos encontrados</strong>
             <span role="status">
-              {queuePageLoading ? 'Atualizando...' : `Exibindo ${filteredJobs.length} de ${queuePagination.totalItems} registros`}
+              {queuePageLoading
+                ? 'Atualizando...'
+                : `Exibindo ${filteredJobs.length} de ${queuePagination.totalItems} registros`}
             </span>
             <small>{publicationStats.extensionAvailable} disponíveis na extensão</small>
             <small>

@@ -20,7 +20,6 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      - run: npx prettier --write src/AiCenterView.tsx src/Vehicles.tsx src/Views.tsx src/operational-workspaces.css tests/phase-six-operational-ui.mjs docs/PHASE_6_OPERATIONAL_WORKSPACES.md && git diff -- src/AiCenterView.tsx src/Vehicles.tsx src/Views.tsx src/operational-workspaces.css tests/phase-six-operational-ui.mjs docs/PHASE_6_OPERATIONAL_WORKSPACES.md
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check

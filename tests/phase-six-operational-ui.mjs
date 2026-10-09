@@ -39,11 +39,12 @@ for (const label of [
   'vehicle-scope-note',
   'aria-pressed={status === option.value}',
   'changeStatusFilter(option.value)',
-]) assert(vehicles.includes(label), `Inventory: missing ${label}`)
+])
+  assert(vehicles.includes(label), `Inventory: missing ${label}`)
 assert(!vehicles.includes('Todas as lojas'), 'Do not show a no-op store filter')
-assert(vehicles.includes("setSelected(new Set())"), 'Changing status must clear old selections')
-assert(vehicles.includes("setPage(1)"), 'Changing status must reset server pagination')
-assert(vehicles.includes("api<VehiclePage>(`/vehicles/paged?"), 'Filtering stays server-paginated')
+assert(vehicles.includes('setSelected(new Set())'), 'Changing status must clear old selections')
+assert(vehicles.includes('setPage(1)'), 'Changing status must reset server pagination')
+assert(vehicles.includes('api<VehiclePage>(`/vehicles/paged?'), 'Filtering stays server-paginated')
 
 for (const part of [
   'publication-workflow',
@@ -54,8 +55,9 @@ for (const part of [
   "setQueueStatus('pending')",
   "setQueueStatus('error')",
   'aria-pressed={view ===',
-]) assert(publications.includes(part), `Publication view: missing ${part}`)
-assert(publications.includes("setQueuePage(1)"), 'Queue shortcuts must reset pagination')
+])
+  assert(publications.includes(part), `Publication view: missing ${part}`)
+assert(publications.includes('setQueuePage(1)'), 'Queue shortcuts must reset pagination')
 assert(publications.includes('setSelected(new Set())'), 'Queue shortcuts must clear selections')
 
 for (const selector of [
@@ -65,9 +67,13 @@ for (const selector of [
   '.vehicles-page .table-wrap',
   '.publication-quick-filters',
   '.publications-page .queue-filters',
-]) assert(css.includes(selector), `Unstyled operational component: ${selector}`)
+])
+  assert(css.includes(selector), `Unstyled operational component: ${selector}`)
 
 assert(css.includes('@media (max-width: 1200px)'))
 assert(css.includes('@media (max-width: 720px)'))
-assert(entry.indexOf("import './operational-workspaces.css'") > entry.indexOf("import './design-system.css'"))
+assert(
+  entry.indexOf("import './operational-workspaces.css'") >
+    entry.indexOf("import './design-system.css'"),
+)
 console.log('✓ Phase 6.2: AI, stock and publication workspace UX regressions passed')

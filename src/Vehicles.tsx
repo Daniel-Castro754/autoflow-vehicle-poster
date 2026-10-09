@@ -462,7 +462,11 @@ export default function VehiclesView({
             </span>
           )}
         </div>
-        <div className="vehicle-status-filters" role="group" aria-label="Filtrar veículos por situação">
+        <div
+          className="vehicle-status-filters"
+          role="group"
+          aria-label="Filtrar veículos por situação"
+        >
           {[
             { label: 'Todos', value: 'Todos', count: summary?.total },
             { label: 'Prontos', value: 'Pronto', count: summary?.readyStatus },
@@ -509,7 +513,10 @@ export default function VehiclesView({
               <option key={item}>{item}</option>
             ))}
           </select>
-          <span className="vehicle-scope-note" title="A consulta inclui os veículos da organização atual">
+          <span
+            className="vehicle-scope-note"
+            title="A consulta inclui os veículos da organização atual"
+          >
             <Car size={15} />
             Organização atual
           </span>
@@ -632,7 +639,9 @@ export default function VehiclesView({
         </div>
         <footer className="panel-foot">
           <span role="status">
-            {pageLoading ? 'Atualizando resultados...' : `Exibindo ${filtered.length} de ${pagination.totalItems} veículos`}
+            {pageLoading
+              ? 'Atualizando resultados...'
+              : `Exibindo ${filtered.length} de ${pagination.totalItems} veículos`}
           </span>
           <div>
             <button
