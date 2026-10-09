@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import GoogleSignIn from './GoogleSignIn'
 import { authFetch } from './auth-api'
 import {
@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { OverviewView, PublicationsView, ReportsView, SettingsView } from './Views'
 import { calculateTeamSummary } from './management-metrics'
+import { DrawerFocusGuard } from './DrawerFocusGuard'
 import VehiclesView, { type VehicleRecord } from './Vehicles'
 import { AiCenterView } from './AiCenterView'
 
@@ -195,6 +196,55 @@ export default function App() {
   )
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null)
+  const mobileSidebarRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!mobileMenuOpen) return
+    const wide = window.matchMedia('(min-width: 901px)')
+    const onResize = () => {
+      if (wide.matches) setMobileMenuOpen(false)
+    }
+    wide.addEventListener('change', onResize)
+    return () => wide.removeEventListener('change', onResize)
+  }, [mobileMenuOpen])
+  useEffect(() => {
+    if (!mobileMenuOpen) return
+    const sidebar = mobileSidebarRef.current
+    if (!sidebar) return
+    const opener = mobileMenuButtonRef.current
+    const oldOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const controls = () =>
+      [...sidebar.querySelectorAll<HTMLButtonElement>('button:not([disabled])')].filter(
+        (button) => button.getClientRects().length > 0,
+      )
+    ;(sidebar.querySelector<HTMLButtonElement>('.sidebar-close') || controls()[0])?.focus()
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setMobileMenuOpen(false)
+        return
+      }
+      if (event.key !== 'Tab') return
+      const buttons = controls()
+      const first = buttons[0]
+      const last = buttons[buttons.length - 1]
+      if (!first || !last) return
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    sidebar.addEventListener('keydown', handleKey)
+    return () => {
+      sidebar.removeEventListener('keydown', handleKey)
+      document.body.style.overflow = oldOverflow
+      opener?.focus()
+    }
+  }, [mobileMenuOpen])
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>(() =>
     storedStringList('autoflow_notifications_read_ids'),
   )
@@ -536,12 +586,27 @@ export default function App() {
 
   return (
     <div className={`app-shell ${theme === 'dark' ? 'theme-dark' : ''}`}>
-      <aside className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
+      <aside
+        ref={mobileSidebarRef}
+        id="mobile-navigation"
+        className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}
+        role={mobileMenuOpen ? 'dialog' : undefined}
+        aria-modal={mobileMenuOpen || undefined}
+        aria-label={mobileMenuOpen ? 'Menu principal' : 'Navegação lateral'}
+      >
         <div className="brand">
           <span className="brand-mark">
             <Car size={22} />
           </span>
           <span>AutoFlow</span>
+          <button
+            className="sidebar-close"
+            type="button"
+            aria-label="Fechar menu"
+            onClick={() => setMobileMenuOpen(false)}
+          >
+            <X size={20} />
+          </button>
         </div>
         <button
           className="workspace"
@@ -563,11 +628,12 @@ export default function App() {
           </div>
           <ChevronDown size={16} />
         </button>
-        <nav>
+        <nav aria-label="Páginas principais">
           {nav.map(([label, Icon]) => (
             <button
               key={label}
               className={active === label ? 'active' : ''}
+              aria-current={active === label ? 'page' : undefined}
               onClick={() => {
                 setActive(label)
                 setMobileMenuOpen(false)
@@ -584,6 +650,7 @@ export default function App() {
         <div className="sidebar-foot">
           <button
             className={active === 'Configurações' ? 'active' : ''}
+            aria-current={active === 'Configurações' ? 'page' : undefined}
             onClick={() => {
               setActive('Configurações')
               setMobileMenuOpen(false)
@@ -612,7 +679,7 @@ export default function App() {
                     : ''}
               </small>
             </div>
-            <button className="logout" onClick={logout} title="Sair">
+            <button className="logout" onClick={logout} title="Sair" aria-label="Sair da conta">
               <MoreHorizontal size={18} />
             </button>
           </div>
@@ -629,9 +696,13 @@ export default function App() {
       <main>
         <header>
           <button
+            ref={mobileMenuButtonRef}
+            type="button"
             className="mobile-menu"
             onClick={() => setMobileMenuOpen(true)}
             aria-label="Abrir menu"
+            aria-controls="mobile-navigation"
+            aria-expanded={mobileMenuOpen}
           >
             <Menu />
           </button>
@@ -653,7 +724,7 @@ export default function App() {
               <button
                 className="icon-btn"
                 onClick={() => setNotificationsOpen((open) => !open)}
-                aria-label="Abrir notificações"
+                aria-label={notificationsOpen ? 'Fechar notificações' : 'Abrir notificações'}
                 aria-expanded={notificationsOpen}
               >
                 <Bell size={19} />
@@ -731,7 +802,7 @@ export default function App() {
         )}
       </main>
       {toast && (
-        <div className="toast">
+        <div className="toast" role="status" aria-live="polite">
           <Check size={17} />
           {toast}
         </div>
@@ -759,7 +830,17 @@ function NotificationCenter({
 }) {
   const unread = notifications.filter((item) => !readIds.includes(item.id)).length
   return (
-    <div className="notification-panel">
+    <div
+      className="notification-panel"
+      role="region"
+      aria-label="Central de notificações"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.stopPropagation()
+          onClose()
+        }
+      }}
+    >
       <div className="notification-head">
         <div>
           <strong>Notificações</strong>
@@ -1005,6 +1086,10 @@ function TeamView({
       {modal && (
         <div className="overlay" onMouseDown={() => setModal(null)}>
           <aside className="drawer" onMouseDown={(e) => e.stopPropagation()}>
+            <DrawerFocusGuard
+              label={modal === 'user' ? 'Adicionar vendedor' : 'Associar perfil Brave'}
+              onClose={() => setModal(null)}
+            />
             <button className="close" aria-label="Fechar formulário" onClick={() => setModal(null)}>
               <X />
             </button>

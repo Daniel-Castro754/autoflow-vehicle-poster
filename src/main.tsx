@@ -5,6 +5,7 @@ import './styles.css'
 import './design-system.css'
 import './operational-workspaces.css'
 import './management-workspaces.css'
+import './final-polish.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

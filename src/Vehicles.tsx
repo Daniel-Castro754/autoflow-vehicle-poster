@@ -20,6 +20,7 @@ import {
   X,
 } from 'lucide-react'
 import { FieldLabel, HelpTip } from './HelpTip'
+import { DrawerFocusGuard } from './DrawerFocusGuard'
 import {
   BODY_TYPES,
   FUEL_TYPES,
@@ -543,7 +544,7 @@ export default function VehiclesView({
             </button>
           </div>
         )}
-        <div className="table-wrap">
+        <div className="table-wrap" role="region" aria-label="Tabela de veículos" tabIndex={0}>
           <table>
             <thead>
               <tr>
@@ -815,6 +816,7 @@ function QueueDrawer({
   return (
     <div className="overlay" onMouseDown={onClose}>
       <aside className="drawer queue-drawer" onMouseDown={(event) => event.stopPropagation()}>
+        <DrawerFocusGuard label="Escolher perfil do Brave" onClose={onClose} />
         <button className="close" onClick={onClose} aria-label="Fechar fila">
           <X />
         </button>
@@ -1051,6 +1053,10 @@ function VehicleDrawer({
   return (
     <div className="overlay" onMouseDown={onClose}>
       <aside className="drawer vehicle-drawer" onMouseDown={(event) => event.stopPropagation()}>
+        <DrawerFocusGuard
+          label={vehicle ? 'Editar veículo' : 'Adicionar veículo'}
+          onClose={onClose}
+        />
         <button className="close" onClick={onClose} aria-label="Fechar veículo">
           <X />
         </button>
