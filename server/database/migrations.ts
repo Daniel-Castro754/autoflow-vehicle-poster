@@ -199,7 +199,7 @@ const migrations: Migration[] = [
     sql: `CREATE TABLE operational_incidents (
       id INTEGER PRIMARY KEY,
       organization_id INTEGER NOT NULL REFERENCES organizations(id),
-      publication_job_id INTEGER NOT NULL REFERENCES publication_jobs(id),
+      publication_job_id INTEGER NOT NULL REFERENCES publication_jobs(id) ON DELETE CASCADE,
       kind TEXT NOT NULL CHECK(kind IN ('publication_uncertain','execution_error','selector_drift','duplicate_risk','slow_execution')),
       severity TEXT NOT NULL CHECK(severity IN ('warning','critical')),
       status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','acknowledged','resolved')),
@@ -218,7 +218,7 @@ const migrations: Migration[] = [
     CREATE TABLE operational_incident_actions (
       id INTEGER PRIMARY KEY,
       organization_id INTEGER NOT NULL REFERENCES organizations(id),
-      incident_id INTEGER NOT NULL REFERENCES operational_incidents(id),
+      incident_id INTEGER NOT NULL REFERENCES operational_incidents(id) ON DELETE CASCADE,
       action TEXT NOT NULL CHECK(action IN ('opened','reopened','occurred','acknowledged','resolved','auto_resolved')),
       actor_user_id INTEGER REFERENCES users(id),
       note TEXT NOT NULL DEFAULT '',
