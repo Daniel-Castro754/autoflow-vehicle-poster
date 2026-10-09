@@ -19,20 +19,21 @@ await assert.rejects(
   err(/formato inesperado/, 200),
 )
 await assert.rejects(
-  readAuthResponse(new Response(JSON.stringify({ error: 'E-mail ou senha inválidos.' }), {
-    status: 401,
-    headers: { 'Content-Type': 'application/json' },
-  })),
+  readAuthResponse(
+    new Response(JSON.stringify({ error: 'E-mail ou senha inválidos.' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  ),
   err(/E-mail ou senha inválidos/, 401),
 )
 await assert.rejects(
   readAuthResponse(new Response('{}', { status: 503 })),
   err(/recusou a operação/, 503),
 )
-assert.deepEqual(
-  await readAuthResponse(new Response(JSON.stringify({ token: 'test' }))),
-  { token: 'test' },
-)
+assert.deepEqual(await readAuthResponse(new Response(JSON.stringify({ token: 'test' }))), {
+  token: 'test',
+})
 const oldFetch = globalThis.fetch
 try {
   globalThis.fetch = async () => {
@@ -74,7 +75,9 @@ try {
   )
   const config = await authFetch(`${server.base}/auth/google/config`)
   assert.deepEqual(config, { enabled: false, clientId: '' })
-  console.log('✓ Login: success, invalid credentials, Google configuration and API connectivity errors')
+  console.log(
+    '✓ Login: success, invalid credentials, Google configuration and API connectivity errors',
+  )
 } finally {
   await server.close()
 }

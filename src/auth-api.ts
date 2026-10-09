@@ -1,12 +1,11 @@
 // O servidor sempre responde JSON nas rotas de autenticação. Erros de proxy,
 // API indisponível ou páginas HTML não devem aparecer como SyntaxError no login.
 export class AuthResponseError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
+  readonly status: number
+  constructor(message: string, status: number) {
     super(message)
     this.name = 'AuthResponseError'
+    this.status = status
   }
 }
 

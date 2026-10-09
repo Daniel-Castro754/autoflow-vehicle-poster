@@ -44,7 +44,6 @@ O Google também exige `GOOGLE_CLIENT_ID` de um aplicativo web válido com
 origem `http://localhost:5173`; após configurar, reinicie a API. Para experimentar
 sem comprometer o banco normal, defina `DATA_DIR=./data-teste` no `.env`.
 
-
 ## Entrar com Google
 
 O painel também oferece **Entrar com Google** quando `GOOGLE_CLIENT_ID` está configurado.
