@@ -227,7 +227,7 @@ export async function handleAuthRoute(
   auth: AuthContext | undefined,
   dependencies: Dependencies,
 ): Promise<boolean> {
-  const { db, send, jsonBody, userById, verifyPassword, dummyPasswordHash } = dependencies
+  const { db, send, jsonBody, userById, verifyPassword, dummyPasswordHash, sign } = dependencies
   if (req.method === 'POST' && url.pathname === '/api/auth/extension/refresh') {
     res.setHeader('Cache-Control', 'no-store')
     if (!EXTENSION_ORIGIN.test(String(req.headers.origin || ''))) {
