@@ -44,6 +44,7 @@ import {
 } from 'lucide-react'
 import { FieldLabel, HelpTip } from './HelpTip'
 import { OperationalHealth } from './OperationalHealth'
+import { InterventionCenter } from './InterventionCenter'
 
 type ApiFn = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
 type Vehicle = {
@@ -288,10 +289,12 @@ export function OverviewView({
   api,
   vehicles,
   navigate,
+  canManage,
 }: {
   api: ApiFn
   vehicles: Vehicle[]
   navigate: (page: string) => void
+  canManage: boolean
 }) {
   const [data, setData] = useState<OverviewData | null>(null)
   useEffect(() => {
@@ -370,6 +373,7 @@ export function OverviewView({
         </article>
       </div>
       <OperationalHealth api={api} />
+      <InterventionCenter api={api} canManage={canManage} navigate={navigate} />
       <div className="overview-grid">
         <article className="module-card">
           <div className="module-head">

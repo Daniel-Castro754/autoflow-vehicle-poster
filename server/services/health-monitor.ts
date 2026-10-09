@@ -3,6 +3,7 @@ import { sendCriticalAlert } from './alerting.ts'
 import { publicationMayExist, ambiguousPublicationReport } from './publication-evidence.ts'
 import { logger } from '../lib/logger.ts'
 import { warnSlowExecutions } from './proactive-alerts.ts'
+import { recordOperationalSignal } from './operational-incidents.ts'
 
 export interface HealthStatusReport {
   timestamp: string
@@ -127,6 +128,7 @@ export async function runHealthCheck(
               job.id,
               JSON.stringify({ elapsedMinutes, recoveredBy: 'health_monitor' }),
             )
+            recordOperationalSignal(db, job.organizationId, job.id, 'stalled_publish_ambiguous')
 
             db.exec('COMMIT')
             recoveredCount++
@@ -194,6 +196,7 @@ export async function runHealthCheck(
                 maxRetries: job.maxRetries,
               }),
             )
+            recordOperationalSignal(db, job.organizationId, job.id, 'stalled_exhausted')
           } else {
             const updated = db
               .prepare(
@@ -224,6 +227,7 @@ export async function runHealthCheck(
               job.id,
               JSON.stringify({ elapsedMinutes, recoveredBy: 'health_monitor' }),
             )
+            recordOperationalSignal(db, job.organizationId, job.id, 'stalled_recovered')
           }
 
           db.exec('COMMIT')

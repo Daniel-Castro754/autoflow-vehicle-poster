@@ -13,6 +13,8 @@ import { startGroupCurationWorker } from './services/group-curation-worker.ts'
 import { startHealthMonitor, stopHealthMonitor } from './services/health-monitor.ts'
 import { createAutonomousScheduler } from './services/autonomous-scheduler.ts'
 import { handleOperationsRoute } from './routes/operations.ts'
+import { handleInterventionsRoute } from './routes/interventions.ts'
+import { recordOperationalSignal } from './services/operational-incidents.ts'
 import { requestIdFor, withRequestContext } from './lib/request-context.ts'
 import { vehicleOptions } from './services/vehicle-input.ts'
 import { publicationDuplicateRisk as findPublicationDuplicateRisk } from './services/publication-policy.ts'
@@ -118,6 +120,7 @@ function recordJobEvent(
     createdBy,
     serialized,
   )
+  recordOperationalSignal(db, organizationId, publicationJobId, eventType, details, createdBy)
 }
 
 function publicationDuplicateRisk(organizationId: number, vehicleId: number, excludeJobId = 0) {
@@ -403,6 +406,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (!activeSession(auth))
       return send(res, 401, { error: 'Esta sessão foi encerrada ou revogada. Entre novamente.' })
     if (await handleAuthRoute(req, res, url, auth, authRouteDependencies)) return
+    if (
+      await handleInterventionsRoute(req, res, url, auth, {
+        db,
+        send,
+        jsonBody,
+        isAdmin,
+      })
+    )
+      return
     if (handleOperationsRoute(req, res, url, auth, db, send)) return
     if (
       handleVehicleReadRoute(req, res, url, auth, {

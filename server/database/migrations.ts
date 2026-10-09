@@ -193,6 +193,65 @@ const migrations: Migration[] = [
     CREATE INDEX IF NOT EXISTS idx_extension_refresh_expiry
       ON extension_refresh_sessions (expires_at);`,
   },
+  {
+    version: 14,
+    columns: [],
+    sql: `CREATE TABLE IF NOT EXISTS operational_incidents (
+      id INTEGER PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      publication_job_id INTEGER NOT NULL REFERENCES publication_jobs(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK(kind IN ('publication_uncertain','execution_error','selector_drift','duplicate_risk','slow_execution')),
+      severity TEXT NOT NULL CHECK(severity IN ('warning','critical')),
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','acknowledged','resolved')),
+      summary TEXT NOT NULL,
+      occurrence_count INTEGER NOT NULL DEFAULT 1,
+      first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      acknowledged_by INTEGER REFERENCES users(id),
+      acknowledged_at TEXT,
+      resolved_by INTEGER REFERENCES users(id),
+      resolved_at TEXT,
+      UNIQUE(organization_id,publication_job_id,kind)
+    );
+    CREATE INDEX IF NOT EXISTS idx_operational_incidents_queue
+      ON operational_incidents (organization_id,status,severity,last_seen_at DESC);
+    CREATE TABLE IF NOT EXISTS operational_incident_actions (
+      id INTEGER PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      incident_id INTEGER NOT NULL REFERENCES operational_incidents(id) ON DELETE CASCADE,
+      action TEXT NOT NULL CHECK(action IN ('opened','reopened','occurred','acknowledged','resolved','auto_resolved')),
+      actor_user_id INTEGER REFERENCES users(id),
+      note TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_operational_incident_actions_timeline
+      ON operational_incident_actions (organization_id,incident_id,id DESC);
+    INSERT OR IGNORE INTO operational_incidents
+      (organization_id,publication_job_id,kind,severity,summary)
+    SELECT organization_id,id,
+      CASE WHEN status='awaiting_confirmation' THEN 'publication_uncertain' ELSE 'execution_error' END,
+      CASE WHEN status='awaiting_confirmation' THEN 'critical' ELSE 'warning' END,
+      CASE WHEN status='awaiting_confirmation'
+        THEN 'Publicação pendente de confirmação: verifique o Facebook antes de repetir.'
+        ELSE 'Trabalho em erro: revise a causa e decida se deve repetir.' END
+    FROM publication_jobs
+    WHERE status='error' OR (
+      status='awaiting_confirmation' AND (
+        publish_attempt_at IS NOT NULL OR
+        CASE WHEN json_valid(fill_report)
+          THEN json_extract(fill_report,'$.publishAttempted') = 1
+          ELSE 0 END
+      )
+    );
+    INSERT INTO operational_incident_actions (organization_id,incident_id,action,note)
+    SELECT organization_id,id,'opened','Importado do estado atual durante a migração.'
+    FROM operational_incidents i
+    WHERE NOT EXISTS (
+      SELECT 1 FROM operational_incident_actions a
+      WHERE a.incident_id=i.id AND a.organization_id=i.organization_id
+        AND a.action='opened' AND a.note='Importado do estado atual durante a migração.'
+    );`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

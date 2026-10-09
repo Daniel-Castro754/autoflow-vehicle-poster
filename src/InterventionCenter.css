@@ -1,0 +1,184 @@
+.intervention-panel {
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #e4e8ed);
+  border-radius: 16px;
+  padding: 22px;
+  margin: 20px 0;
+  min-width: 0;
+}
+.intervention-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.intervention-head h2 {
+  font-size: 20px;
+  margin: 4px 0;
+}
+.intervention-head p,
+.intervention-activity > p {
+  font-size: 13px;
+  color: var(--text-muted, #687887);
+  margin: 5px 0 14px;
+}
+.intervention-refresh,
+.intervention-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border, #dce4ec);
+  background: transparent;
+  color: inherit;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.intervention-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.intervention-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 18px;
+}
+.intervention-stats > div {
+  border: 1px solid var(--border, #e4e8ed);
+  border-radius: 12px;
+  padding: 13px;
+}
+.intervention-stats strong {
+  display: block;
+  font-size: 22px;
+}
+.intervention-stats span {
+  font-size: 12px;
+  color: var(--text-muted, #687887);
+}
+.intervention-filter {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.intervention-filter select {
+  border-radius: 8px;
+  border: 1px solid var(--border, #dce4ec);
+  padding: 8px;
+  background: var(--surface, #fff);
+  color: inherit;
+}
+.intervention-list {
+  display: grid;
+  gap: 10px;
+}
+.intervention-item {
+  border: 1px solid var(--border, #e4e8ed);
+  border-radius: 12px;
+  padding: 13px;
+}
+.intervention-main {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.intervention-icon {
+  display: flex;
+  padding: 8px;
+  border-radius: 9px;
+  background: rgba(219, 160, 33, 0.12);
+  color: #b77b0c;
+}
+.intervention-icon.critical {
+  background: rgba(205, 65, 65, 0.12);
+  color: #d04444;
+}
+.intervention-detail {
+  min-width: 0;
+}
+.intervention-detail strong {
+  font-size: 14px;
+}
+.intervention-detail p {
+  font-size: 13px;
+  margin: 7px 0;
+  line-height: 1.5;
+}
+.intervention-detail small {
+  display: block;
+  color: var(--text-muted, #687887);
+  font-size: 12px;
+}
+.intervention-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0 45px;
+}
+.intervention-history {
+  padding: 10px 14px;
+  margin: 12px 0 0 45px;
+  list-style: none;
+  border-left: 2px solid var(--border, #dce4ec);
+}
+.intervention-history li {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  padding: 6px 0;
+}
+.intervention-history li span {
+  color: var(--text-muted, #687887);
+}
+.intervention-message {
+  font-size: 13px;
+  margin: 10px 0;
+}
+.intervention-empty {
+  padding: 16px;
+  font-size: 13px;
+  color: var(--text-muted, #687887);
+}
+.intervention-activity {
+  border-top: 1px solid var(--border, #e4e8ed);
+  margin-top: 20px;
+  padding-top: 18px;
+}
+.intervention-activity h3 {
+  font-size: 15px;
+}
+.intervention-activity > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  align-items: center;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border, #e4e8ed);
+  font-size: 12px;
+}
+.intervention-activity > div span {
+  color: var(--text-muted, #687887);
+}
+.intervention-activity code {
+  font-size: 11px;
+}
+@media (max-width: 720px) {
+  .intervention-panel {
+    padding: 14px;
+  }
+  .intervention-head {
+    flex-direction: column;
+  }
+  .intervention-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .intervention-actions,
+  .intervention-history {
+    margin-left: 0;
+  }
+}
