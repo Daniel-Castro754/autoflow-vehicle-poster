@@ -196,7 +196,7 @@ const migrations: Migration[] = [
   {
     version: 14,
     columns: [],
-    sql: `CREATE TABLE operational_incidents (
+    sql: `CREATE TABLE IF NOT EXISTS operational_incidents (
       id INTEGER PRIMARY KEY,
       organization_id INTEGER NOT NULL REFERENCES organizations(id),
       publication_job_id INTEGER NOT NULL REFERENCES publication_jobs(id) ON DELETE CASCADE,
@@ -213,9 +213,9 @@ const migrations: Migration[] = [
       resolved_at TEXT,
       UNIQUE(organization_id,publication_job_id,kind)
     );
-    CREATE INDEX idx_operational_incidents_queue
+    CREATE INDEX IF NOT EXISTS idx_operational_incidents_queue
       ON operational_incidents (organization_id,status,severity,last_seen_at DESC);
-    CREATE TABLE operational_incident_actions (
+    CREATE TABLE IF NOT EXISTS operational_incident_actions (
       id INTEGER PRIMARY KEY,
       organization_id INTEGER NOT NULL REFERENCES organizations(id),
       incident_id INTEGER NOT NULL REFERENCES operational_incidents(id) ON DELETE CASCADE,
@@ -224,9 +224,9 @@ const migrations: Migration[] = [
       note TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
-    CREATE INDEX idx_operational_incident_actions_timeline
+    CREATE INDEX IF NOT EXISTS idx_operational_incident_actions_timeline
       ON operational_incident_actions (organization_id,incident_id,id DESC);
-    INSERT INTO operational_incidents
+    INSERT OR IGNORE INTO operational_incidents
       (organization_id,publication_job_id,kind,severity,summary)
     SELECT organization_id,id,
       CASE WHEN status='awaiting_confirmation' THEN 'publication_uncertain' ELSE 'execution_error' END,
@@ -245,7 +245,12 @@ const migrations: Migration[] = [
     );
     INSERT INTO operational_incident_actions (organization_id,incident_id,action,note)
     SELECT organization_id,id,'opened','Importado do estado atual durante a migração.'
-    FROM operational_incidents;`,
+    FROM operational_incidents i
+    WHERE NOT EXISTS (
+      SELECT 1 FROM operational_incident_actions a
+      WHERE a.incident_id=i.id AND a.organization_id=i.organization_id
+        AND a.action='opened' AND a.note='Importado do estado atual durante a migração.'
+    );`
   },
 ]
 
