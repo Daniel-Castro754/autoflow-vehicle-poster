@@ -37,6 +37,16 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
     CREATE TABLE vehicles (id INTEGER, year INTEGER, make TEXT, model TEXT);
     CREATE TABLE social_accounts (id INTEGER, label TEXT);
     CREATE TABLE publication_job_events (organization_id INTEGER, publication_job_id INTEGER, event_type TEXT, created_by INTEGER, details TEXT);
+    CREATE TABLE operational_incidents (
+      id INTEGER PRIMARY KEY, organization_id INTEGER, publication_job_id INTEGER,
+      kind TEXT, severity TEXT, status TEXT DEFAULT 'open', summary TEXT,
+      occurrence_count INTEGER DEFAULT 1, last_seen_at TEXT, acknowledged_at TEXT,
+      acknowledged_by INTEGER, resolved_at TEXT, resolved_by INTEGER
+    );
+    CREATE TABLE operational_incident_actions (
+      id INTEGER PRIMARY KEY, organization_id INTEGER, incident_id INTEGER,
+      action TEXT,actor_user_id INTEGER,note TEXT,created_at TEXT
+    );
     INSERT INTO organization_settings VALUES (1, 15, 'org-bot-token', 'org-chat', 'https://org.example/hook');
     INSERT INTO publication_jobs VALUES (1, 1, 1, 1, 'filling', datetime('now','-40 minutes'), datetime('now','-35 minutes'), 0, 1, NULL, NULL, 'lease', 'worker', datetime('now','-40 minutes'));
     INSERT INTO vehicles VALUES (1, 2022, 'Toyota', 'Corolla');
