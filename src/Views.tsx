@@ -45,6 +45,7 @@ import {
 import { FieldLabel, HelpTip } from './HelpTip'
 import { OperationalHealth } from './OperationalHealth'
 import { InterventionCenter } from './InterventionCenter'
+import { SchedulingInsights } from './SchedulingInsights'
 
 type ApiFn = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
 type Vehicle = {
@@ -374,6 +375,7 @@ export function OverviewView({
       </div>
       <OperationalHealth api={api} />
       <InterventionCenter api={api} canManage={canManage} navigate={navigate} />
+      <SchedulingInsights api={api} />
       <div className="overview-grid">
         <article className="module-card">
           <div className="module-head">
