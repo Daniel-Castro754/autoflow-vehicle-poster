@@ -46,6 +46,7 @@ import { FieldLabel, HelpTip } from './HelpTip'
 import { OperationalHealth } from './OperationalHealth'
 import { InterventionCenter } from './InterventionCenter'
 import { SchedulingInsights } from './SchedulingInsights'
+import { formatRate } from './management-metrics'
 import { OverviewPriorities } from './OverviewPriorities'
 
 type ApiFn = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
@@ -2412,7 +2413,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
   const completed = Number(reportSummary?.completed || 0)
   const errors = Number(reportSummary?.errors || 0)
   const active = Number(reportSummary?.active || 0)
-  const successRate = reportJobTotal ? Math.round((completed / reportJobTotal) * 100) : null
+  const successRate = formatRate(completed, reportJobTotal)
   const automatic = Number(reportSummary?.automatic || 0)
   const groupsSelected = Number(reportSummary?.groupsSelected || 0)
   const byStatus = [
@@ -2688,7 +2689,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
               </span>
               <div>
                 <span>Estoque publicado</span>
-                <strong>{total ? `${Math.round((publishedVehicles / total) * 100)}%` : 'Sem dados'}</strong>
+                <strong>{formatRate(publishedVehicles, total)}</strong>
                 <small>
                   {publishedVehicles} publicado{publishedVehicles === 1 ? '' : 's'} ·{' '}
                   {attentionVehicles} em atenção
@@ -2701,7 +2702,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
               </span>
               <div>
                 <span>Cobertura de fotos</span>
-                <strong>{total ? `${photoCoverage}%` : 'Sem dados'}</strong>
+                <strong>{formatRate(withPhotos, total)}</strong>
                 <small>
                   {withPhotos} de {total} com pelo menos uma foto
                 </small>
@@ -2713,7 +2714,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
               </span>
               <div>
                 <span>Taxa de conclusão</span>
-                <strong>{successRate === null ? 'Sem dados' : `${successRate}%`}</strong>
+                <strong>{successRate}</strong>
                 <small>
                   {completed} concluída{completed === 1 ? '' : 's'} em {reportJobTotal} trabalho
                   {reportJobTotal === 1 ? '' : 's'}
