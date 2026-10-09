@@ -80,7 +80,8 @@ export function calculateOptimalSchedule(options: ScheduleOptions = {}): Optimal
   // Rate with Bayesian smoothing, not raw completed volume. Require a meaningful
   // organization-wide sample AND support in the winning day/hour bucket.
   const eligibleHistory = history.filter(
-    (h) => Number.isInteger(h.attemptCount) && h.attemptCount! >= h.successCount && h.attemptCount! >= 4,
+    (h) =>
+      Number.isInteger(h.attemptCount) && h.attemptCount! >= h.successCount && h.attemptCount! >= 4,
   )
   const totalSamples = history.reduce((sum, h) => sum + (h.attemptCount || 0), 0)
   if (totalSamples >= 20 && eligibleHistory.length > 0) {
@@ -102,7 +103,12 @@ export function calculateOptimalSchedule(options: ScheduleOptions = {}): Optimal
       }
       const free = freeTime(candidate.getTime())
       if (free >= earliest && free - earliest <= 72 * 60 * 60000)
-        return result(new Date(free), 'historical', `Dia ${best.dayOfWeek} às ${best.hour}h`, jitter)
+        return result(
+          new Date(free),
+          'historical',
+          `Dia ${best.dayOfWeek} às ${best.hour}h`,
+          jitter,
+        )
     }
   }
   for (let offset = 0; offset < 7; offset++) {

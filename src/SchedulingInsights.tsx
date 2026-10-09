@@ -42,7 +42,9 @@ export function SchedulingInsights({
     <article className="module-card">
       <div className="module-head">
         <div>
-          <h2><CalendarClock size={18} /> Agendamento orientado por dados</h2>
+          <h2>
+            <CalendarClock size={18} /> Agendamento orientado por dados
+          </h2>
           <span>Últimos 180 dias · resultados das execuções no AutoFlow</span>
         </div>
       </div>
@@ -57,15 +59,24 @@ export function SchedulingInsights({
               : `${data.completionRate}% de conclusão operacional`}
           </p>
           {!data.eligible ? (
-            <p>Sem amostra suficiente para ajustar automaticamente os horários. Mantidas as janelas predefinidas.</p>
+            <p>
+              Sem amostra suficiente para ajustar automaticamente os horários. Mantidas as janelas
+              predefinidas.
+            </p>
           ) : (
             <div className="compact-list">
               {data.topSlots.slice(0, 3).map((slot) => (
                 <div key={`${slot.dayOfWeek}:${slot.hour}`}>
-                  <span className="mini-car"><TrendingUp size={17} /></span>
+                  <span className="mini-car">
+                    <TrendingUp size={17} />
+                  </span>
                   <div>
-                    <strong>{week[slot.dayOfWeek]} · {String(slot.hour).padStart(2, '0')}h</strong>
-                    <small>{slot.completions}/{slot.samples} execuções concluídas ({slot.observedRate}%)</small>
+                    <strong>
+                      {week[slot.dayOfWeek]} · {String(slot.hour).padStart(2, '0')}h
+                    </strong>
+                    <small>
+                      {slot.completions}/{slot.samples} execuções concluídas ({slot.observedRate}%)
+                    </small>
                   </div>
                 </div>
               ))}

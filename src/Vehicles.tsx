@@ -320,7 +320,9 @@ export default function VehiclesView({
           `Ignorados: ${preview.skipped} | Erros: ${preview.failed}`,
           preview.failed ? 'Há linhas com erro, que serão ignoradas.' : '',
           'Confirmar sincronização do estoque com estes resultados?',
-        ].filter(Boolean).join('\\n'),
+        ]
+          .filter(Boolean)
+          .join('\\n'),
       )
       if (!proceed) {
         notify('Sincronização cancelada: nenhuma alteração realizada.')

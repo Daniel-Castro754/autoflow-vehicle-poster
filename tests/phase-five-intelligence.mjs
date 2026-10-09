@@ -26,9 +26,7 @@ try {
   assert.equal(sparse.confidence, 'peak_heuristic', 'Sparse history must not bias scheduling')
   const delayed = calculateOptimalSchedule({
     referenceDate,
-    historicalData: [
-      { dayOfWeek: 6, hour: 12, attemptCount: 20, successCount: 19 },
-    ],
+    historicalData: [{ dayOfWeek: 6, hour: 12, attemptCount: 20, successCount: 19 }],
   })
   assert.equal(delayed.confidence, 'peak_heuristic', 'Do not wait a week for the top slot')
 } finally {
@@ -38,8 +36,7 @@ try {
 const server = await startTestServer()
 const db = new DatabaseSync(join(server.dataDir, 'autoflow.db'))
 const anonymous = createApiClient(server.base, '')
-const fail = (operation, code) =>
-  assert.rejects(operation, (error) => error.status === code)
+const fail = (operation, code) => assert.rejects(operation, (error) => error.status === code)
 const csvHeader =
   'ID Estoque;Ano;Marca;Modelo;Preço;KM;Tipo Veículo;Localização;Câmbio;Combustível;Carroceria;Cor Externa;Cor Interna;Condição;Descrição;Status'
 const csvRow = (code, price, status = 'Rascunho') =>
@@ -55,8 +52,12 @@ try {
     body: JSON.stringify({ email: server.email, password: server.password }),
   })
   const admin = createApiClient(server.base, login.token)
-  const org = db.prepare('SELECT organization_id org FROM users WHERE email=?').get(server.email).org
-  const org2 = Number(db.prepare("INSERT INTO organizations(name) VALUES('Outra loja')").run().lastInsertRowid)
+  const org = db
+    .prepare('SELECT organization_id org FROM users WHERE email=?')
+    .get(server.email).org
+  const org2 = Number(
+    db.prepare("INSERT INTO organizations(name) VALUES('Outra loja')").run().lastInsertRowid,
+  )
   const first = `${csvHeader}\n${csvRow('SYNC-1', 98000)}`
   await fail(() => anonymous('/operations/scheduling-insights'), 401)
   assert.equal((await admin('/operations/scheduling-insights')).eligible, false)
@@ -71,9 +72,9 @@ try {
   )
   const committed = await requestImport(admin, first, { previewDigest: pre.previewDigest })
   assert.equal(committed.created, 1)
-  const vehicle = db.prepare(
-    "SELECT id,price FROM vehicles WHERE organization_id=? AND stock_code='SYNC-1'",
-  ).get(org)
+  const vehicle = db
+    .prepare("SELECT id,price FROM vehicles WHERE organization_id=? AND stock_code='SYNC-1'")
+    .get(org)
   assert.equal(vehicle.price, 98000)
   const nextCsv = `${csvHeader}\n${csvRow('SYNC-1', 102000)}`
   const updatePreview = await requestImport(admin, nextCsv, { dryRun: true })
@@ -93,7 +94,10 @@ try {
   assert.equal(db.prepare('SELECT price FROM vehicles WHERE id=?').get(vehicle.id).price, 102000)
 
   const job = Number(
-    db.prepare("INSERT INTO publication_jobs(organization_id,vehicle_id,status) VALUES (?,?,'pending')")
+    db
+      .prepare(
+        "INSERT INTO publication_jobs(organization_id,vehicle_id,status) VALUES (?,?,'pending')",
+      )
       .run(org, vehicle.id).lastInsertRowid,
   )
   const blocked = await requestImport(admin, `${csvHeader}\n${csvRow('SYNC-1', 125000)}`, {
@@ -107,7 +111,10 @@ try {
   })
   assert.equal(applied.updated, 0)
   assert.equal(db.prepare('SELECT price FROM vehicles WHERE id=?').get(vehicle.id).price, 102000)
-  assert.equal(db.prepare('SELECT status FROM publication_jobs WHERE id=?').get(job).status, 'pending')
+  assert.equal(
+    db.prepare('SELECT status FROM publication_jobs WHERE id=?').get(job).status,
+    'pending',
+  )
 
   const sold = await requestImport(admin, `${csvHeader}\n${csvRow('SYNC-2', 99000, 'Vendido')}`, {
     dryRun: true,
@@ -127,9 +134,11 @@ try {
   // Feed terminal events to the historical scheduler; pending/unknown results excluded.
   for (let i = 0; i < 25; i++) {
     const other = Number(
-      db.prepare(
-        "INSERT INTO vehicles(organization_id,year,make,model,status) VALUES (?,2022,'Toyota',?,'Rascunho')",
-      ).run(org, `Teste ${i}`).lastInsertRowid,
+      db
+        .prepare(
+          "INSERT INTO vehicles(organization_id,year,make,model,status) VALUES (?,2022,'Toyota',?,'Rascunho')",
+        )
+        .run(org, `Teste ${i}`).lastInsertRowid,
     )
     db.prepare(
       `INSERT INTO publication_jobs(organization_id,vehicle_id,status,started_at)
@@ -137,8 +146,14 @@ try {
     ).run(org, other, i < 18 ? 'completed' : 'error')
   }
   const history = organizationScheduleHistory(db, org)
-  assert.equal(history.reduce((n, h) => n + (h.attemptCount || 0), 0), 25)
-  assert.equal(history.reduce((n, h) => n + h.successCount, 0), 18)
+  assert.equal(
+    history.reduce((n, h) => n + (h.attemptCount || 0), 0),
+    25,
+  )
+  assert.equal(
+    history.reduce((n, h) => n + h.successCount, 0),
+    18,
+  )
   const insights = await admin('/operations/scheduling-insights')
   assert.equal(insights.eligible, true)
   assert.equal(insights.totalSamples, 25)
@@ -146,7 +161,9 @@ try {
   assert.equal(insights.completionRate, 72)
   assert(insights.topSlots.length)
   assert.match(insights.metric, /não visualizações/)
-  console.log('✓ Phase 5: data-backed schedules, CSV preview/commit, stale guard and live-job safety')
+  console.log(
+    '✓ Phase 5: data-backed schedules, CSV preview/commit, stale guard and live-job safety',
+  )
 } finally {
   db.close()
   await server.close()

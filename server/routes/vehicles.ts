@@ -236,13 +236,15 @@ export async function handleVehicleMutationRoute(
     db.exec('BEGIN IMMEDIATE')
     let digest: string
     try {
-      const snapshot = db.prepare(
-        `SELECT v.id,v.stock_code stockCode,v.vin,v.status,v.updated_at updatedAt,
+      const snapshot = db
+        .prepare(
+          `SELECT v.id,v.stock_code stockCode,v.vin,v.status,v.updated_at updatedAt,
           v.year,v.make,v.model,v.price,v.km,
           (SELECT group_concat(j.id || ':' || j.status || ':' || j.updated_at, ',')
            FROM publication_jobs j WHERE j.organization_id=v.organization_id AND j.vehicle_id=v.id) jobs
          FROM vehicles v WHERE v.organization_id=? ORDER BY v.id`,
-      ).all(auth.organizationId)
+        )
+        .all(auth.organizationId)
       digest = createHash('sha256')
         .update(JSON.stringify({ organizationId: auth.organizationId, csv, mode, snapshot }))
         .digest('hex')
@@ -300,12 +302,14 @@ export async function handleVehicleMutationRoute(
           }
           // Do not silently rewrite stock referenced by any active publication;
           // a human must first reconcile that job safely.
-          const activePublication = db.prepare(
-            `SELECT 1 FROM publication_jobs
+          const activePublication = db
+            .prepare(
+              `SELECT 1 FROM publication_jobs
              WHERE organization_id=? AND vehicle_id=?
              AND status IN ('pending','filling','error','awaiting_confirmation','completed')
              LIMIT 1`,
-          ).get(auth.organizationId, duplicate.id)
+            )
+            .get(auth.organizationId, duplicate.id)
           if (activePublication) {
             skipped++
             errors.push({
