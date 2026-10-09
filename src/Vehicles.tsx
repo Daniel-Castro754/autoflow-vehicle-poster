@@ -322,7 +322,7 @@ export default function VehiclesView({
           'Confirmar sincronização do estoque com estes resultados?',
         ]
           .filter(Boolean)
-          .join('\\n'),
+          .join('\n'),
       )
       if (!proceed) {
         notify('Sincronização cancelada: nenhuma alteração realizada.')
