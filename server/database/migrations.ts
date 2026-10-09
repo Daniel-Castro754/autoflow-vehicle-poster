@@ -172,6 +172,14 @@ const migrations: Migration[] = [
     sql: `CREATE UNIQUE INDEX IF NOT EXISTS uq_users_google_subject
       ON users (google_subject) WHERE google_subject IS NOT NULL;`,
   },
+  {
+    version: 12,
+    columns: [],
+    // Existing conflicts require reconciliation; never silently delete a possibly published job.
+    sql: `CREATE UNIQUE INDEX IF NOT EXISTS uq_publication_jobs_open_vehicle
+      ON publication_jobs (organization_id,vehicle_id)
+      WHERE status IN ('pending','filling','error','awaiting_confirmation','completed');`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

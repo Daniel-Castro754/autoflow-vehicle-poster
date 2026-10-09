@@ -27,7 +27,7 @@ export async function runHealthCheck(
     .prepare(
       `
       SELECT j.id, j.organization_id organizationId, j.social_account_id accountId, j.started_at startedAt,
-        j.publish_attempt_at publishAttemptAt, j.fill_report fillReport, j.attempt_count attemptCount, j.retry_count retryCount,
+        j.publish_attempt_at publishAttemptAt, j.fill_report fillReport, j.lease_token leaseToken, j.attempt_count attemptCount, j.retry_count retryCount,
         COALESCE(j.max_retries, s.max_retries, 3) maxRetries,
         COALESCE(s.stuck_timeout_minutes, 15) timeoutMinutes,
         COALESCE(s.alert_telegram_token, '') alertTelegramToken,
@@ -51,6 +51,7 @@ export async function runHealthCheck(
     accountId: number
     startedAt: string
     publishAttemptAt: string | null
+    leaseToken: string | null
     fillReport: string
     alertTelegramToken: string
     alertTelegramChatId: string
@@ -91,21 +92,30 @@ export async function runHealthCheck(
         // acontecido antes de perdermos contato. Não é seguro assumir que nada foi publicado —
         // o job vai para confirmação manual em vez de voltar direto para a fila.
         if (publicationMayExist(job)) {
-          db.exec('BEGIN')
+          db.exec('BEGIN IMMEDIATE')
           try {
-            db.prepare(
-              `
+            const updated = db
+              .prepare(
+                `
               UPDATE publication_jobs
               SET status = 'awaiting_confirmation', paused = 1, extension_visible = 0, error_code = NULL,
                 fill_report = ?, last_lease_token = COALESCE(lease_token,last_lease_token),
                 lease_token = NULL, lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
               WHERE id = ? AND organization_id = ?
+                AND status='filling' AND lease_token IS ?
+                AND (lease_expires_at IS NULL OR datetime(lease_expires_at)<=CURRENT_TIMESTAMP)
             `,
-            ).run(
-              JSON.stringify(ambiguousPublicationReport(job.fillReport)),
-              job.id,
-              job.organizationId,
-            )
+              )
+              .run(
+                JSON.stringify(ambiguousPublicationReport(job.fillReport)),
+                job.id,
+                job.organizationId,
+                job.leaseToken,
+              )
+            if (updated.changes !== 1) {
+              db.exec('ROLLBACK')
+              continue
+            }
 
             db.prepare(
               `
@@ -125,6 +135,7 @@ export async function runHealthCheck(
             logger.warn('HealthMonitor', `Falha ao processar job ambíguo #${job.id}`, {
               error: txErr,
             })
+            continue
           }
 
           void sendCriticalAlert(
@@ -148,18 +159,26 @@ export async function runHealthCheck(
         // respeitando o mesmo orçamento de retry automático usado pelo fill-result — retry_count
         // (não attempt_count, que também conta reaberturas manuais e não deve gatilhar esgotamento).
         const exhausted = job.retryCount >= job.maxRetries
-        db.exec('BEGIN')
+        db.exec('BEGIN IMMEDIATE')
         try {
           if (exhausted) {
-            db.prepare(
-              `
+            const updated = db
+              .prepare(
+                `
               UPDATE publication_jobs
               SET status = 'error', error_code = 'Travado repetidamente sem confirmação da extensão.',
                 last_lease_token = NULL, publish_attempt_at = NULL, lease_token = NULL,
                 lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
               WHERE id = ? AND organization_id = ?
+                AND status='filling' AND lease_token IS ?
+                AND (lease_expires_at IS NULL OR datetime(lease_expires_at)<=CURRENT_TIMESTAMP)
             `,
-            ).run(job.id, job.organizationId)
+              )
+              .run(job.id, job.organizationId, job.leaseToken)
+            if (updated.changes !== 1) {
+              db.exec('ROLLBACK')
+              continue
+            }
 
             db.prepare(
               `
@@ -176,16 +195,24 @@ export async function runHealthCheck(
               }),
             )
           } else {
-            db.prepare(
-              `
+            const updated = db
+              .prepare(
+                `
               UPDATE publication_jobs
               SET status = 'pending', paused = 0, extension_visible = 1, error_code = NULL,
                 fill_report = '', started_at = NULL, filled_at = NULL, last_lease_token = NULL,
                 publish_attempt_at = NULL, retry_count = retry_count + 1, lease_token = NULL,
                 lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
               WHERE id = ? AND organization_id = ?
+                AND status='filling' AND lease_token IS ?
+                AND (lease_expires_at IS NULL OR datetime(lease_expires_at)<=CURRENT_TIMESTAMP)
             `,
-            ).run(job.id, job.organizationId)
+              )
+              .run(job.id, job.organizationId, job.leaseToken)
+            if (updated.changes !== 1) {
+              db.exec('ROLLBACK')
+              continue
+            }
 
             db.prepare(
               `
@@ -204,6 +231,7 @@ export async function runHealthCheck(
         } catch (txErr) {
           db.exec('ROLLBACK')
           logger.warn('HealthMonitor', `Falha ao recuperar job #${job.id}`, { error: txErr })
+          continue
         }
 
         // Notifica via alerta caso o travamento tenha sido excessivo (> 30 min) ou as tentativas se esgotaram

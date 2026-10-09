@@ -33,7 +33,7 @@ for (const legacy of [true, false]) {
   }
   applyMigrations(migrationDb)
   applyMigrations(migrationDb)
-  assert.equal(migrationDb.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 11)
+  assert.equal(migrationDb.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 12)
   if (legacy)
     assert.equal(
       migrationDb.prepare('SELECT publish_attempt_at FROM publication_jobs WHERE id=1').get()
@@ -554,11 +554,16 @@ try {
     .prepare('SELECT organization_id organizationId FROM vehicles WHERE id=?')
     .get(vehicleE.id).organizationId
   for (let dayOffset = 10; dayOffset < 15; dayOffset++) {
+    const historicalVehicle = testDb
+      .prepare(
+        'INSERT INTO vehicles(organization_id,year,make,model) SELECT organization_id,year,make,model FROM vehicles WHERE id=?',
+      )
+      .run(vehicleE.id)
     testDb
       .prepare(
         `INSERT INTO publication_jobs (organization_id,vehicle_id,status,filled_at) VALUES (?,?,'completed',datetime('now','-${dayOffset} days'))`,
       )
-      .run(vehicleEOrgId, vehicleE.id)
+      .run(vehicleEOrgId, Number(historicalVehicle.lastInsertRowid))
   }
   const smartScheduled = await call(`/publications/${publicationE.id}/smart-schedule`, adminToken, {
     method: 'POST',
@@ -640,11 +645,16 @@ try {
     .prepare('SELECT organization_id organizationId FROM social_accounts WHERE id=?')
     .get(accountB.id).organizationId
   for (let i = 0; i < 49; i++) {
+    const fillerVehicle = testDb
+      .prepare(
+        'INSERT INTO vehicles(organization_id,year,make,model) SELECT organization_id,year,make,model FROM vehicles WHERE id=?',
+      )
+      .run(vehicleF.id)
     testDb
       .prepare(
         `INSERT INTO publication_jobs (organization_id,vehicle_id,social_account_id,status) VALUES (?,?,?,'error')`,
       )
-      .run(accountBOrgId, vehicleF.id, accountB.id)
+      .run(accountBOrgId, Number(fillerVehicle.lastInsertRowid), accountB.id)
   }
   const vehicleG = await createReadyVehicle(adminToken)
   const publicationG = await call('/publications', adminToken, {
