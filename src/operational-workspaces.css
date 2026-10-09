@@ -1,0 +1,687 @@
+/* Fase 6 · Etapa 2 — áreas operacionais
+ * Todas as regras são locais às páginas, após os estilos legados e os
+ * tokens definidos em design-system.css. Nenhum fluxo/API é alterado.
+ */
+
+/* Central de IA · preparação, execução, diagnóstico e assistente */
+.app-shell .ai-center-page {
+  gap: 20px;
+}
+.ai-workflow-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 24px;
+  background: var(--af-surface);
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius);
+}
+.ai-workflow-intro h2,
+.vehicle-filter-heading h2,
+.publication-workflow-heading h2 {
+  color: var(--af-text);
+  font: 700 19px/1.35 Manrope, sans-serif;
+  margin: 3px 0 5px;
+}
+.ai-workflow-intro p,
+.vehicle-filter-heading p,
+.publication-workflow-heading p {
+  max-width: 550px;
+  color: var(--af-muted);
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
+}
+.ai-workflow-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.ai-workflow-steps span {
+  white-space: nowrap;
+  padding: 10px 12px;
+  background: var(--af-surface-muted);
+  color: var(--af-text);
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+}
+.ai-workflow-steps strong {
+  color: var(--af-success);
+  margin-right: 6px;
+  letter-spacing: 0.03em;
+}
+.app-shell .ai-kpi-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.app-shell .ai-kpi-card {
+  min-width: 0;
+  min-height: 136px;
+  padding: 18px;
+  gap: 9px;
+}
+.app-shell .ai-kpi-label {
+  color: var(--af-muted);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.app-shell .ai-kpi-val {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.app-shell .ai-kpi-val strong {
+  color: var(--af-text);
+  font: 700 clamp(21px, 2vw, 27px)/1.3 Manrope, sans-serif;
+}
+.app-shell .ai-kpi-card small,
+.app-shell .ai-sub-info {
+  color: var(--af-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.app-shell .ai-badge {
+  font-size: 11px;
+  padding: 4px 8px;
+}
+.ai-audit-warning {
+  margin: 0;
+  padding: 13px 16px;
+  border: 1px solid color-mix(in srgb, var(--af-warning) 45%, var(--af-border));
+  background: color-mix(in srgb, var(--af-warning) 10%, var(--af-surface));
+  border-radius: var(--af-radius-sm);
+  color: var(--af-text);
+  font-size: 13px;
+}
+.ai-preflight {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-radius: var(--af-radius-sm);
+  background: var(--af-surface-muted);
+  border: 1px solid var(--af-border);
+}
+.ai-preflight > div:first-child {
+  display: grid;
+  gap: 5px;
+}
+.ai-preflight > div:first-child strong {
+  color: var(--af-text);
+  font-size: 14px;
+}
+.ai-preflight > div:first-child span {
+  color: var(--af-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ai-preflight-indicators {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+}
+.ai-preflight-indicators span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--af-border);
+  background: var(--af-surface);
+  color: var(--af-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.ai-preflight-indicators .is-ready {
+  color: var(--af-success);
+}
+.ai-preflight-indicators .needs-attention {
+  color: var(--af-warning);
+}
+.app-shell .ai-two-column-grid {
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  align-items: start;
+  gap: 18px;
+}
+.app-shell .ai-column {
+  min-width: 0;
+  gap: 18px;
+}
+.app-shell .ai-card {
+  min-width: 0;
+  padding: 18px;
+  gap: 14px;
+}
+.app-shell .ai-card .module-head {
+  margin: -18px -18px 0;
+  padding: 17px 18px;
+}
+.app-shell .ai-card .module-head span {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ai-pipeline-steps {
+  counter-reset: step;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.ai-pipeline-steps li {
+  counter-increment: step;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 11px;
+  row-gap: 3px;
+  color: var(--af-text);
+}
+.ai-pipeline-steps li::before {
+  content: counter(step);
+  display: grid;
+  place-items: center;
+  grid-row: span 2;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: var(--af-success);
+  background: var(--af-surface-muted);
+  font: 700 12px/1 Manrope, sans-serif;
+}
+.ai-pipeline-steps li strong {
+  font-size: 13px;
+}
+.ai-pipeline-steps li span {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--af-muted);
+}
+.app-shell .ai-big-btn {
+  background: var(--af-primary) !important;
+  color: var(--af-primary-text);
+  box-shadow: none !important;
+  border-radius: var(--af-radius-sm);
+}
+.app-shell .ai-big-btn:hover {
+  background: var(--af-primary-hover) !important;
+  transform: none;
+}
+.app-shell .ai-agent-console {
+  min-height: 0;
+}
+.app-shell .ai-chat-history {
+  flex: initial;
+  min-height: 170px;
+  max-height: 300px;
+  border-radius: var(--af-radius-sm);
+  background: var(--af-surface-muted);
+  border-color: var(--af-border);
+}
+.app-shell .ai-chat-reply {
+  background: var(--af-surface);
+  border-color: var(--af-border);
+  color: var(--af-text);
+  font-size: 13px;
+}
+.app-shell .ai-chat-item,
+.app-shell .ai-chat-prompt {
+  font-size: 13px;
+}
+.app-shell .ai-prompt-chips button,
+.app-shell .ai-chat-input-form input {
+  font-size: 13px;
+  border-color: var(--af-border);
+}
+.app-shell .ai-chat-input-form input,
+.app-shell .ai-reader-form textarea,
+.app-shell .ai-parsed-card,
+.app-shell .ai-parsed-details-grid input,
+.app-shell .ai-parsed-details-grid select {
+  background: var(--af-surface);
+  border-color: var(--af-border);
+  color: var(--af-text);
+}
+.app-shell .ai-reader-form label span,
+.app-shell .ai-parsed-description,
+.app-shell .ai-parsed-details-grid {
+  color: var(--af-text);
+  font-size: 13px;
+}
+.app-shell .ai-rec-content p,
+.app-shell .ai-rec-content strong,
+.app-shell .ai-rec-item .small-action,
+.app-shell .ai-empty-rec p {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.app-shell .ai-empty-rec {
+  color: var(--af-success);
+}
+.app-shell .ai-result-box {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* Veículos · filtros claros + tabela legível */
+.vehicle-filter-section {
+  margin-bottom: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--af-border);
+  background: var(--af-surface);
+  border-radius: var(--af-radius);
+}
+.vehicle-filter-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 15px;
+}
+.vehicle-filter-heading h2 {
+  margin-top: 0;
+}
+.vehicle-photo-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--af-surface-muted);
+  color: var(--af-muted);
+  padding: 7px 10px;
+  border-radius: var(--af-radius-sm);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.vehicle-status-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.vehicle-status-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  min-height: 37px;
+  padding: 8px 12px;
+  border-radius: var(--af-radius-sm);
+  border: 1px solid var(--af-border);
+  color: var(--af-muted);
+  background: var(--af-surface);
+  font-size: 13px;
+  font-weight: 600;
+}
+.vehicle-status-filters button span {
+  font-size: 12px;
+  color: inherit;
+  opacity: 0.85;
+}
+.vehicle-status-filters button.active,
+.vehicle-status-filters button[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--af-primary) 13%, var(--af-surface));
+  border-color: var(--af-primary);
+  color: var(--af-text);
+}
+.vehicle-status-filters button:hover:not(.active) {
+  background: var(--af-surface-muted);
+}
+.app-shell .vehicle-inventory-panel {
+  overflow: hidden;
+}
+.app-shell .vehicles-page .toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  background: var(--af-surface);
+  padding: 13px 16px;
+  gap: 10px;
+}
+.vehicles-page .toolbar .search {
+  flex: 1 1 270px;
+  width: auto;
+  min-width: 0;
+  max-width: 520px;
+}
+.vehicles-page .toolbar .search input {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--af-text);
+}
+.vehicles-page .toolbar select {
+  background: var(--af-surface);
+  color: var(--af-text);
+  min-height: 40px;
+  font-size: 13px;
+}
+.vehicle-scope-note {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--af-muted);
+  font-size: 12px;
+}
+.app-shell .vehicles-page .table-wrap {
+  overflow-x: auto;
+}
+.vehicles-page table {
+  min-width: 940px;
+}
+.app-shell .vehicles-page th,
+.app-shell .publications-page th {
+  padding: 12px 14px;
+  color: var(--af-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: var(--af-surface-muted);
+  border-bottom: 1px solid var(--af-border);
+}
+.app-shell .vehicles-page td,
+.app-shell .publications-page td {
+  font-size: 13px;
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--af-border);
+  color: var(--af-text);
+}
+.app-shell .vehicles-page tr:hover td,
+.app-shell .publications-page tr:hover td {
+  background: color-mix(in srgb, var(--af-primary) 4%, var(--af-surface));
+}
+.vehicles-page .vehicle {
+  gap: 12px;
+}
+.vehicles-page .car-thumb {
+  width: 60px;
+  height: 47px;
+  border-radius: 8px;
+  flex: none;
+  overflow: hidden;
+}
+.vehicles-page .vehicle strong {
+  color: var(--af-text);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.vehicles-page .vehicle small {
+  color: var(--af-muted);
+  font-size: 12px;
+}
+.vehicles-page .badge,
+.vehicles-page .seller,
+.vehicles-page .image-status {
+  font-size: 12px;
+}
+.vehicles-page .badge {
+  border-radius: 999px;
+  padding: 6px 9px;
+}
+.vehicles-page .row-more {
+  color: var(--af-muted);
+  min-width: 34px;
+  min-height: 34px;
+  border-radius: 8px;
+}
+.vehicles-page .row-more:hover {
+  background: var(--af-surface-muted);
+}
+.vehicles-page .panel-foot {
+  font-size: 12px;
+  color: var(--af-muted);
+}
+.vehicles-page .panel-foot button {
+  min-height: 35px;
+}
+
+/* Publicações · separar estado geral, prioridades e trabalhos */
+.publication-workflow {
+  margin-bottom: 13px;
+  padding: 18px 20px;
+  border: 1px solid var(--af-border);
+  background: var(--af-surface);
+  border-radius: var(--af-radius);
+}
+.publication-workflow-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 15px;
+}
+.publication-workflow-heading h2 {
+  margin-top: 0;
+}
+.publication-workflow-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--af-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  padding: 8px 10px;
+  background: var(--af-surface-muted);
+  border-radius: var(--af-radius-sm);
+}
+.publication-workflow-status span {
+  width: 7px;
+  height: 7px;
+  background: var(--af-muted);
+  border-radius: 50%;
+}
+.publication-workflow-status span.online {
+  background: var(--af-success);
+}
+.publication-workflow-status span.offline {
+  background: var(--af-warning);
+}
+.publication-setup-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--af-warning);
+  background: color-mix(in srgb, var(--af-warning) 9%, var(--af-surface));
+  border: 1px solid color-mix(in srgb, var(--af-warning) 25%, var(--af-border));
+  border-radius: var(--af-radius-sm);
+  padding: 11px 13px;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+.publication-quick-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.publication-quick-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 39px;
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--af-text);
+  background: var(--af-surface-muted);
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius-sm);
+  font-size: 13px;
+}
+.publication-quick-filters button:hover {
+  border-color: var(--af-primary);
+}
+.publication-quick-filters strong {
+  color: var(--af-primary);
+  font-size: 12px;
+}
+.app-shell .publications-page .publication-view-tabs,
+.theme-dark .publications-page .publication-view-tabs {
+  background: var(--af-surface-muted);
+  border-color: var(--af-border);
+  border-radius: var(--af-radius);
+  gap: 6px;
+  padding: 6px;
+}
+.publications-page .publication-view-tabs button {
+  color: var(--af-muted);
+  font-size: 13px;
+  min-height: 40px;
+  padding: 9px 14px;
+}
+.app-shell .publications-page .publication-view-tabs button.active {
+  background: var(--af-surface);
+  color: var(--af-text);
+  border: 1px solid var(--af-border);
+  box-shadow: var(--af-shadow);
+}
+.publications-page .publication-view-tabs .refresh-view {
+  margin-left: auto;
+}
+.app-shell .publications-page .automation-summary {
+  background: var(--af-surface);
+  color: var(--af-text);
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius);
+  flex-wrap: wrap;
+  gap: 20px;
+}
+.app-shell .publications-page .automation-summary > div > svg {
+  color: var(--af-success);
+}
+.app-shell .publications-page .automation-summary strong {
+  color: var(--af-text);
+  font-size: 21px;
+}
+.app-shell .publications-page .automation-summary small {
+  color: var(--af-muted);
+  font-size: 12px;
+}
+.app-shell .publications-page .automation-profile {
+  color: var(--af-text);
+  background: var(--af-surface);
+  border-color: var(--af-border);
+  border-radius: var(--af-radius);
+  gap: 15px;
+  padding: 18px;
+}
+.app-shell .publications-page .profile-live-head strong {
+  color: var(--af-text);
+  font-size: 14px;
+}
+.app-shell .publications-page .profile-live-head small,
+.app-shell .publications-page .live-state,
+.app-shell .publications-page .profile-stage small {
+  color: var(--af-muted);
+  font-size: 12px;
+}
+.app-shell .publications-page .profile-stage {
+  border-color: var(--af-border);
+  background: var(--af-surface-muted);
+}
+.app-shell .publications-page .queue-filters {
+  background: var(--af-surface);
+  border-color: var(--af-border);
+  padding: 14px;
+  gap: 10px;
+  grid-template-columns: minmax(240px, 1.3fr) repeat(3, minmax(130px, 0.7fr)) auto;
+}
+.publications-page .queue-filters :is(select, .queue-search) {
+  font-size: 13px;
+  background: var(--af-surface);
+  border-color: var(--af-border);
+  color: var(--af-text);
+  min-height: 40px;
+}
+.publications-page .queue-search input {
+  font-size: 13px;
+  color: var(--af-text);
+}
+.publications-page .clear-queue-filters {
+  font-size: 12px;
+  background: var(--af-surface-muted);
+  border-color: var(--af-border);
+  color: var(--af-muted);
+  min-height: 40px;
+}
+.app-shell .publications-page .pub-tabs {
+  background: var(--af-surface-muted);
+  color: var(--af-text);
+  border-color: var(--af-border);
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.publications-page .pub-tabs strong {
+  font-size: 13px;
+  color: var(--af-text);
+}
+.publications-page .pub-tabs span,
+.publications-page .pub-tabs > small {
+  font-size: 12px;
+  color: var(--af-muted);
+}
+.app-shell .publications-page .table-wrap {
+  overflow-x: auto;
+}
+.publications-page table {
+  min-width: 960px;
+}
+.publications-page .bulk-bar {
+  flex-wrap: wrap;
+}
+
+/* Tamanhos menores · cards em pilha e filtros sem rolagem horizontal. */
+@media (max-width: 1200px) {
+  .ai-workflow-intro,
+  .ai-preflight {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .app-shell .ai-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .app-shell .ai-two-column-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .app-shell .publications-page .queue-filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .publications-page .queue-search {
+    grid-column: 1/-1;
+  }
+}
+@media (max-width: 720px) {
+  .app-shell .ai-kpi-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ai-workflow-intro,
+  .vehicle-filter-section,
+  .publication-workflow {
+    padding: 16px;
+  }
+  .vehicle-filter-heading,
+  .publication-workflow-heading {
+    flex-direction: column;
+  }
+  .app-shell .publications-page .queue-filters {
+    grid-template-columns: 1fr;
+  }
+  .publications-page .queue-search {
+    grid-column: auto;
+  }
+  .publications-page .publication-view-tabs {
+    flex-wrap: wrap;
+  }
+  .publications-page .publication-view-tabs .refresh-view {
+    margin-left: 0;
+  }
+  .vehicle-scope-note {
+    margin-left: 0;
+  }
+  .vehicles-page .toolbar .search {
+    flex-basis: 100%;
+  }
+}
