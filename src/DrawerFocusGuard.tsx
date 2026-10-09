@@ -11,7 +11,9 @@ export function DrawerFocusGuard({
 }) {
   const marker = useRef<HTMLSpanElement>(null)
   const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
 
   useEffect(() => {
     const drawer = marker.current?.closest<HTMLElement>('.drawer')
