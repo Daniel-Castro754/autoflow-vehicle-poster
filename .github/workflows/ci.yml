@@ -20,6 +20,15 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - name: Temporary formatted file capture
+        run: |
+          npx prettier --write docs/PHASE_4_OBSERVABILITY.md server/routes/interventions.ts server/server.ts server/services/operational-incidents.ts src/App.tsx src/InterventionCenter.css src/InterventionCenter.tsx tests/phase-four-observability.mjs >/dev/null
+          for file in docs/PHASE_4_OBSERVABILITY.md server/routes/interventions.ts server/server.ts server/services/operational-incidents.ts src/App.tsx src/InterventionCenter.css src/InterventionCenter.tsx tests/phase-four-observability.mjs; do
+            echo "AUTO_FORMAT_BEGIN=$file"
+            base64 -w0 "$file"
+            echo
+            echo "AUTO_FORMAT_END=$file"
+          done
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
