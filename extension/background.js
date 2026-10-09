@@ -10,7 +10,10 @@ async function refreshSession() {
   if (refreshInFlight) return refreshInFlight
   refreshInFlight = (async () => {
     const { refreshToken } = await chrome.storage.local.get('refreshToken')
-    if (!refreshToken) return null
+    if (!refreshToken) {
+      await chrome.storage.local.set({ authNeeded: true })
+      return null
+    }
     let response
     try {
       response = await fetch(`${API}/auth/extension/refresh`, {
@@ -210,7 +213,9 @@ async function consumeQueue() {
       },
     )
     if (response.status === 401) {
-      await chrome.storage.local.set({ autoRun: false, authNeeded: true })
+      const { authNeeded } = await chrome.storage.local.get('authNeeded')
+      // An API outage during refresh is transient: retry on the next alarm.
+      if (authNeeded) await chrome.storage.local.set({ autoRun: false })
       return
     }
     if (!response.ok) throw new Error(`Falha ao consultar a fila: HTTP ${response.status}`)
@@ -494,7 +499,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           return { ready: false, reason: 'Abra o formulário de veículo no Facebook.' }
         return marketplaceReady(tabId)
       })
-      .then(sendResponse)
+      .then(async (status) => {
+        const { activeAccountId } = await chrome.storage.local.get('activeAccountId')
+        await chrome.storage.local.set({
+          facebookSession: {
+            accountId: activeAccountId,
+            ready: Boolean(status.ready),
+            reason: status.reason,
+            checkedAt: Date.now(),
+          },
+        })
+        sendResponse(status)
+      })
       .catch(() => sendResponse({ ready: false, reason: 'A aba do Facebook não está acessível.' }))
     return true
   }
