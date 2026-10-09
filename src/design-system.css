@@ -242,7 +242,9 @@ body {
   font-size: 13px;
 }
 .overview-inventory-summary strong {
-  font: 700 clamp(24px, 2.2vw, 32px) / 1.25 Manrope, sans-serif;
+  font:
+    700 clamp(24px, 2.2vw, 32px) / 1.25 Manrope,
+    sans-serif;
   color: var(--af-text);
   letter-spacing: -0.025em;
 }
@@ -299,7 +301,9 @@ body {
   margin-bottom: 16px;
 }
 .overview-section-heading h2 {
-  font: 700 19px / 1.3 Manrope, sans-serif;
+  font:
+    700 19px / 1.3 Manrope,
+    sans-serif;
   margin: 4px 0 5px;
   color: var(--af-text);
 }

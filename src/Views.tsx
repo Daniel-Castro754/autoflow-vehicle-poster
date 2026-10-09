@@ -319,7 +319,8 @@ export function OverviewView({
   }, [api])
   const stats = data?.vehicleStats || {}
   const total = stats.total ?? vehicles.length
-  const published = stats.published ?? vehicles.filter((vehicle) => vehicle.status === 'Publicado').length
+  const published =
+    stats.published ?? vehicles.filter((vehicle) => vehicle.status === 'Publicado').length
   const publishedPercent = total > 0 ? Math.round((published / total) * 100) : 0
   return (
     <section className="content">
@@ -343,7 +344,9 @@ export function OverviewView({
         <div>
           <span>Valor estimado do estoque</span>
           <strong>{data ? money.format(Number(stats.inventoryValue || 0)) : '—'}</strong>
-          <small>{total} {total === 1 ? 'veículo ativo' : 'veículos ativos'} na operação</small>
+          <small>
+            {total} {total === 1 ? 'veículo ativo' : 'veículos ativos'} na operação
+          </small>
         </div>
         <div className="overview-publication-progress">
           <div>

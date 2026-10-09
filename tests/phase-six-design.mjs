@@ -41,7 +41,8 @@ for (const token of [
   '--af-muted:',
   '--af-primary:',
   '--af-focus:',
-]) assert(css.includes(token), `Missing semantic token ${token}`)
+])
+  assert(css.includes(token), `Missing semantic token ${token}`)
 assert(entry.indexOf("import './design-system.css'") > entry.indexOf("import './styles.css'"))
 for (const panel of ['<OperationalHealth', '<InterventionCenter', '<SchedulingInsights']) {
   assert(overview.includes(panel), `Existing panel removed: ${panel}`)

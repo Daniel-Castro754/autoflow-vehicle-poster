@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Camera, CheckCircle2, ChevronRight, ClipboardList, Send } from 'lucide-react'
+import {
+  AlertTriangle,
+  Camera,
+  CheckCircle2,
+  ChevronRight,
+  ClipboardList,
+  Send,
+} from 'lucide-react'
 import { overviewActionCounts } from './overview-priorities'
 
 type VehicleSummary = { id: number; status: string; imageCount?: number }
@@ -50,59 +57,69 @@ export function OverviewPriorities({
 
   const priorities = [
     ...(critical > 0
-      ? [{
-          id: 'critical',
-          tone: 'danger',
-          icon: AlertTriangle,
-          title: `${critical} ocorrência${critical === 1 ? '' : 's'} crítica${critical === 1 ? '' : 's'}`,
-          detail: 'Revise os trabalhos críticos antes de retomar a automação.',
-          action: 'Revisar',
-          onClick: onOpenMonitoring,
-        }]
+      ? [
+          {
+            id: 'critical',
+            tone: 'danger',
+            icon: AlertTriangle,
+            title: `${critical} ocorrência${critical === 1 ? '' : 's'} crítica${critical === 1 ? '' : 's'}`,
+            detail: 'Revise os trabalhos críticos antes de retomar a automação.',
+            action: 'Revisar',
+            onClick: onOpenMonitoring,
+          },
+        ]
       : []),
     ...(attention > 0
-      ? [{
-          id: 'attention',
-          tone: 'danger',
-          icon: ClipboardList,
-          title: `${attention} veículo${attention === 1 ? '' : 's'} requer${attention === 1 ? '' : 'em'} revisão`,
-          detail: 'Confira dados e pendências do estoque.',
-          action: 'Ver veículos',
-          onClick: () => navigate('Veículos'),
-        }]
+      ? [
+          {
+            id: 'attention',
+            tone: 'danger',
+            icon: ClipboardList,
+            title: `${attention} veículo${attention === 1 ? '' : 's'} requer${attention === 1 ? '' : 'em'} revisão`,
+            detail: 'Confira dados e pendências do estoque.',
+            action: 'Ver veículos',
+            onClick: () => navigate('Veículos'),
+          },
+        ]
       : []),
     ...(noPhotos > 0
-      ? [{
-          id: 'photos',
-          tone: 'warning',
-          icon: Camera,
-          title: `${noPhotos} veículo${noPhotos === 1 ? '' : 's'} sem fotos`,
-          detail: 'Inclua as imagens antes de preparar os anúncios.',
-          action: 'Adicionar fotos',
-          onClick: () => navigate('Veículos'),
-        }]
+      ? [
+          {
+            id: 'photos',
+            tone: 'warning',
+            icon: Camera,
+            title: `${noPhotos} veículo${noPhotos === 1 ? '' : 's'} sem fotos`,
+            detail: 'Inclua as imagens antes de preparar os anúncios.',
+            action: 'Adicionar fotos',
+            onClick: () => navigate('Veículos'),
+          },
+        ]
       : []),
     ...(openIncidents > critical
-      ? [{
-          id: 'incidents',
-          tone: 'warning',
-          icon: AlertTriangle,
-          title: `${openIncidents - critical} outra${openIncidents - critical === 1 ? '' : 's'} ocorrência${openIncidents - critical === 1 ? '' : 's'} ativa${openIncidents - critical === 1 ? '' : 's'}`,
-          detail: 'Consulte o histórico das execuções no monitoramento.',
-          action: 'Monitorar',
-          onClick: onOpenMonitoring,
-        }]
+      ? [
+          {
+            id: 'incidents',
+            tone: 'warning',
+            icon: AlertTriangle,
+            title: `${openIncidents - critical} outra${openIncidents - critical === 1 ? '' : 's'} ocorrência${openIncidents - critical === 1 ? '' : 's'} ativa${openIncidents - critical === 1 ? '' : 's'}`,
+            detail: 'Consulte o histórico das execuções no monitoramento.',
+            action: 'Monitorar',
+            onClick: onOpenMonitoring,
+          },
+        ]
       : []),
     ...(ready > 0
-      ? [{
-          id: 'ready',
-          tone: 'info',
-          icon: Send,
-          title: `${ready} veículo${ready === 1 ? '' : 's'} pronto${ready === 1 ? '' : 's'}`,
-          detail: 'Consulte a fila e confira os requisitos de publicação.',
-          action: 'Abrir fila',
-          onClick: () => navigate('Publicações'),
-        }]
+      ? [
+          {
+            id: 'ready',
+            tone: 'info',
+            icon: Send,
+            title: `${ready} veículo${ready === 1 ? '' : 's'} pronto${ready === 1 ? '' : 's'}`,
+            detail: 'Consulte a fila e confira os requisitos de publicação.',
+            action: 'Abrir fila',
+            onClick: () => navigate('Publicações'),
+          },
+        ]
       : []),
   ]
 
@@ -138,7 +155,9 @@ export function OverviewPriorities({
             const Icon = item.icon
             return (
               <div key={item.id} className={`overview-priority-item tone-${item.tone}`}>
-                <span className="overview-priority-icon"><Icon size={19} /></span>
+                <span className="overview-priority-icon">
+                  <Icon size={19} />
+                </span>
                 <div className="overview-priority-copy">
                   <strong>{item.title}</strong>
                   <small>{item.detail}</small>
