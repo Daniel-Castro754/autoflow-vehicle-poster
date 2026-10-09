@@ -46,6 +46,7 @@ import { FieldLabel, HelpTip } from './HelpTip'
 import { OperationalHealth } from './OperationalHealth'
 import { InterventionCenter } from './InterventionCenter'
 import { SchedulingInsights } from './SchedulingInsights'
+import { OverviewPriorities } from './OverviewPriorities'
 
 type ApiFn = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
 type Vehicle = {
@@ -298,10 +299,29 @@ export function OverviewView({
   canManage: boolean
 }) {
   const [data, setData] = useState<OverviewData | null>(null)
+  const [overviewError, setOverviewError] = useState(false)
+  const [monitoringOpen, setMonitoringOpen] = useState(false)
   useEffect(() => {
-    api<OverviewData>('/overview').then(setData)
+    let mounted = true
+    api<OverviewData>('/overview')
+      .then((result) => {
+        if (mounted) {
+          setData(result)
+          setOverviewError(false)
+        }
+      })
+      .catch(() => {
+        if (mounted) setOverviewError(true)
+      })
+    return () => {
+      mounted = false
+    }
   }, [api])
   const stats = data?.vehicleStats || {}
+  const total = stats.total ?? vehicles.length
+  const published =
+    stats.published ?? vehicles.filter((vehicle) => vehicle.status === 'Publicado').length
+  const publishedPercent = total > 0 ? Math.round((published / total) * 100) : 0
   return (
     <section className="content">
       <div className="title-row">
@@ -315,20 +335,34 @@ export function OverviewView({
           Abrir fila
         </button>
       </div>
-      <div className="hero-card">
+      {overviewError && (
+        <p className="overview-priority-error" role="status">
+          Os indicadores não foram atualizados. Confira a conexão com a API.
+        </p>
+      )}
+      <div className="overview-inventory-summary" aria-label="Resumo financeiro do estoque">
         <div>
           <span>Valor estimado do estoque</span>
-          <strong>{money.format(Number(stats.inventoryValue || 0))}</strong>
-          <p>{stats.total || vehicles.length} veículos ativos na operação</p>
+          <strong>{data ? money.format(Number(stats.inventoryValue || 0)) : '—'}</strong>
+          <small>
+            {total} {total === 1 ? 'veículo ativo' : 'veículos ativos'} na operação
+          </small>
         </div>
-        <div className="hero-score">
-          <strong>
-            {stats.total
-              ? Math.round((Number(stats.published || 0) / Number(stats.total)) * 100)
-              : 0}
-            %
-          </strong>
-          <span>do estoque publicado</span>
+        <div className="overview-publication-progress">
+          <div>
+            <strong>{publishedPercent}%</strong>
+            <span>do estoque publicado</span>
+          </div>
+          <div
+            className="overview-progress-track"
+            role="progressbar"
+            aria-label="Porcentagem do estoque publicado"
+            aria-valuenow={publishedPercent}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <span style={{ width: `${publishedPercent}%` }} />
+          </div>
         </div>
       </div>
       <div className="stats overview-stats">
@@ -373,9 +407,20 @@ export function OverviewView({
           </div>
         </article>
       </div>
-      <OperationalHealth api={api} />
-      <InterventionCenter api={api} canManage={canManage} navigate={navigate} />
-      <SchedulingInsights api={api} />
+      <OverviewPriorities
+        api={api}
+        vehicles={vehicles}
+        navigate={navigate}
+        onOpenMonitoring={() => {
+          setMonitoringOpen(true)
+          document.getElementById('overview-monitoring')?.scrollIntoView({
+            behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+              ? 'instant'
+              : 'smooth',
+            block: 'start',
+          })
+        }}
+      />
       <div className="overview-grid">
         <article className="module-card">
           <div className="module-head">
@@ -444,6 +489,29 @@ export function OverviewView({
           </button>
         </article>
       </div>
+      <details
+        id="overview-monitoring"
+        className="overview-monitoring"
+        open={monitoringOpen}
+        onToggle={(event) => setMonitoringOpen(event.currentTarget.open)}
+      >
+        <summary>
+          <span>
+            <strong>Monitoramento e diagnósticos</strong>
+            <small>Saúde da operação, intervenções e histórico de agendamentos</small>
+          </span>
+          <span className="overview-monitoring-hint">
+            {monitoringOpen ? 'Ocultar detalhes' : 'Ver detalhes'}
+          </span>
+        </summary>
+        {monitoringOpen && (
+          <div className="overview-monitoring-content">
+            <OperationalHealth api={api} />
+            <InterventionCenter api={api} canManage={canManage} navigate={navigate} />
+            <SchedulingInsights api={api} />
+          </div>
+        )}
+      </details>
     </section>
   )
 }
