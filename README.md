@@ -22,6 +22,28 @@ O login aceita por padrão até 5 tentativas por conta/endereço e 30 tentativas
 
 O comando `npm run dev` inicia o painel em `http://localhost:5173` e a API em `http://127.0.0.1:3333`.
 
+### Se o login não funcionar no Windows
+
+Se o painel abrir, mas o login com senha e o Google falharem ao mesmo tempo, confirme
+que a API está ativa. Abra **outro PowerShell**, na pasta do projeto, e execute:
+
+```powershell
+npm run doctor
+Invoke-RestMethod http://127.0.0.1:3333/health/ready
+```
+
+O diagnóstico **não exibe senhas, tokens ou chaves**. Se a porta 3333 estiver inacessível,
+confira o terminal `[API]` iniciado pelo `npm run dev`, onde aparecerá o motivo da falha.
+As configurações `AUTH_SECRET=...`, `INITIAL_ADMIN_EMAIL=...` e similares pertencem ao
+arquivo `.env`, **não são comandos do PowerShell**. Para editá-lo use `notepad .env`,
+salve e reinicie `npm run dev`.
+
+`INITIAL_ADMIN_EMAIL` e `INITIAL_ADMIN_PASSWORD` só criam o primeiro administrador
+**quando o banco está vazio**. Alterá-los depois não redefine uma conta existente.
+O Google também exige `GOOGLE_CLIENT_ID` de um aplicativo web válido com
+origem `http://localhost:5173`; após configurar, reinicie a API. Para experimentar
+sem comprometer o banco normal, defina `DATA_DIR=./data-teste` no `.env`.
+
 ## Entrar com Google
 
 O painel também oferece **Entrar com Google** quando `GOOGLE_CLIENT_ID` está configurado.
