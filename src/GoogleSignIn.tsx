@@ -1,21 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { loadGoogleIdentity } from './google-identity'
+import { authFetch } from './auth-api'
 
 type LinkRequest = { linkRequired: true; linkToken: string; email: string }
 type LoginResult = { token: string } | LinkRequest
 
 async function googleRequest<T>(apiUrl: string, path: string, body?: object, signal?: AbortSignal) {
-  const response = await fetch(`${apiUrl}/auth/google${path}`, {
+  return authFetch<T>(`${apiUrl}/auth/google${path}`, {
     method: body ? 'POST' : 'GET',
     ...(body
       ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
       : {}),
     signal: signal || AbortSignal.timeout(20000),
-    cache: 'no-store',
   })
-  const data = await response.json()
-  if (!response.ok) throw new Error(data.error || 'Não foi possível entrar com Google.')
-  return data as T
 }
 
 export default function GoogleSignIn({

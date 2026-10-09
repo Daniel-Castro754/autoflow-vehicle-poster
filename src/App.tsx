@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import GoogleSignIn from './GoogleSignIn'
+import { authFetch } from './auth-api'
 import {
   BarChart3,
   Bell,
@@ -486,13 +487,13 @@ export default function App() {
     setLoading(true)
     const form = new FormData(e.currentTarget)
     try {
-      const response = await fetch(`${API}/auth/login`, {
+      const data = await authFetch<{ token: string }>(`${API}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: form.get('email'), password: form.get('password') }),
       })
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.error)
+      if (typeof data.token !== 'string' || !data.token)
+        throw new Error('A API não retornou uma sessão válida. Confira o servidor local.')
       localStorage.setItem('autoflow_token', data.token)
       setToken(data.token)
     } catch (error) {
