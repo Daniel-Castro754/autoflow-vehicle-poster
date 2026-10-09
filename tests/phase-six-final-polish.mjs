@@ -36,7 +36,7 @@ for (const part of [
   "aria-current={active === label ? 'page' : undefined}",
   "window.matchMedia('(min-width: 901px)')",
   "event.key === 'Escape'",
-  'mobileMenuButtonRef.current?.focus()',
+  'opener?.focus()',
   'aria-label="Fechar menu"',
   'aria-label="Sair da conta"',
   'role="status" aria-live="polite"',
