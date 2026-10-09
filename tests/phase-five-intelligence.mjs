@@ -62,7 +62,9 @@ try {
   await fail(() => anonymous('/operations/scheduling-insights'), 401)
   assert.equal((await admin('/operations/scheduling-insights')).eligible, false)
 
-  const stockBeforePreview = db.prepare('SELECT COUNT(*) n FROM vehicles WHERE organization_id=?').get(org).n
+  const stockBeforePreview = db
+    .prepare('SELECT COUNT(*) n FROM vehicles WHERE organization_id=?')
+    .get(org).n
   const pre = await requestImport(admin, first, { dryRun: true })
   assert.equal(pre.created, 1)
   assert.match(pre.previewDigest, /^[a-f0-9]{64}$/)
