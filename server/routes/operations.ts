@@ -27,7 +27,13 @@ export function handleOperationsRoute(
       }))
       .sort((a, b) => b.score - a.score || b.samples - a.samples)
       .slice(0, 5)
-      .map(({ score: _score, ...hour }) => hour)
+      .map((hour) => ({
+        dayOfWeek: hour.dayOfWeek,
+        hour: hour.hour,
+        samples: hour.samples,
+        completions: hour.completions,
+        observedRate: hour.observedRate,
+      }))
     res.setHeader('Cache-Control', 'no-store')
     send(res, 200, {
       eligible: totalSamples >= 20 && ranked.length > 0,
