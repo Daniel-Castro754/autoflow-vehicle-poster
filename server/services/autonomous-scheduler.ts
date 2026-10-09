@@ -2,9 +2,20 @@ import type { DatabaseSync } from 'node:sqlite'
 import { runAutopilotPipeline } from './ai-agent.ts'
 import { logger } from '../lib/logger.ts'
 
+// Keep AI provider/network pressure bounded while allowing independent tenants to progress.
+// Per-tenant exclusivity is enforced by the persisted coordinator lease.
+export function boundedAutopilotConcurrency(value: unknown): number {
+  const number = Number(value)
+  return Number.isInteger(number) && number >= 1 ? Math.min(number, 4) : 3
+}
+
 export function createAutonomousScheduler(
   db: DatabaseSync,
-  { intervalMs = 30_000, run = runAutopilotPipeline } = {},
+  {
+    intervalMs = 30_000,
+    run = runAutopilotPipeline,
+    maxConcurrentOrganizations = boundedAutopilotConcurrency(process.env.AUTOPILOT_MAX_PARALLEL_ORGS || 3),
+  } = {},
 ) {
   let timer: ReturnType<typeof setInterval> | undefined
   let running = false
@@ -22,17 +33,28 @@ export function createAutonomousScheduler(
         ORDER BY COALESCE(a.next_run_at,'') ASC,s.organization_id`,
         )
         .all() as Array<{ id: number }>
-      for (const org of organizations) {
-        if (stopped) break
-        try {
-          await run(db, org.id, null, { automatic: true })
-        } catch (error) {
-          logger.error('AutonomousScheduler', 'Falha na rodada de agendamento', {
-            organizationId: org.id,
-            error,
-          })
+      // Fixed-size pool: a slow AI request in one tenant must not stall all others.
+      // No whole-pipeline automatic retry here: a failed run might already have created jobs.
+      let nextIndex = 0
+      const work = async () => {
+        while (!stopped) {
+          const org = organizations[nextIndex++]
+          if (!org) break
+          try {
+            await run(db, org.id, null, { automatic: true })
+          } catch (error) {
+            logger.error('AutonomousScheduler', 'Falha na rodada de agendamento', {
+              organizationId: org.id,
+              error,
+            })
+          }
         }
       }
+      const parallelism = Math.min(
+        organizations.length,
+        boundedAutopilotConcurrency(maxConcurrentOrganizations),
+      )
+      await Promise.all(Array.from({ length: parallelism }, () => work()))
     } catch (error) {
       logger.error('AutonomousScheduler', 'Falha na consulta de organizações', { error })
     } finally {
