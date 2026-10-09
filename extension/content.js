@@ -558,7 +558,9 @@
     // Never resume blindly or let auto-publish treat a partial previous upload as verified.
     if (!state && initial > 0)
       throw Object.assign(
-        new Error('Fotos já presentes sem identificação verificável. Revise o formulário antes de publicar.'),
+        new Error(
+          'Fotos já presentes sem identificação verificável. Revise o formulário antes de publicar.',
+        ),
         { failureCode: 'photo_identity_unverified' },
       )
     if (initial >= target.length) return initial

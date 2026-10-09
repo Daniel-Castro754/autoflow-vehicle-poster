@@ -11,7 +11,9 @@ import {
 
 const deferred = () => {
   let resolve
-  const promise = new Promise((done) => { resolve = done })
+  const promise = new Promise((done) => {
+    resolve = done
+  })
   return { promise, resolve }
 }
 
@@ -50,7 +52,6 @@ assert.deepEqual(classifyExtensionFailure('fake_timeout_exploit'), {
 })
 assert.deepEqual(classifyExtensionFailure(''), classifyExtensionFailure('unknown'))
 
-
 // Independent organizations can advance even if the first has a slow AI call.
 const db = new DatabaseSync(':memory:')
 db.exec(`
@@ -78,13 +79,24 @@ try {
       if (organizationId === 3) thirdEntered.resolve()
       // Resolve other organizations rapidly; the pool should keep draining.
       running--
-      return { ok: true, processedCount: 0, jobsCreated: 0, descriptionsOptimized: 0, assignments: [], message: 'test' }
+      return {
+        ok: true,
+        processedCount: 0,
+        jobsCreated: 0,
+        descriptionsOptimized: 0,
+        assignments: [],
+        message: 'test',
+      }
     },
   })
   const sweep = scheduler.sweep()
   await firstEntered.promise
   await thirdEntered.promise
-  assert.deepEqual(started.slice(0, 3), [1, 2, 3], 'A second lane must run other tenants while the first is blocked')
+  assert.deepEqual(
+    started.slice(0, 3),
+    [1, 2, 3],
+    'A second lane must run other tenants while the first is blocked',
+  )
   await scheduler.sweep()
   assert(peak <= 2, 'The bounded pool must never exceed the configured concurrency')
   firstRelease.resolve()
@@ -101,7 +113,14 @@ try {
     run: async (_database, organizationId) => {
       failures.push(organizationId)
       if (organizationId === 1) throw new Error('provider outage in one tenant')
-      return { ok: true, processedCount: 0, jobsCreated: 0, descriptionsOptimized: 0, assignments: [], message: 'test' }
+      return {
+        ok: true,
+        processedCount: 0,
+        jobsCreated: 0,
+        descriptionsOptimized: 0,
+        assignments: [],
+        message: 'test',
+      }
     },
   })
   await resilient.sweep()
@@ -117,7 +136,14 @@ try {
       peakCapped = Math.max(peakCapped, concurrent)
       await new Promise((resolve) => setImmediate(resolve))
       concurrent--
-      return { ok: true, processedCount: 0, jobsCreated: 0, descriptionsOptimized: 0, assignments: [], message: 'test' }
+      return {
+        ok: true,
+        processedCount: 0,
+        jobsCreated: 0,
+        descriptionsOptimized: 0,
+        assignments: [],
+        message: 'test',
+      }
     },
   })
   await capped.sweep()

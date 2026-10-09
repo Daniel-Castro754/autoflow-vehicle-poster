@@ -14,7 +14,9 @@ export function createAutonomousScheduler(
   {
     intervalMs = 30_000,
     run = runAutopilotPipeline,
-    maxConcurrentOrganizations = boundedAutopilotConcurrency(process.env.AUTOPILOT_MAX_PARALLEL_ORGS || 3),
+    maxConcurrentOrganizations = boundedAutopilotConcurrency(
+      process.env.AUTOPILOT_MAX_PARALLEL_ORGS || 3,
+    ),
   } = {},
 ) {
   let timer: ReturnType<typeof setInterval> | undefined

@@ -14,17 +14,17 @@ O worker mantém um pool **limitado de organizações em paralelo**. Padrão: 3,
 
 Somente códigos explícitos permitidos são elegíveis para auto-retry **quando ainda não existe evidência de tentativa de publicação** e a organização habilitou a política:
 
-| Código | Categoria | Ação |
-| --- | --- | --- |
-| `marketplace_form_timeout` | Transitório | Retry com backoff e orçamento existente |
-| `marketplace_navigation_timeout` | Transitório | Retry com backoff e orçamento existente |
-| `facebook_auth_required` | Autenticação | Intervenção manual |
-| `facebook_checkpoint_required` | Autenticação | Intervenção manual |
-| `photo_identity_unverified` | Segurança | Revisão manual |
-| `selector_layout_drift` | Segurança | Revisão manual |
-| `publish_outcome_unknown` | Segurança | Confirmação manual no Facebook |
-| `vehicle_data_invalid` | Validação | Corrigir cadastro, sem retry |
-| Código ausente ou desconhecido | Desconhecido | Sem auto-retry |
+| Código                           | Categoria    | Ação                                    |
+| -------------------------------- | ------------ | --------------------------------------- |
+| `marketplace_form_timeout`       | Transitório  | Retry com backoff e orçamento existente |
+| `marketplace_navigation_timeout` | Transitório  | Retry com backoff e orçamento existente |
+| `facebook_auth_required`         | Autenticação | Intervenção manual                      |
+| `facebook_checkpoint_required`   | Autenticação | Intervenção manual                      |
+| `photo_identity_unverified`      | Segurança    | Revisão manual                          |
+| `selector_layout_drift`          | Segurança    | Revisão manual                          |
+| `publish_outcome_unknown`        | Segurança    | Confirmação manual no Facebook          |
+| `vehicle_data_invalid`           | Validação    | Corrigir cadastro, sem retry            |
+| Código ausente ou desconhecido   | Desconhecido | Sem auto-retry                          |
 
 O evento `auto_retry_scheduled` registra categoria e tratamento adotado. O evento `fill_error` informa se precisa de intervenção. No retorno da API, o cliente também recebe `failureCategory` e, quando não houve retry, `requiresIntervention`.
 
