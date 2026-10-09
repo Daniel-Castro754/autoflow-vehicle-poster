@@ -208,6 +208,20 @@ async function runConsumer(queue, network = {}) {
   )
 }
 
+{
+  const blocked = await runConsumer(
+    { jobs: [{ jobId: 22, jobStatus: 'pending', locked: false }] },
+    { marketplaceReady: false, marketplaceBlocked: true },
+  )
+  assert.equal(
+    blocked.requests.some((request) => request.url.includes('/prepare')),
+    false,
+    'A login challenge must not reserve a job',
+  )
+  assert.equal(blocked.stored.autoRun, false)
+  assert.equal(blocked.stored.facebookSession.ready, false)
+}
+
 console.log('✓ Queue consumer ignores non-retryable errors and uncertain publications.')
 
 {
