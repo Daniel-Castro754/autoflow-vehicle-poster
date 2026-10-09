@@ -26,6 +26,7 @@ import {
   X,
 } from 'lucide-react'
 import { OverviewView, PublicationsView, ReportsView, SettingsView } from './Views'
+import { calculateTeamSummary } from './management-metrics'
 import VehiclesView, { type VehicleRecord } from './Vehicles'
 import { AiCenterView } from './AiCenterView'
 
@@ -834,11 +835,10 @@ function TeamView({
   onSetAccountAutomation: (account: SocialAccount, paused: boolean) => Promise<void>
 }) {
   const [modal, setModal] = useState<'user' | 'account' | null>(null)
-  const activeMembers = team.filter((user) => user.active === 1).length
-  const pausedProfiles = accounts.filter((account) => account.automationPaused).length
-  const unassignedProfiles = accounts.filter(
-    (account) => !team.some((user) => user.id === account.userId && user.active === 1),
-  ).length
+  const { activeMembers, pausedProfiles, unassignedProfiles } = calculateTeamSummary(
+    team,
+    accounts,
+  )
   return (
     <section className="content team-page">
       <div className="title-row">
