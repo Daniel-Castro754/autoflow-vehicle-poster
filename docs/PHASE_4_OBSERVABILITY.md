@@ -31,12 +31,12 @@ incerta não podem ser encerradas enquanto o trabalho estiver
 
 Todos os endpoints exigem sessão válida e estão isolados por `organization_id`.
 
-| Endpoint | Finalidade |
-| --- | --- |
-| `GET /api/operations/incidents?status=active&limit=30` | Fila de ocorrências, prioridades e totais |
-| `GET /api/operations/incidents/:id/history` | Histórico de reconhecimento e resolução |
-| `GET /api/operations/activity?limit=30&beforeId=...` | Linha do tempo de eventos, com filtro `jobId` |
-| `PATCH /api/operations/incidents/:id` | `{"action":"acknowledge"}` ou `{"action":"resolve"}` |
+| Endpoint                                               | Finalidade                                           |
+| ------------------------------------------------------ | ---------------------------------------------------- |
+| `GET /api/operations/incidents?status=active&limit=30` | Fila de ocorrências, prioridades e totais            |
+| `GET /api/operations/incidents/:id/history`            | Histórico de reconhecimento e resolução              |
+| `GET /api/operations/activity?limit=30&beforeId=...`   | Linha do tempo de eventos, com filtro `jobId`        |
+| `PATCH /api/operations/incidents/:id`                  | `{"action":"acknowledge"}` ou `{"action":"resolve"}` |
 
 Somente administradores podem reconhecer ou encerrar. A leitura segue o
 escopo organizacional do painel existente. Resultados têm `Cache-Control: no-store`,

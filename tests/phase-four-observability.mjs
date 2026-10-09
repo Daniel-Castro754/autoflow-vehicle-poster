@@ -17,23 +17,29 @@ const login = async (email) => {
 }
 const insertVehicle = (organizationId, n) =>
   Number(
-    db.prepare(
-      "INSERT INTO vehicles(organization_id,year,make,model,status) VALUES (?,2022,'Toyota',?,'Pronto')",
-    ).run(organizationId, `Modelo ${n}`).lastInsertRowid,
+    db
+      .prepare(
+        "INSERT INTO vehicles(organization_id,year,make,model,status) VALUES (?,2022,'Toyota',?,'Pronto')",
+      )
+      .run(organizationId, `Modelo ${n}`).lastInsertRowid,
   )
 const insertJob = (organizationId, vehicleId, status) =>
   Number(
-    db.prepare(
-      'INSERT INTO publication_jobs (organization_id,vehicle_id,status) VALUES (?,?,?)',
-    ).run(organizationId, vehicleId, status).lastInsertRowid,
+    db
+      .prepare('INSERT INTO publication_jobs (organization_id,vehicle_id,status) VALUES (?,?,?)')
+      .run(organizationId, vehicleId, status).lastInsertRowid,
   )
 
 try {
-  const primary = db.prepare('SELECT id,organization_id organizationId,password_hash passwordHash FROM users WHERE email=?')
+  const primary = db
+    .prepare(
+      'SELECT id,organization_id organizationId,password_hash passwordHash FROM users WHERE email=?',
+    )
     .get(server.email)
   const orgId = primary.organizationId
   const otherOrgId = Number(
-    db.prepare("INSERT INTO organizations(name) VALUES ('Outra organização')").run().lastInsertRowid,
+    db.prepare("INSERT INTO organizations(name) VALUES ('Outra organização')").run()
+      .lastInsertRowid,
   )
   db.prepare(
     "INSERT INTO users(organization_id,name,email,password_hash,role) VALUES (?,?,?,?, 'admin')",
@@ -59,20 +65,29 @@ try {
   assert.equal((await seller('/operations/incidents')).incidents.length, 1)
 
   const incidentId = list.incidents[0].id
+  await denies(() => external(`/operations/incidents/${incidentId}/history`), 404)
   await denies(
-    () => external(`/operations/incidents/${incidentId}/history`),
+    () =>
+      external(`/operations/incidents/${incidentId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ action: 'acknowledge' }),
+      }),
     404,
   )
   await denies(
-    () => external(`/operations/incidents/${incidentId}`, { method: 'PATCH', body: JSON.stringify({ action: 'acknowledge' }) }),
-    404,
-  )
-  await denies(
-    () => seller(`/operations/incidents/${incidentId}`, { method: 'PATCH', body: JSON.stringify({ action: 'acknowledge' }) }),
+    () =>
+      seller(`/operations/incidents/${incidentId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ action: 'acknowledge' }),
+      }),
     403,
   )
   await denies(
-    () => admin(`/operations/incidents/${incidentId}`, { method: 'PATCH', body: JSON.stringify({ action: 'nonsense' }) }),
+    () =>
+      admin(`/operations/incidents/${incidentId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ action: 'nonsense' }),
+      }),
     400,
   )
   const acknowledged = await admin(`/operations/incidents/${incidentId}`, {
@@ -86,7 +101,12 @@ try {
   })
   assert.equal(repeat.idempotent, true)
   assert.equal((await admin('/operations/incidents')).totals.acknowledged, 1)
-  assert.equal((await admin(`/operations/incidents/${incidentId}/history`)).history.filter((h) => h.action === 'acknowledged').length, 1)
+  assert.equal(
+    (await admin(`/operations/incidents/${incidentId}/history`)).history.filter(
+      (h) => h.action === 'acknowledged',
+    ).length,
+    1,
+  )
 
   // A possible Facebook publish must not be dismissed as a UI-only alert.
   const uncertainJob = insertJob(orgId, insertVehicle(orgId, 3), 'awaiting_confirmation')
@@ -95,21 +115,31 @@ try {
   const uncertain = list.incidents.find((i) => i.jobId === uncertainJob)
   assert.equal(uncertain.severity, 'critical')
   await denies(
-    () => admin(`/operations/incidents/${uncertain.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ action: 'resolve' }),
-    }),
+    () =>
+      admin(`/operations/incidents/${uncertain.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ action: 'resolve' }),
+      }),
     409,
   )
   await admin(`/operations/incidents/${uncertain.id}`, {
     method: 'PATCH',
     body: JSON.stringify({ action: 'acknowledge' }),
   })
-  assert.equal(db.prepare('SELECT status FROM publication_jobs WHERE id=?').get(uncertainJob).status, 'awaiting_confirmation')
+  assert.equal(
+    db.prepare('SELECT status FROM publication_jobs WHERE id=?').get(uncertainJob).status,
+    'awaiting_confirmation',
+  )
   db.prepare("UPDATE publication_jobs SET status='completed' WHERE id=?").run(uncertainJob)
   recordOperationalSignal(db, orgId, uncertainJob, 'confirmed_published')
-  assert.equal(db.prepare('SELECT status FROM operational_incidents WHERE id=?').get(uncertain.id).status, 'resolved')
-  assert.equal((await admin(`/operations/incidents/${uncertain.id}/history`)).history[0].action, 'auto_resolved')
+  assert.equal(
+    db.prepare('SELECT status FROM operational_incidents WHERE id=?').get(uncertain.id).status,
+    'resolved',
+  )
+  assert.equal(
+    (await admin(`/operations/incidents/${uncertain.id}/history`)).history[0].action,
+    'auto_resolved',
+  )
 
   const resolved = await admin(`/operations/incidents/${incidentId}`, {
     method: 'PATCH',
@@ -117,13 +147,25 @@ try {
   })
   assert.equal(resolved.status, 'resolved')
   recordOperationalSignal(db, orgId, jobId, 'fill_error', { error: 'Voltou a ocorrer' })
-  assert.equal(db.prepare('SELECT status,occurrence_count count FROM operational_incidents WHERE id=?').get(incidentId).status, 'open')
-  assert.equal((await admin(`/operations/incidents/${incidentId}/history`)).history[0].action, 'reopened')
+  assert.equal(
+    db
+      .prepare('SELECT status,occurrence_count count FROM operational_incidents WHERE id=?')
+      .get(incidentId).status,
+    'open',
+  )
+  assert.equal(
+    (await admin(`/operations/incidents/${incidentId}/history`)).history[0].action,
+    'reopened',
+  )
 
   const slowJob = insertJob(orgId, insertVehicle(orgId, 4), 'filling')
   recordOperationalSignal(db, orgId, slowJob, 'job_nearly_stuck')
   recordOperationalSignal(db, orgId, slowJob, 'stalled_recovered')
-  const slow = db.prepare("SELECT status FROM operational_incidents WHERE organization_id=? AND publication_job_id=? AND kind='slow_execution'").get(orgId, slowJob)
+  const slow = db
+    .prepare(
+      "SELECT status FROM operational_incidents WHERE organization_id=? AND publication_job_id=? AND kind='slow_execution'",
+    )
+    .get(orgId, slowJob)
   assert.equal(slow.status, 'resolved')
 
   db.prepare(
@@ -141,7 +183,9 @@ try {
     (await admin(`/operations/activity?jobId=${jobId}`)).activity.every((e) => e.jobId === jobId),
     true,
   )
-  console.log('✓ Phase 4: persistent incidents, dedup/reopen, RBAC, isolation, audit and publish safety')
+  console.log(
+    '✓ Phase 4: persistent incidents, dedup/reopen, RBAC, isolation, audit and publish safety',
+  )
 } finally {
   db.close()
   await server.close()

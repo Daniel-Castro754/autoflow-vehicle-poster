@@ -70,7 +70,11 @@ export function recordOperationalSignal(
     resolveJobIncidents(db, organizationId, jobId, eventType)
     return
   }
-  if (eventType === 'auto_retry_scheduled' || eventType === 'retry_requested' || eventType === 'stalled_recovered') {
+  if (
+    eventType === 'auto_retry_scheduled' ||
+    eventType === 'retry_requested' ||
+    eventType === 'stalled_recovered'
+  ) {
     const kinds: IncidentKind[] = ['execution_error', 'slow_execution']
     // Manual reset to pending is only allowed after the operator confirms that
     // Facebook did NOT publish; in that case the uncertain-result alert is resolved.

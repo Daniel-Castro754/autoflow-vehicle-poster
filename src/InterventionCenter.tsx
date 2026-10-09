@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, CheckCircle2, ChevronDown, ClipboardCheck, History, RefreshCcw } from 'lucide-react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  ClipboardCheck,
+  History,
+  RefreshCcw,
+} from 'lucide-react'
 import './InterventionCenter.css'
 
 type Api = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
@@ -99,7 +106,9 @@ export function InterventionCenter({
         }
       } catch (error) {
         if (mounted)
-          setMessage(error instanceof Error ? error.message : 'Não foi possível carregar a central.')
+          setMessage(
+            error instanceof Error ? error.message : 'Não foi possível carregar a central.',
+          )
       } finally {
         busy = false
       }
@@ -120,9 +129,7 @@ export function InterventionCenter({
     setSelected(id)
     setHistory([])
     try {
-      const result = await api<{ history: IncidentAction[] }>(
-        `/operations/incidents/${id}/history`,
-      )
+      const result = await api<{ history: IncidentAction[] }>(`/operations/incidents/${id}/history`)
       setHistory(result.history)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Não foi possível abrir o histórico.')
@@ -170,14 +177,30 @@ export function InterventionCenter({
         </button>
       </div>
       <div className="intervention-stats">
-        <div><strong>{data?.totals.open ?? '—'}</strong><span>Novas</span></div>
-        <div><strong>{data?.totals.acknowledged ?? '—'}</strong><span>Reconhecidas</span></div>
-        <div><strong>{data?.totals.critical ?? '—'}</strong><span>Críticas ativas</span></div>
-        <div><strong>{data?.totals.resolved ?? '—'}</strong><span>Encerradas</span></div>
+        <div>
+          <strong>{data?.totals.open ?? '—'}</strong>
+          <span>Novas</span>
+        </div>
+        <div>
+          <strong>{data?.totals.acknowledged ?? '—'}</strong>
+          <span>Reconhecidas</span>
+        </div>
+        <div>
+          <strong>{data?.totals.critical ?? '—'}</strong>
+          <span>Críticas ativas</span>
+        </div>
+        <div>
+          <strong>{data?.totals.resolved ?? '—'}</strong>
+          <span>Encerradas</span>
+        </div>
       </div>
       <div className="intervention-filter">
         <label htmlFor="intervention-status">Situação</label>
-        <select id="intervention-status" value={status} onChange={(event) => setStatus(event.target.value)}>
+        <select
+          id="intervention-status"
+          value={status}
+          onChange={(event) => setStatus(event.target.value)}
+        >
           <option value="active">Pendentes</option>
           <option value="open">Novas</option>
           <option value="acknowledged">Reconhecidas</option>
@@ -185,34 +208,78 @@ export function InterventionCenter({
           <option value="all">Todas</option>
         </select>
       </div>
-      {message && <p className="intervention-message" role="status">{message}</p>}
+      {message && (
+        <p className="intervention-message" role="status">
+          {message}
+        </p>
+      )}
       <div className="intervention-list">
         {data?.incidents.map((incident) => (
           <article key={incident.id} className="intervention-item">
             <div className="intervention-main">
-              <span className={incident.severity === 'critical' ? 'intervention-icon critical' : 'intervention-icon warning'}>
-                {incident.severity === 'critical' ? <AlertTriangle size={18} /> : <ClipboardCheck size={18} />}
+              <span
+                className={
+                  incident.severity === 'critical'
+                    ? 'intervention-icon critical'
+                    : 'intervention-icon warning'
+                }
+              >
+                {incident.severity === 'critical' ? (
+                  <AlertTriangle size={18} />
+                ) : (
+                  <ClipboardCheck size={18} />
+                )}
               </span>
               <div className="intervention-detail">
-                <strong>{labels[incident.kind] || incident.kind} · #{incident.jobId}</strong>
-                <small>{incident.vehicleTitle} · {incident.accountLabel}</small>
+                <strong>
+                  {labels[incident.kind] || incident.kind} · #{incident.jobId}
+                </strong>
+                <small>
+                  {incident.vehicleTitle} · {incident.accountLabel}
+                </small>
                 <p>{incident.summary}</p>
-                <small>{dateTime(incident.lastSeenAt)} · {incident.occurrenceCount} ocorrência(s) · {incident.status === 'resolved' ? 'Encerrada' : incident.status === 'acknowledged' ? 'Reconhecida' : 'Nova'}</small>
+                <small>
+                  {dateTime(incident.lastSeenAt)} · {incident.occurrenceCount} ocorrência(s) ·{' '}
+                  {incident.status === 'resolved'
+                    ? 'Encerrada'
+                    : incident.status === 'acknowledged'
+                      ? 'Reconhecida'
+                      : 'Nova'}
+                </small>
               </div>
             </div>
             <div className="intervention-actions">
-              <button type="button" onClick={() => navigate('Publicações')}>Abrir publicações</button>
+              <button type="button" onClick={() => navigate('Publicações')}>
+                Abrir publicações
+              </button>
               {canManage && incident.status === 'open' && (
-                <button type="button" disabled={busyId !== null} onClick={() => void act(incident, 'acknowledge')}>
+                <button
+                  type="button"
+                  disabled={busyId !== null}
+                  onClick={() => void act(incident, 'acknowledge')}
+                >
                   <ClipboardCheck size={14} /> Reconhecer
                 </button>
               )}
               {canManage && incident.status !== 'resolved' && (
-                <button type="button" disabled={busyId !== null || (incident.kind === 'publication_uncertain' && incident.jobStatus === 'awaiting_confirmation')} title="Ocorrências de publicação incerta só podem ser encerradas após a confirmação em Publicações" onClick={() => void act(incident, 'resolve')}>
+                <button
+                  type="button"
+                  disabled={
+                    busyId !== null ||
+                    (incident.kind === 'publication_uncertain' &&
+                      incident.jobStatus === 'awaiting_confirmation')
+                  }
+                  title="Ocorrências de publicação incerta só podem ser encerradas após a confirmação em Publicações"
+                  onClick={() => void act(incident, 'resolve')}
+                >
                   <CheckCircle2 size={14} /> Encerrar
                 </button>
               )}
-              <button type="button" onClick={() => void showHistory(incident.id)} aria-expanded={selected === incident.id}>
+              <button
+                type="button"
+                onClick={() => void showHistory(incident.id)}
+                aria-expanded={selected === incident.id}
+              >
                 <History size={14} /> Histórico <ChevronDown size={13} />
               </button>
             </div>
@@ -221,7 +288,10 @@ export function InterventionCenter({
                 {history.map((entry) => (
                   <li key={entry.id}>
                     <strong>{labels[entry.action] || entry.action}</strong>
-                    <span>{dateTime(entry.createdAt)} · {entry.actorName || 'Sistema'}{entry.note ? ` · ${entry.note}` : ''}</span>
+                    <span>
+                      {dateTime(entry.createdAt)} · {entry.actorName || 'Sistema'}
+                      {entry.note ? ` · ${entry.note}` : ''}
+                    </span>
                   </li>
                 ))}
                 {!history.length && <li>Carregando ou sem registros.</li>}
@@ -239,7 +309,9 @@ export function InterventionCenter({
         {activity.map((entry) => (
           <div key={entry.id}>
             <span>{dateTime(entry.createdAt)}</span>
-            <strong>#{entry.jobId} · {entry.vehicleTitle}</strong>
+            <strong>
+              #{entry.jobId} · {entry.vehicleTitle}
+            </strong>
             <code>{entry.eventType.replaceAll('_', ' ')}</code>
           </div>
         ))}
