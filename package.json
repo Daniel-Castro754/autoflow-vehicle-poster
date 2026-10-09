@@ -23,7 +23,7 @@
     "test:phase-one": "node --import=./tests/helpers/offline.mjs tests/phase-one-integrity.mjs",
     "test:backup": "node --import=./tests/helpers/offline.mjs tests/backup.mjs",
     "backup": "node scripts/backup.mjs",
-    "test": "npm run test:stock && npm run test:queue && npm run test:autonomous && npm run test:extension-consumer && npm run test:backup && npm run test:publish-safety && npm run test:audit && npm run test:fipe && npm run test:timezone && npm run test:sessions && npm run test:extension-resilience && npm run test:operations && npm run test:selector-config && npm run test:vehicle-import && npm run test:selector-health && npm run test:google-auth && npm run test:phase-one && npm run test:extension-session && npm run test:orchestration && npm run test:observability && npm run test:intelligence",
+    "test": "npm run test:stock && npm run test:queue && npm run test:autonomous && npm run test:extension-consumer && npm run test:backup && npm run test:publish-safety && npm run test:audit && npm run test:fipe && npm run test:timezone && npm run test:sessions && npm run test:extension-resilience && npm run test:operations && npm run test:selector-config && npm run test:vehicle-import && npm run test:selector-health && npm run test:google-auth && npm run test:phase-one && npm run test:extension-session && npm run test:orchestration && npm run test:observability && npm run test:intelligence && npm run test:login-diagnostics",
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
@@ -39,7 +39,9 @@
     "test:selector-config": "node tests/selector-config.mjs",
     "test:vehicle-import": "node tests/vehicle-import.mjs",
     "test:selector-health": "node tests/selector-health.mjs",
-    "test:google-auth": "node --import=./tests/helpers/offline.mjs tests/google-auth.mjs"
+    "test:google-auth": "node --import=./tests/helpers/offline.mjs tests/google-auth.mjs",
+    "test:login-diagnostics": "node --import=./tests/helpers/offline.mjs tests/login-diagnostics.mjs",
+    "doctor": "node --env-file-if-exists=.env scripts/doctor.mjs"
   },
   "dependencies": {
     "google-auth-library": "^11.2.0",
