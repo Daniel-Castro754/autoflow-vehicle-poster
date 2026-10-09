@@ -3252,6 +3252,24 @@ export function SettingsView({
     [aiProvider, setAiProvider] = useState('auto')
   const [testingKey, setTestingKey] = useState<'gemini' | 'openai' | null>(null),
     [testKeyStatus, setTestKeyStatus] = useState('')
+  const [settingsSection, setSettingsSection] = useState('company')
+  const settingsSections = [
+    { id: 'company', label: 'Empresa', detail: 'Identificação e localização' },
+    { id: 'marketplace', label: 'Marketplace', detail: 'Grupos e publicações' },
+    { id: 'intelligence', label: 'Inteligência artificial', detail: 'Provedores e chaves' },
+    { id: 'notifications', label: 'Notificações', detail: 'Telegram e webhooks' },
+    { id: 'appearance', label: 'Aparência', detail: 'Tema da interface' },
+    { id: 'security', label: 'Segurança', detail: 'Políticas de sessão' },
+  ]
+  function jumpToSection(sectionId: string) {
+    setSettingsSection(sectionId)
+    document.getElementById(`settings-${sectionId}`)?.scrollIntoView({
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 'instant'
+        : 'smooth',
+      block: 'start',
+    })
+  }
 
   useEffect(() => {
     api<SettingsData>('/settings').then((result) => {
@@ -3429,8 +3447,29 @@ export function SettingsView({
           </button>
         </div>
       )}
+      <div className="settings-section-header">
+        <div>
+          <strong>Organize as configurações por assunto</strong>
+          <p>Use a navegação abaixo para localizar cada opção. As alterações só serão aplicadas quando você salvar.</p>
+        </div>
+        <span>{groups.filter((group) => group.active).length} grupos ativos</span>
+      </div>
+      <nav className="settings-section-nav" aria-label="Seções de configurações">
+        {settingsSections.map((section) => (
+          <button
+            key={section.id}
+            type="button"
+            className={settingsSection === section.id ? 'active' : ''}
+            aria-label={`Ir para ${section.label}`}
+            onClick={() => jumpToSection(section.id)}
+          >
+            <strong>{section.label}</strong>
+            <small>{section.detail}</small>
+          </button>
+        ))}
+      </nav>
       <form onSubmit={save}>
-        <article className="settings-card">
+        <article id="settings-company" className="settings-card">
           <div className="settings-icon">
             <Settings />
           </div>
@@ -3453,7 +3492,7 @@ export function SettingsView({
             </div>
           </div>
         </article>
-        <article className="settings-card">
+        <article id="settings-marketplace" className="settings-card">
           <div className="settings-icon">
             <Send />
           </div>
@@ -3761,7 +3800,7 @@ export function SettingsView({
             </label>
           </div>
         </article>
-        <article className="settings-card">
+        <article id="settings-intelligence" className="settings-card">
           <div className="settings-icon">
             <Bot />
           </div>
@@ -3880,7 +3919,7 @@ export function SettingsView({
             )}
           </div>
         </article>
-        <article className="settings-card">
+        <article id="settings-notifications" className="settings-card">
           <div className="settings-icon">
             <Bell />
           </div>
@@ -3897,6 +3936,8 @@ export function SettingsView({
                 </FieldLabel>
                 <input
                   name="alertTelegramToken"
+                  type="password"
+                  autoComplete="off"
                   value={alertTelegramToken}
                   onChange={(e) => setAlertTelegramToken(e.target.value)}
                   placeholder="123456:ABC-DEF..."
@@ -3943,7 +3984,7 @@ export function SettingsView({
             </div>
           </div>
         </article>
-        <article className="settings-card">
+        <article id="settings-appearance" className="settings-card">
           <div className="settings-icon">
             <Palette />
           </div>
@@ -3954,6 +3995,7 @@ export function SettingsView({
               <button
                 type="button"
                 className={theme === 'light' ? 'selected' : ''}
+                aria-pressed={theme === 'light'}
                 onClick={() => onThemeChange('light')}
               >
                 <span>
@@ -3968,6 +4010,7 @@ export function SettingsView({
               <button
                 type="button"
                 className={theme === 'dark' ? 'selected' : ''}
+                aria-pressed={theme === 'dark'}
                 onClick={() => onThemeChange('dark')}
               >
                 <span>
@@ -3982,7 +4025,7 @@ export function SettingsView({
             </div>
           </div>
         </article>
-        <article className="settings-card security-settings">
+        <article id="settings-security" className="settings-card security-settings">
           <div className="settings-icon">
             <ShieldCheck />
           </div>
@@ -4003,7 +4046,11 @@ export function SettingsView({
           </div>
         </article>
         <div className="settings-save">
-          <button className="primary">
+          <div className="settings-save-copy">
+            <strong>Aplicar alterações da organização</strong>
+            <small>As mudanças feitas em qualquer seção são salvas juntas.</small>
+          </div>
+          <button className="primary" type="submit">
             <Save size={17} />
             Salvar configurações
           </button>
