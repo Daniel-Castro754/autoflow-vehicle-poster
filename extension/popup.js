@@ -93,8 +93,17 @@ async function loadAccounts() {
   }
 }
 function updateProfileMeta(account) {
-  $('profileMeta').textContent =
-    `Perfil local: ${account.browserProfile || 'não informado'} · ${account.status === 'connected' ? 'conectado' : 'aguardando conexão'}`
+  const prefix = `Perfil local: ${account.browserProfile || 'não informado'}`
+  $('profileMeta').textContent = prefix + ' · Facebook: verificação pendente'
+  chrome.storage.local.get('facebookSession').then(({ facebookSession }) => {
+    if (activeAccountId !== account.id) return
+    if (facebookSession?.accountId !== account.id) return
+    $('profileMeta').textContent =
+      prefix +
+      (facebookSession.ready
+        ? ' · Facebook: formulário verificado'
+        : ` · Facebook: ${facebookSession.reason || 'requer revisão'}`)
+  })
 }
 function loadQueue() {
   const seq = ++loadQueueSeq
