@@ -557,8 +557,11 @@
     // After reload, a count alone does not prove the identity of existing photos.
     // Never resume blindly or let auto-publish treat a partial previous upload as verified.
     if (!state && initial > 0)
-      throw new Error(
-        'Fotos já presentes sem identificação verificável. Revise o formulário antes de publicar.',
+      throw Object.assign(
+        new Error(
+          'Fotos já presentes sem identificação verificável. Revise o formulário antes de publicar.',
+        ),
+        { failureCode: 'photo_identity_unverified' },
       )
     if (initial >= target.length) return initial
     if (!state) {
@@ -753,19 +756,29 @@
         ready: false,
         blocked: true,
         reason: 'Confirme a verificação de segurança do Facebook.',
+        failureCode: 'facebook_checkpoint_required',
       }
     if (
       document.querySelector('input[type="password"]') ||
       page.includes('entrar no facebook') ||
       page.includes('log in to facebook')
     )
-      return { ready: false, blocked: true, reason: 'Entre na sua conta do Facebook nesta aba.' }
+      return {
+        ready: false,
+        blocked: true,
+        reason: 'Entre na sua conta do Facebook nesta aba.',
+        failureCode: 'facebook_auth_required',
+      }
     const form = document.querySelector(
       'input[type="file"], [role="combobox"], textarea, [contenteditable="true"]',
     )
     return form
       ? { ready: true }
-      : { ready: false, reason: 'O formulário de veículo ainda não está disponível.' }
+      : {
+          ready: false,
+          reason: 'O formulário de veículo ainda não está disponível.',
+          failureCode: 'marketplace_form_timeout',
+        }
   }
 
   function marketplaceStage() {
@@ -1355,7 +1368,10 @@
       }
       if (task?.startupError) throw new Error(task.startupError)
       const session = marketplaceSessionStatus()
-      if (!session.ready) throw new Error(session.reason || 'O Marketplace não está disponível.')
+      if (!session.ready)
+        throw Object.assign(new Error(session.reason || 'O Marketplace não está disponível.'), {
+          failureCode: session.failureCode,
+        })
       stopActivity = startExecutionActivity(boundTask)
       return await fill(boundTask)
     } catch (error) {
@@ -1369,9 +1385,10 @@
           documentId: boundTask.documentId,
           error: error.message || String(error),
           failureCode:
-            task?.startupError === 'O formulário do Marketplace não ficou disponível.'
+            error.failureCode ||
+            (task?.startupError === 'O formulário do Marketplace não ficou disponível.'
               ? 'marketplace_form_timeout'
-              : '',
+              : ''),
         })
       if (task?.jobId && !boundTask?.documentId) runningJobs.delete(task.jobId)
     } finally {
