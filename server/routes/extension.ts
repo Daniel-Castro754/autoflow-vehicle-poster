@@ -371,7 +371,7 @@ export async function handleExtensionRoute(
       leaseSeconds = 120
     // Checking and reserving capacity must be atomic across API processes.
     db.exec('BEGIN IMMEDIATE')
-    let acquired = false
+    let acquired: boolean
     try {
       const currentUsage = dailyExecutionAttempts(db, auth.organizationId, accountId)
       if (currentUsage >= dailyLimit) {
