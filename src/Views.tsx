@@ -46,6 +46,7 @@ import { FieldLabel, HelpTip } from './HelpTip'
 import { OperationalHealth } from './OperationalHealth'
 import { InterventionCenter } from './InterventionCenter'
 import { SchedulingInsights } from './SchedulingInsights'
+import { DrawerFocusGuard } from './DrawerFocusGuard'
 import { formatRate } from './management-metrics'
 import { OverviewPriorities } from './OverviewPriorities'
 
@@ -1756,7 +1757,8 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
       {open && (
         <div className="overlay" onMouseDown={() => setOpen(false)}>
           <aside className="drawer" onMouseDown={(e) => e.stopPropagation()}>
-            <button className="close" onClick={() => setOpen(false)}>
+            <DrawerFocusGuard label="Adicionar publicação à fila" onClose={() => setOpen(false)} />
+            <button className="close" aria-label="Fechar nova publicação" onClick={() => setOpen(false)}>
               <X />
             </button>
             <span className="eyebrow">NOVA PUBLICAÇÃO</span>
@@ -1837,7 +1839,8 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
             className="drawer schedule-drawer batch-schedule-drawer"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <button className="close" onClick={() => setBatchScheduleIds(null)}>
+            <DrawerFocusGuard label="Agendar sequência" onClose={() => setBatchScheduleIds(null)} />
+            <button className="close" aria-label="Fechar agendamento em lote" onClick={() => setBatchScheduleIds(null)}>
               <X />
             </button>
             <span className="eyebrow">PROGRAMAÇÃO DA FILA</span>
@@ -1931,7 +1934,8 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
             className="drawer schedule-drawer"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <button className="close" onClick={() => setScheduleJob(null)}>
+            <DrawerFocusGuard label="Agendar publicação" onClose={() => setScheduleJob(null)} />
+            <button className="close" aria-label="Fechar agendamento" onClick={() => setScheduleJob(null)}>
               <X />
             </button>
             <span className="eyebrow">CONTROLE DA FILA</span>
@@ -1978,7 +1982,8 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
             className="drawer schedule-drawer"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <button className="close" onClick={() => setReassignIds(null)}>
+            <DrawerFocusGuard label="Trocar perfil responsável" onClose={() => setReassignIds(null)} />
+            <button className="close" aria-label="Fechar troca de perfil" onClick={() => setReassignIds(null)}>
               <X />
             </button>
             <span className="eyebrow">DISTRIBUIÇÃO DA FILA</span>
@@ -2044,7 +2049,8 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
             className="drawer timeline-drawer"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <button className="close" onClick={() => setTimelineJob(null)}>
+            <DrawerFocusGuard label="Linha do tempo da publicação" onClose={() => setTimelineJob(null)} />
+            <button className="close" aria-label="Fechar linha do tempo" onClick={() => setTimelineJob(null)}>
               <X />
             </button>
             <span className="eyebrow">RASTREABILIDADE</span>
