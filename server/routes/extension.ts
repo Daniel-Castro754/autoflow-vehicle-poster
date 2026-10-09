@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto'
 import { publicationMayExist, readPublicationReport } from '../services/publication-evidence.ts'
 import { findBestAccountForVehicle } from '../services/session-manager.ts'
 import { calculateBackoff } from '../lib/retry.ts'
+import { dailyExecutionAttempts } from '../services/daily-capacity.ts'
 import { isRetryableExtensionFailureCode } from '../services/publication-policy.ts'
 import { sendCriticalAlert } from '../services/alerting.ts'
 import {
@@ -287,17 +288,18 @@ export async function handleExtensionRoute(
       0,
       Math.min(1440, Number(executionSettings?.executionIntervalMinutes ?? 25)),
     )
+    const executionCount = dailyExecutionAttempts(db, auth.organizationId, accountId)
     const usage = db
       .prepare(
-        `SELECT COUNT(*) count,MAX(CASE WHEN status IN ('completed','removed') THEN updated_at END) lastCompletedAt
-        FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND autoflow_day(created_at)=autoflow_day(CURRENT_TIMESTAMP) AND status!='canceled'`,
+        `SELECT MAX(CASE WHEN status IN ('completed','removed') THEN updated_at END) lastCompletedAt
+        FROM publication_jobs WHERE organization_id=? AND social_account_id=?`,
       )
       .get(auth.organizationId, accountId) as
-      { count?: number; lastCompletedAt?: string | null } | undefined
-    if (Number(usage?.count || 0) >= dailyLimit)
+      { lastCompletedAt?: string | null } | undefined
+    if (executionCount >= dailyLimit)
       return send(res, 409, {
         error: `O limite diário deste perfil foi atingido (${dailyLimit} execuções).`,
-        capacity: { dailyLimit, used: Number(usage?.count || 0), remaining: 0 },
+        capacity: { dailyLimit, used: executionCount, remaining: 0 },
       })
     if (intervalMinutes > 0 && usage?.lastCompletedAt) {
       const elapsed = Date.now() - Date.parse(String(usage.lastCompletedAt).replace(' ', 'T') + 'Z')
@@ -307,8 +309,8 @@ export async function handleExtensionRoute(
           error: `Aguarde ${Math.ceil(retryAfterSeconds / 60)} min antes de iniciar outra execução neste perfil.`,
           capacity: {
             dailyLimit,
-            used: Number(usage?.count || 0),
-            remaining: Math.max(0, dailyLimit - Number(usage?.count || 0)),
+            used: executionCount,
+            remaining: Math.max(0, dailyLimit - executionCount),
             intervalMinutes,
             retryAfterSeconds,
           },
@@ -367,7 +369,19 @@ export async function handleExtensionRoute(
     if (configuredGroups.length) targetGroups = configuredGroups.map(groupTarget)
     const leaseToken = randomBytes(24).toString('hex'),
       leaseSeconds = 120
-    const acquired = db
+    // Checking and reserving capacity must be atomic across API processes.
+    db.exec('BEGIN IMMEDIATE')
+    let acquired = false
+    try {
+      const currentUsage = dailyExecutionAttempts(db, auth.organizationId, accountId)
+      if (currentUsage >= dailyLimit) {
+        db.exec('COMMIT')
+        return send(res, 409, {
+          error: `O limite diário deste perfil foi atingido (${dailyLimit} execuções).`,
+          capacity: { dailyLimit, used: currentUsage, remaining: 0 },
+        })
+      }
+      const result = db
       .prepare(
         `UPDATE publication_jobs SET status='filling',attempt_count=attempt_count+1,error_code=NULL,started_at=CURRENT_TIMESTAMP,
         lease_token=?,lease_owner=?,execution_tab_id=?,execution_document=?,execution_document_id=NULL,lease_expires_at=datetime('now',?),updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?
@@ -391,11 +405,18 @@ export async function handleExtensionRoute(
         accountId,
         instanceId,
       )
-    if (!acquired.changes)
+      acquired = result.changes === 1
+      if (acquired)
+        recordJobEvent(auth.organizationId, job.id, 'filling_started', null, { accountId, instanceId })
+      db.exec('COMMIT')
+    } catch (error) {
+      db.exec('ROLLBACK')
+      throw error
+    }
+    if (!acquired)
       return send(res, 409, {
         error: 'Este trabalho acabou de ser aberto por outra aba ou instância.',
       })
-    recordJobEvent(auth.organizationId, job.id, 'filling_started', null, { accountId, instanceId })
     return send(res, 200, {
       jobId: job.id,
       accountId,
