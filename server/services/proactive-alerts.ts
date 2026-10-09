@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { sendCriticalAlert } from './alerting.ts'
 import { logger } from '../lib/logger.ts'
+import { recordOperationalSignal } from './operational-incidents.ts'
 
 export async function warnSlowExecutions(
   db: DatabaseSync,
@@ -64,6 +65,7 @@ export async function warnSlowExecutions(
             }),
           ).lastInsertRowid,
       )
+      recordOperationalSignal(db, job.organizationId, job.id, 'job_nearly_stuck')
       db.exec('COMMIT')
     } catch (error) {
       db.exec('ROLLBACK')
