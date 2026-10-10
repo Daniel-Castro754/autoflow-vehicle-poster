@@ -1,0 +1,25 @@
+name: Temporary readiness formatter
+on:
+  push:
+    branches: [feature/readiness-security-dashboard]
+permissions:
+  contents: write
+jobs:
+  format:
+    if: "!contains(github.event.head_commit.message, '[style-bot]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx prettier --write server/services/system-readiness.ts src/App.tsx src/ReadinessDashboard.tsx tests/system-readiness.mjs
+      - run: |
+          if test -z "$(git status --porcelain)"; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server/services/system-readiness.ts src/App.tsx src/ReadinessDashboard.tsx tests/system-readiness.mjs
+          git commit -m "style: format readiness dashboard [style-bot]"
+          git push origin HEAD:feature/readiness-security-dashboard
