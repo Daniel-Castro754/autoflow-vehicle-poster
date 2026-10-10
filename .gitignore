@@ -22,3 +22,6 @@ coverage/
 
 # Banco e credenciais usados nos ambientes isolados de teste
 data-*/
+
+# Exportação criptografada de recuperação (guardar fora do repositório)
+*.autoflow-recovery
