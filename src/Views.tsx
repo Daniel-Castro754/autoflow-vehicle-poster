@@ -115,8 +115,10 @@ type SettingsData = {
     alertTelegramChatId?: string
     alertWebhookUrl?: string
     autoCurateGroups?: boolean
-    geminiApiKey?: string
-    openaiApiKey?: string
+    geminiKeyConfigured?: boolean
+    openaiKeyConfigured?: boolean
+    geminiKeySource?: string
+    openaiKeySource?: string
     aiProvider?: string
   }
 }
@@ -3317,6 +3319,12 @@ export function SettingsView({
   const [geminiApiKey, setGeminiApiKey] = useState(''),
     [openaiApiKey, setOpenaiApiKey] = useState(''),
     [aiProvider, setAiProvider] = useState('auto')
+  const [geminiKeyConfigured, setGeminiKeyConfigured] = useState(false)
+  const [openaiKeyConfigured, setOpenaiKeyConfigured] = useState(false)
+  const [geminiKeySource, setGeminiKeySource] = useState('none')
+  const [openaiKeySource, setOpenaiKeySource] = useState('none')
+  const [clearGeminiKey, setClearGeminiKey] = useState(false)
+  const [clearOpenaiKey, setClearOpenaiKey] = useState(false)
   const [testingKey, setTestingKey] = useState<'gemini' | 'openai' | null>(null),
     [testKeyStatus, setTestKeyStatus] = useState('')
   const [settingsSection, setSettingsSection] = useState('company')
@@ -3352,8 +3360,12 @@ export function SettingsView({
       setAlertTelegramToken(result.settings.alertTelegramToken || '')
       setAlertTelegramChatId(result.settings.alertTelegramChatId || '')
       setAlertWebhookUrl(result.settings.alertWebhookUrl || '')
-      setGeminiApiKey(result.settings.geminiApiKey || '')
-      setOpenaiApiKey(result.settings.openaiApiKey || '')
+      setGeminiApiKey('')
+      setOpenaiApiKey('')
+      setGeminiKeyConfigured(Boolean(result.settings.geminiKeyConfigured))
+      setOpenaiKeyConfigured(Boolean(result.settings.openaiKeyConfigured))
+      setGeminiKeySource(result.settings.geminiKeySource || 'none')
+      setOpenaiKeySource(result.settings.openaiKeySource || 'none')
       setAiProvider(result.settings.aiProvider || 'auto')
       setGroups(
         (result.settings.groups || []).map((group: MarketplaceGroup, index: number) => ({
@@ -3594,6 +3606,8 @@ export function SettingsView({
           autoCurateGroups,
           geminiApiKey,
           openaiApiKey,
+          clearGeminiApiKey: clearGeminiKey,
+          clearOpenaiApiKey: clearOpenaiKey,
           aiProvider,
         }),
       })
@@ -3604,9 +3618,18 @@ export function SettingsView({
             active: Boolean(group.active),
           })),
         )
+      const fresh = await api<SettingsData>('/settings')
+      setGeminiApiKey('')
+      setOpenaiApiKey('')
+      setClearGeminiKey(false)
+      setClearOpenaiKey(false)
+      setGeminiKeyConfigured(Boolean(fresh.settings.geminiKeyConfigured))
+      setOpenaiKeyConfigured(Boolean(fresh.settings.openaiKeyConfigured))
+      setGeminiKeySource(fresh.settings.geminiKeySource || 'none')
+      setOpenaiKeySource(fresh.settings.openaiKeySource || 'none')
       setDeletedGroupIds([])
       setGroupEditsPending(false)
-      setMessage('Configurações salvas com sucesso.')
+      setMessage('Configurações salvas. Chaves preservadas no armazenamento configurado.')
       onSaved()
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Erro ao salvar')
@@ -4064,8 +4087,8 @@ export function SettingsView({
                     name="geminiApiKey"
                     type="password"
                     value={geminiApiKey}
-                    onChange={(e) => setGeminiApiKey(e.target.value)}
-                    placeholder="AIzaSy..."
+                    onChange={(e) => { setGeminiApiKey(e.target.value); setClearGeminiKey(false) }}
+                    placeholder={geminiKeyConfigured ? 'Chave salva — digite apenas para substituir' : 'Cole a chave Gemini'}
                     style={{ flex: 1 }}
                   />
                   <button
@@ -4079,7 +4102,10 @@ export function SettingsView({
                   </button>
                 </div>
                 <small style={{ display: 'block', marginTop: 4, color: '#6b7c77' }}>
-                  Obtenha gratuitamente em{' '}
+                  {geminiKeyConfigured
+                    ? 'Configurada (' + (geminiKeySource === 'database' ? 'banco local' : 'variável de ambiente') + '). Não é necessário preencher novamente.'
+                    : 'Ainda não configurada.'}
+                  {' '}Obtenha em{' '}
                   <a
                     href="https://aistudio.google.com/"
                     target="_blank"
@@ -4089,6 +4115,20 @@ export function SettingsView({
                     Google AI Studio
                   </a>
                 </small>
+                {geminiKeySource === 'database' && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => {
+                      if (window.confirm('Remover a chave Gemini salva no banco? A chave do ambiente, se houver, continuará disponível.')) {
+                        setClearGeminiKey(true)
+                        setGeminiApiKey('')
+                      }
+                    }}
+                  >
+                    {clearGeminiKey ? 'Remoção pendente ao salvar' : 'Remover chave salva'}
+                  </button>
+                )}
               </label>
 
               <label>
@@ -4100,8 +4140,8 @@ export function SettingsView({
                     name="openaiApiKey"
                     type="password"
                     value={openaiApiKey}
-                    onChange={(e) => setOpenaiApiKey(e.target.value)}
-                    placeholder="sk-proj-..."
+                    onChange={(e) => { setOpenaiApiKey(e.target.value); setClearOpenaiKey(false) }}
+                    placeholder={openaiKeyConfigured ? 'Chave salva — digite apenas para substituir' : 'Cole a chave OpenAI'}
                     style={{ flex: 1 }}
                   />
                   <button
@@ -4115,7 +4155,10 @@ export function SettingsView({
                   </button>
                 </div>
                 <small style={{ display: 'block', marginTop: 4, color: '#6b7c77' }}>
-                  Obtenha em{' '}
+                  {openaiKeyConfigured
+                    ? 'Configurada (' + (openaiKeySource === 'database' ? 'banco local' : 'variável de ambiente') + '). Não é necessário preencher novamente.'
+                    : 'Ainda não configurada.'}
+                  {' '}Obtenha em{' '}
                   <a
                     href="https://platform.openai.com/api-keys"
                     target="_blank"
@@ -4125,6 +4168,20 @@ export function SettingsView({
                     platform.openai.com
                   </a>
                 </small>
+                {openaiKeySource === 'database' && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => {
+                      if (window.confirm('Remover a chave OpenAI salva no banco? A chave do ambiente, se houver, continuará disponível.')) {
+                        setClearOpenaiKey(true)
+                        setOpenaiApiKey('')
+                      }
+                    }}
+                  >
+                    {clearOpenaiKey ? 'Remoção pendente ao salvar' : 'Remover chave salva'}
+                  </button>
+                )}
               </label>
             </div>
 
