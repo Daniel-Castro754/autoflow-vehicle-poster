@@ -4087,8 +4087,15 @@ export function SettingsView({
                     name="geminiApiKey"
                     type="password"
                     value={geminiApiKey}
-                    onChange={(e) => { setGeminiApiKey(e.target.value); setClearGeminiKey(false) }}
-                    placeholder={geminiKeyConfigured ? 'Chave salva — digite apenas para substituir' : 'Cole a chave Gemini'}
+                    onChange={(e) => {
+                      setGeminiApiKey(e.target.value)
+                      setClearGeminiKey(false)
+                    }}
+                    placeholder={
+                      geminiKeyConfigured
+                        ? 'Chave salva — digite apenas para substituir'
+                        : 'Cole a chave Gemini'
+                    }
                     style={{ flex: 1 }}
                   />
                   <button
@@ -4103,9 +4110,11 @@ export function SettingsView({
                 </div>
                 <small style={{ display: 'block', marginTop: 4, color: '#6b7c77' }}>
                   {geminiKeyConfigured
-                    ? 'Configurada (' + (geminiKeySource === 'database' ? 'banco local' : 'variável de ambiente') + '). Não é necessário preencher novamente.'
-                    : 'Ainda não configurada.'}
-                  {' '}Obtenha em{' '}
+                    ? 'Configurada (' +
+                      (geminiKeySource === 'database' ? 'banco local' : 'variável de ambiente') +
+                      '). Não é necessário preencher novamente.'
+                    : 'Ainda não configurada.'}{' '}
+                  Obtenha em{' '}
                   <a
                     href="https://aistudio.google.com/"
                     target="_blank"
@@ -4120,7 +4129,11 @@ export function SettingsView({
                     type="button"
                     className="secondary"
                     onClick={() => {
-                      if (window.confirm('Remover a chave Gemini salva no banco? A chave do ambiente, se houver, continuará disponível.')) {
+                      if (
+                        window.confirm(
+                          'Remover a chave Gemini salva no banco? A chave do ambiente, se houver, continuará disponível.',
+                        )
+                      ) {
                         setClearGeminiKey(true)
                         setGeminiApiKey('')
                       }
@@ -4140,8 +4153,15 @@ export function SettingsView({
                     name="openaiApiKey"
                     type="password"
                     value={openaiApiKey}
-                    onChange={(e) => { setOpenaiApiKey(e.target.value); setClearOpenaiKey(false) }}
-                    placeholder={openaiKeyConfigured ? 'Chave salva — digite apenas para substituir' : 'Cole a chave OpenAI'}
+                    onChange={(e) => {
+                      setOpenaiApiKey(e.target.value)
+                      setClearOpenaiKey(false)
+                    }}
+                    placeholder={
+                      openaiKeyConfigured
+                        ? 'Chave salva — digite apenas para substituir'
+                        : 'Cole a chave OpenAI'
+                    }
                     style={{ flex: 1 }}
                   />
                   <button
@@ -4156,9 +4176,11 @@ export function SettingsView({
                 </div>
                 <small style={{ display: 'block', marginTop: 4, color: '#6b7c77' }}>
                   {openaiKeyConfigured
-                    ? 'Configurada (' + (openaiKeySource === 'database' ? 'banco local' : 'variável de ambiente') + '). Não é necessário preencher novamente.'
-                    : 'Ainda não configurada.'}
-                  {' '}Obtenha em{' '}
+                    ? 'Configurada (' +
+                      (openaiKeySource === 'database' ? 'banco local' : 'variável de ambiente') +
+                      '). Não é necessário preencher novamente.'
+                    : 'Ainda não configurada.'}{' '}
+                  Obtenha em{' '}
                   <a
                     href="https://platform.openai.com/api-keys"
                     target="_blank"
@@ -4173,7 +4195,11 @@ export function SettingsView({
                     type="button"
                     className="secondary"
                     onClick={() => {
-                      if (window.confirm('Remover a chave OpenAI salva no banco? A chave do ambiente, se houver, continuará disponível.')) {
+                      if (
+                        window.confirm(
+                          'Remover a chave OpenAI salva no banco? A chave do ambiente, se houver, continuará disponível.',
+                        )
+                      ) {
                         setClearOpenaiKey(true)
                         setOpenaiApiKey('')
                       }

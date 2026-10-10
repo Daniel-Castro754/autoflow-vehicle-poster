@@ -30,7 +30,9 @@ export function recordAiAudit(
 }
 
 export function getAiAuditHistory(db: DatabaseSync, org: number, limit = 30) {
-  return db.prepare(
-    'SELECT id,action,outcome,provider,items,created_at createdAt FROM ai_operation_history WHERE organization_id=? ORDER BY id DESC LIMIT ?',
-  ).all(org, Math.max(1, Math.min(100, Number(limit) || 30)))
+  return db
+    .prepare(
+      'SELECT id,action,outcome,provider,items,created_at createdAt FROM ai_operation_history WHERE organization_id=? ORDER BY id DESC LIMIT ?',
+    )
+    .all(org, Math.max(1, Math.min(100, Number(limit) || 30)))
 }

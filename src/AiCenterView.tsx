@@ -224,13 +224,17 @@ export function AiCenterView({
     Promise.all([
       api<{ history: AiOperationEvent[] }>('/ai/history'),
       api<AiProviderStatus>('/ai/provider-status'),
-    ]).then(([log, status]) => {
-      if (active) {
-        setAiHistory(log.history)
-        setProviderStatus(status)
-      }
-    }).catch(() => {})
-    return () => { active = false }
+    ])
+      .then(([log, status]) => {
+        if (active) {
+          setAiHistory(log.history)
+          setProviderStatus(status)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
   }, [api])
 
   async function handleRunAutopilot() {
@@ -620,19 +624,27 @@ export function AiCenterView({
           </button>
         </div>
         <p>
-          Preferência: <strong>{providerStatus?.preference || 'carregando'}</strong>.
-          {' '}Gemini: {providerStatus?.geminiConfigured ? 'configurado' : 'não configurado'}.
-          {' '}OpenAI: {providerStatus?.openaiConfigured ? 'configurada' : 'não configurada'}.
-          {' '}Fallback disponível: procedural (offline).
+          Preferência: <strong>{providerStatus?.preference || 'carregando'}</strong>. Gemini:{' '}
+          {providerStatus?.geminiConfigured ? 'configurado' : 'não configurado'}. OpenAI:{' '}
+          {providerStatus?.openaiConfigured ? 'configurada' : 'não configurada'}. Fallback
+          disponível: procedural (offline).
         </p>
         <p style={{ fontSize: 13 }}>
-          O provedor configurado pode não ser o utilizado. A geração de descrições
-          identifica o provedor real em cada proposta.
+          O provedor configurado pode não ser o utilizado. A geração de descrições identifica o
+          provedor real em cada proposta.
         </p>
         <div style={{ maxHeight: 220, overflowY: 'auto' }}>
           {aiHistory.length ? (
             <table className="data-table">
-              <thead><tr><th>Horário (UTC)</th><th>Operação</th><th>Resultado</th><th>Provedor</th><th>Itens</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Horário (UTC)</th>
+                  <th>Operação</th>
+                  <th>Resultado</th>
+                  <th>Provedor</th>
+                  <th>Itens</th>
+                </tr>
+              </thead>
               <tbody>
                 {aiHistory.slice(0, 20).map((event) => (
                   <tr key={event.id}>
@@ -645,7 +657,9 @@ export function AiCenterView({
                 ))}
               </tbody>
             </table>
-          ) : <p>Nenhuma operação registrada neste ambiente.</p>}
+          ) : (
+            <p>Nenhuma operação registrada neste ambiente.</p>
+          )}
         </div>
       </article>
       {/* Main Grid: Autopilot + Command Agent */}

@@ -16,16 +16,22 @@ try {
   const gemini = 'test-gemini-private-API-key-should-never-appear'
   const openai = 'test-openai-private-API-key-should-never-appear'
   const company = 'Empresa AI Teste'
-  const patch = async (fields) => api('/settings', {
-    method: 'PATCH',
-    body: JSON.stringify({
-      organizationName: company, defaultLocation: 'Criciúma, SC',
-      groups: [], ...fields,
-    }),
-  })
-  const dbKeys = () => db.prepare(
-    'SELECT gemini_api_key gemini,openai_api_key openai,ai_provider preference FROM organization_settings WHERE organization_id=?',
-  ).get(org)
+  const patch = async (fields) =>
+    api('/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        organizationName: company,
+        defaultLocation: 'Criciúma, SC',
+        groups: [],
+        ...fields,
+      }),
+    })
+  const dbKeys = () =>
+    db
+      .prepare(
+        'SELECT gemini_api_key gemini,openai_api_key openai,ai_provider preference FROM organization_settings WHERE organization_id=?',
+      )
+      .get(org)
   const initial = await api('/settings')
   assert(!('geminiApiKey' in initial.settings) && !('openaiApiKey' in initial.settings))
   await patch({ geminiApiKey: gemini, openaiApiKey: openai, aiProvider: 'gemini' })
@@ -48,7 +54,12 @@ try {
   assert.equal(stored.preference, 'openai')
   // Open a second connection to verify credentials are persisted on disk, not in memory.
   const secondDb = new DatabaseSync(join(server.dataDir, 'autoflow.db'), { readOnly: true })
-  assert.equal(secondDb.prepare('SELECT gemini_api_key key FROM organization_settings WHERE organization_id=?').get(org).key, gemini)
+  assert.equal(
+    secondDb
+      .prepare('SELECT gemini_api_key key FROM organization_settings WHERE organization_id=?')
+      .get(org).key,
+    gemini,
+  )
   secondDb.close()
 
   // No key value or prompt/description should appear in the audit trail.
@@ -60,11 +71,16 @@ try {
   })
   assert.equal(response.provider, 'procedural')
   await api('/ai/command', {
-    method: 'POST', body: JSON.stringify({ prompt: 'Auditar saúde do estoque ' + gemini }),
+    method: 'POST',
+    body: JSON.stringify({ prompt: 'Auditar saúde do estoque ' + gemini }),
   })
   const history = await api('/ai/history')
   assert(history.history.some((event) => event.action === 'ai_configuration_saved'))
-  assert(history.history.some((event) => event.action === 'description_generated' && event.provider === 'procedural'))
+  assert(
+    history.history.some(
+      (event) => event.action === 'description_generated' && event.provider === 'procedural',
+    ),
+  )
   assert(history.history.some((event) => event.action === 'assistant_command'))
   assert(!JSON.stringify(history).includes(gemini))
   assert(!JSON.stringify(history).includes(openai))
@@ -78,14 +94,23 @@ try {
   await patch({ clearGeminiApiKey: true, clearOpenaiApiKey: true })
   assert.equal(dbKeys().gemini, '')
   assert.equal(dbKeys().openai, '')
-  assert.equal((await api('/settings')).settings.geminiKeySource, process.env.GEMINI_API_KEY ? 'environment' : 'none')
+  assert.equal(
+    (await api('/settings')).settings.geminiKeySource,
+    process.env.GEMINI_API_KEY ? 'environment' : 'none',
+  )
 
   // Tenants cannot read other tenants' AI audit history.
-  const foreign = Number(db.prepare("INSERT INTO organizations(name) VALUES('Loja Externa')").run().lastInsertRowid)
-  db.prepare("INSERT INTO ai_operation_history(organization_id,user_id,action,outcome) VALUES(?,NULL,'api_key_test','tested')").run(foreign)
+  const foreign = Number(
+    db.prepare("INSERT INTO organizations(name) VALUES('Loja Externa')").run().lastInsertRowid,
+  )
+  db.prepare(
+    "INSERT INTO ai_operation_history(organization_id,user_id,action,outcome) VALUES(?,NULL,'api_key_test','tested')",
+  ).run(foreign)
   const ownHistory = await api('/ai/history')
   assert(!ownHistory.history.some((event) => event.action === 'api_key_test'))
-  console.log('✓ API keys persist, blank settings preserve them, explicit removal, private status and redacted AI audit history')
+  console.log(
+    '✓ API keys persist, blank settings preserve them, explicit removal, private status and redacted AI audit history',
+  )
 } finally {
   db.close()
   await server.close()

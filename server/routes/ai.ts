@@ -74,7 +74,15 @@ export async function handleAIRoute(
       ...resolveAIProviderSettings(aiConf),
     })
     const hashtags = generateVehicleHashtags(input)
-    recordAiAudit(db, auth.organizationId, auth.userId, 'description_generated', 'applied', result.provider, 1)
+    recordAiAudit(
+      db,
+      auth.organizationId,
+      auth.userId,
+      'description_generated',
+      'applied',
+      result.provider,
+      1,
+    )
     send(res, 200, {
       ok: true,
       description: result.description,
@@ -98,9 +106,12 @@ export async function handleAIRoute(
     return true
   }
   if (req.method === 'GET' && url.pathname === '/api/ai/provider-status') {
-    const stored = db.prepare(
-      'SELECT gemini_api_key gemini,openai_api_key openai,ai_provider preference FROM organization_settings WHERE organization_id=?',
-    ).get(auth.organizationId) as { gemini: string; openai: string; preference: string } | undefined
+    const stored = db
+      .prepare(
+        'SELECT gemini_api_key gemini,openai_api_key openai,ai_provider preference FROM organization_settings WHERE organization_id=?',
+      )
+      .get(auth.organizationId) as
+      { gemini: string; openai: string; preference: string } | undefined
     send(res, 200, {
       ok: true,
       preference: stored?.preference || 'auto',
@@ -116,7 +127,15 @@ export async function handleAIRoute(
   }
   if (req.method === 'GET' && url.pathname === '/api/ai/autopilot/preview') {
     const preview = prepareAutopilotPreview(db, auth.organizationId, auth.userId)
-    recordAiAudit(db, auth.organizationId, auth.userId, 'manual_pilot_preview', 'preview', null, preview.potentialVehicles.length)
+    recordAiAudit(
+      db,
+      auth.organizationId,
+      auth.userId,
+      'manual_pilot_preview',
+      'preview',
+      null,
+      preview.potentialVehicles.length,
+    )
     send(res, 200, preview)
     return true
   }
@@ -133,7 +152,15 @@ export async function handleAIRoute(
       return true
     }
     const result = await runAutopilotPipeline(db, auth.organizationId, auth.userId)
-    recordAiAudit(db, auth.organizationId, auth.userId, 'manual_pilot_executed', result.ok ? 'applied' : 'rejected', null, result.jobsCreated)
+    recordAiAudit(
+      db,
+      auth.organizationId,
+      auth.userId,
+      'manual_pilot_executed',
+      result.ok ? 'applied' : 'rejected',
+      null,
+      result.jobsCreated,
+    )
     send(res, 200, result)
     return true
   }
@@ -153,12 +180,25 @@ export async function handleAIRoute(
     const b = (await jsonBody(req)) as Record<string, unknown>
     try {
       const preview = await prepareBatchDescriptionPreview(
-        db, auth.organizationId, auth.userId, String(b.tone || 'vendedor') as CopyTone,
+        db,
+        auth.organizationId,
+        auth.userId,
+        String(b.tone || 'vendedor') as CopyTone,
       )
-      recordAiAudit(db, auth.organizationId, auth.userId, 'description_preview', 'preview', null, preview.proposals.length)
+      recordAiAudit(
+        db,
+        auth.organizationId,
+        auth.userId,
+        'description_preview',
+        'preview',
+        null,
+        preview.proposals.length,
+      )
       send(res, 200, preview)
     } catch (err) {
-      send(res, 400, { error: err instanceof Error ? err.message : 'Não foi possível gerar a prévia.' })
+      send(res, 400, {
+        error: err instanceof Error ? err.message : 'Não foi possível gerar a prévia.',
+      })
     }
     return true
   }
@@ -170,9 +210,21 @@ export async function handleAIRoute(
     }
     try {
       const result = applyBatchDescriptionPreview(
-        db, auth.organizationId, auth.userId, b.previewId, b.selectedVehicleIds,
+        db,
+        auth.organizationId,
+        auth.userId,
+        b.previewId,
+        b.selectedVehicleIds,
       )
-      recordAiAudit(db, auth.organizationId, auth.userId, 'description_approved', 'applied', null, result.updated)
+      recordAiAudit(
+        db,
+        auth.organizationId,
+        auth.userId,
+        'description_approved',
+        'applied',
+        null,
+        result.updated,
+      )
       send(res, 200, result)
     } catch (err) {
       send(res, 409, { error: err instanceof Error ? err.message : 'Prévia inválida.' })
