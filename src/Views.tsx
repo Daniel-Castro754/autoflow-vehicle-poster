@@ -111,9 +111,12 @@ type SettingsData = {
     groups?: MarketplaceGroup[]
     autoRetry?: boolean
     maxRetries?: number
-    alertTelegramToken?: string
-    alertTelegramChatId?: string
-    alertWebhookUrl?: string
+    alertTelegramConfigured?: boolean
+    alertChatConfigured?: boolean
+    alertWebhookConfigured?: boolean
+    alertTelegramSource?: string
+    alertChatSource?: string
+    alertWebhookSource?: string
     autoCurateGroups?: boolean
     geminiKeyConfigured?: boolean
     openaiKeyConfigured?: boolean
@@ -3314,6 +3317,15 @@ export function SettingsView({
   const [alertTelegramToken, setAlertTelegramToken] = useState(''),
     [alertTelegramChatId, setAlertTelegramChatId] = useState(''),
     [alertWebhookUrl, setAlertWebhookUrl] = useState('')
+  const [alertTelegramConfigured, setAlertTelegramConfigured] = useState(false)
+  const [alertChatConfigured, setAlertChatConfigured] = useState(false)
+  const [alertWebhookConfigured, setAlertWebhookConfigured] = useState(false)
+  const [alertTelegramSource, setAlertTelegramSource] = useState('none')
+  const [alertChatSource, setAlertChatSource] = useState('none')
+  const [alertWebhookSource, setAlertWebhookSource] = useState('none')
+  const [clearAlertTelegram, setClearAlertTelegram] = useState(false)
+  const [clearAlertChat, setClearAlertChat] = useState(false)
+  const [clearAlertWebhook, setClearAlertWebhook] = useState(false)
   const [testingAlert, setTestingAlert] = useState(false),
     [curating, setCurating] = useState(false)
   const [geminiApiKey, setGeminiApiKey] = useState(''),
@@ -3357,9 +3369,15 @@ export function SettingsView({
       setAutoRetry(Boolean(result.settings.autoRetry))
       setMaxRetries(Number(result.settings.maxRetries) || 3)
       setAutoCurateGroups(Boolean(result.settings.autoCurateGroups))
-      setAlertTelegramToken(result.settings.alertTelegramToken || '')
-      setAlertTelegramChatId(result.settings.alertTelegramChatId || '')
-      setAlertWebhookUrl(result.settings.alertWebhookUrl || '')
+      setAlertTelegramToken('')
+      setAlertTelegramChatId('')
+      setAlertWebhookUrl('')
+      setAlertTelegramConfigured(Boolean(result.settings.alertTelegramConfigured))
+      setAlertChatConfigured(Boolean(result.settings.alertChatConfigured))
+      setAlertWebhookConfigured(Boolean(result.settings.alertWebhookConfigured))
+      setAlertTelegramSource(result.settings.alertTelegramSource || 'none')
+      setAlertChatSource(result.settings.alertChatSource || 'none')
+      setAlertWebhookSource(result.settings.alertWebhookSource || 'none')
       setGeminiApiKey('')
       setOpenaiApiKey('')
       setGeminiKeyConfigured(Boolean(result.settings.geminiKeyConfigured))
@@ -3421,9 +3439,9 @@ export function SettingsView({
     try {
       const res = await api<{
         ok: boolean
-        result: { telegram: boolean; webhook: boolean; details: string[] }
+        result: { telegram: boolean; webhook: boolean }
       }>('/alerts/test', { method: 'POST' })
-      setMessage(`Teste de alerta concluído: ${res.result.details.join(' · ')}`)
+      setMessage('Teste de alertas: Telegram ' + (res.result.telegram ? 'enviado' : 'não enviado') + ' · Webhook ' + (res.result.webhook ? 'enviado' : 'não enviado'))
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Erro ao testar alerta')
     } finally {
@@ -3603,6 +3621,9 @@ export function SettingsView({
           alertTelegramToken,
           alertTelegramChatId,
           alertWebhookUrl,
+          clearAlertTelegramToken: clearAlertTelegram,
+          clearAlertTelegramChatId: clearAlertChat,
+          clearAlertWebhookUrl: clearAlertWebhook,
           autoCurateGroups,
           geminiApiKey,
           openaiApiKey,
@@ -3619,6 +3640,18 @@ export function SettingsView({
           })),
         )
       const fresh = await api<SettingsData>('/settings')
+      setAlertTelegramToken('')
+      setAlertTelegramChatId('')
+      setAlertWebhookUrl('')
+      setClearAlertTelegram(false)
+      setClearAlertChat(false)
+      setClearAlertWebhook(false)
+      setAlertTelegramConfigured(Boolean(fresh.settings.alertTelegramConfigured))
+      setAlertChatConfigured(Boolean(fresh.settings.alertChatConfigured))
+      setAlertWebhookConfigured(Boolean(fresh.settings.alertWebhookConfigured))
+      setAlertTelegramSource(fresh.settings.alertTelegramSource || 'none')
+      setAlertChatSource(fresh.settings.alertChatSource || 'none')
+      setAlertWebhookSource(fresh.settings.alertWebhookSource || 'none')
       setGeminiApiKey('')
       setOpenaiApiKey('')
       setClearGeminiKey(false)
@@ -4248,8 +4281,8 @@ export function SettingsView({
                   type="password"
                   autoComplete="off"
                   value={alertTelegramToken}
-                  onChange={(e) => setAlertTelegramToken(e.target.value)}
-                  placeholder="123456:ABC-DEF..."
+                  onChange={(e) => { setAlertTelegramToken(e.target.value); setClearAlertTelegram(false) }}
+                  placeholder={alertTelegramConfigured ? 'Configurado — digite para substituir' : '123456:ABC-DEF...'}
                 />
               </label>
               <label>
@@ -4259,8 +4292,8 @@ export function SettingsView({
                 <input
                   name="alertTelegramChatId"
                   value={alertTelegramChatId}
-                  onChange={(e) => setAlertTelegramChatId(e.target.value)}
-                  placeholder="-1001234567890"
+                  onChange={(e) => { setAlertTelegramChatId(e.target.value); setClearAlertChat(false) }}
+                  placeholder={alertChatConfigured ? 'Configurado — digite para substituir' : '-1001234567890'}
                 />
               </label>
             </div>
@@ -4271,24 +4304,45 @@ export function SettingsView({
               <input
                 name="alertWebhookUrl"
                 value={alertWebhookUrl}
-                onChange={(e) => setAlertWebhookUrl(e.target.value)}
-                placeholder="https://webhook.site/... ou https://discord.com/api/webhooks/..."
+                onChange={(e) => { setAlertWebhookUrl(e.target.value); setClearAlertWebhook(false) }}
+                placeholder={alertWebhookConfigured ? 'Configurado — digite para substituir' : 'https://discord.com/api/webhooks/...'}
               />
             </label>
+            <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+              {([
+                ['Telegram', alertTelegramConfigured, alertTelegramSource, clearAlertTelegram,
+                  () => { setClearAlertTelegram(true); setAlertTelegramToken('') }],
+                ['Chat', alertChatConfigured, alertChatSource, clearAlertChat,
+                  () => { setClearAlertChat(true); setAlertTelegramChatId('') }],
+                ['Webhook', alertWebhookConfigured, alertWebhookSource, clearAlertWebhook,
+                  () => { setClearAlertWebhook(true); setAlertWebhookUrl('') }],
+              ] as Array<[string, boolean, string, boolean, () => void]>).map(([name, configured, source, pending, clear]) => (
+                <div key={name}>
+                  <small>{name}: {configured ? 'Configurado (' + (source === 'database' ? 'banco local' : 'ambiente') + ')' : 'Não configurado'}</small>
+                  {configured && source === 'database' && (
+                    <button type="button" className="secondary" onClick={() => {
+                      if (window.confirm('Remover ' + name + ' do banco ao salvar as configurações?')) clear()
+                    }}>
+                      {pending ? 'Remoção pendente' : 'Remover'}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
             <div style={{ marginTop: 14, display: 'flex', gap: 10, alignItems: 'center' }}>
               <button
                 type="button"
                 className="secondary"
                 onClick={testAlert}
-                disabled={testingAlert || (!alertTelegramToken && !alertWebhookUrl)}
+                disabled={testingAlert || (!(alertTelegramConfigured && alertChatConfigured) && !alertWebhookConfigured)}
               >
                 <Bell size={15} />
                 {testingAlert ? 'Enviando teste...' : 'Testar envio de alerta'}
               </button>
               <small style={{ color: '#81908c' }}>
-                {!alertTelegramToken && !alertWebhookUrl
-                  ? 'Configure Telegram ou Webhook para habilitar o teste'
-                  : 'Envia um alerta imediato de verificação'}
+                {!(alertTelegramConfigured && alertChatConfigured) && !alertWebhookConfigured
+                  ? 'Salve as integrações para habilitar o teste'
+                  : 'Testa somente os valores salvos (não as edições pendentes)'}
               </small>
             </div>
           </div>
