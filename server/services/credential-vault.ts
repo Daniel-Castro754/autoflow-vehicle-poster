@@ -1,4 +1,10 @@
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+  scryptSync,
+  timingSafeEqual,
+} from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -12,31 +18,61 @@ type VaultFile =
   | { version: 1; mode: 'passphrase'; salt: string }
 let vaultKey: Buffer | null = null
 
+/**
+ * Invoke Windows PowerShell 5.1 using UTF-16LE encoded code.
+ * Explicitly load System.Security for hosts that do not load DPAPI by default.
+ * Credential bytes travel exclusively on stdin, never in argv or logs.
+ */
 function dpapi(operation: 'Protect' | 'Unprotect', bytes: Buffer): Buffer {
-  const script =
-    "$ErrorActionPreference='Stop';" +
-    '$inputBytes=[Convert]::FromBase64String([Console]::In.ReadToEnd());' +
-    '$scope=[System.Security.Cryptography.DataProtectionScope]::CurrentUser;' +
-    '$result=[System.Security.Cryptography.ProtectedData]::' +
-    operation +
-    '($inputBytes,$null,$scope);' +
-    '[Console]::Out.Write([Convert]::ToBase64String($result))'
+  if (process.platform !== 'win32') throw new Error('DPAPI só está disponível no Windows.')
+
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    'try {',
+    '  Add-Type -AssemblyName System.Security -ErrorAction Stop',
+    '  $encoded = [Console]::In.ReadToEnd().Trim()',
+    '  if (-not $encoded) { throw "MissingInput" }',
+    '  [byte[]] $inputBytes = [Convert]::FromBase64String($encoded)',
+    '  $scope = [System.Security.Cryptography.DataProtectionScope]::CurrentUser',
+    '  [byte[]] $outputBytes = [System.Security.Cryptography.ProtectedData]::' +
+      operation +
+      '($inputBytes, $null, $scope)',
+    '  [Console]::Out.Write([Convert]::ToBase64String($outputBytes))',
+    '} catch {',
+    "  [Console]::Error.WriteLine('DPAPI_ERROR_TYPE:' + $_.Exception.GetType().Name)",
+    '  exit 23',
+    '}',
+  ].join('\n')
+  const encodedCommand = Buffer.from(script, 'utf16le').toString('base64')
   const result = spawnSync(
     'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-Command', script],
+    ['-NoProfile', '-NonInteractive', '-EncodedCommand', encodedCommand],
     {
       input: bytes.toString('base64'),
       encoding: 'utf8',
-      timeout: 12000,
+      timeout: 20000,
       windowsHide: true,
-      maxBuffer: 4096,
+      maxBuffer: 16384,
     },
   )
-  if (result.status !== 0 || result.error || !result.stdout.trim())
+  if (result.status !== 0 || result.error || !result.stdout?.trim()) {
+    // Record only error type; never print stdin or a credential.
+    const category =
+      result.stderr?.match(/DPAPI_ERROR_TYPE:([A-Za-z]+)/)?.[1] ||
+      (result.error as NodeJS.ErrnoException | undefined)?.code ||
+      'exit-' + String(result.status)
     throw new Error(
-      'O Windows não conseguiu desbloquear o cofre DPAPI desta conta. Nenhuma chave será apagada.',
+      'O Windows não conseguiu ' +
+        (operation === 'Protect' ? 'proteger' : 'desbloquear') +
+        ' o cofre DPAPI (' +
+        category +
+        '). Os dados foram preservados.',
     )
-  const decoded = Buffer.from(result.stdout.trim(), 'base64')
+  }
+  const base64 = result.stdout.trim()
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64))
+    throw new Error('A saída do cofre DPAPI não está em Base64 válido.')
+  const decoded = Buffer.from(base64, 'base64')
   if (!decoded.length) throw new Error('O cofre DPAPI retornou uma chave inválida.')
   return decoded
 }
@@ -49,11 +85,22 @@ export function initializeCredentialVault(dataDir: string) {
   if (existsSync(path)) {
     file = JSON.parse(readFileSync(path, 'utf8')) as VaultFile
   } else if (process.platform === 'win32') {
+    // Never leave a vault file behind if either DPAPI operation fails.
     const plain = randomBytes(32)
-    const wrappedKey = dpapi('Protect', plain).toString('base64')
-    file = { version: 1, mode: 'dpapi', wrappedKey }
-    writeFileSync(path, JSON.stringify(file) + '\n', { flag: 'wx', mode: 0o600 })
-    plain.fill(0)
+    try {
+      const wrapped = dpapi('Protect', plain)
+      const unwrapped = dpapi('Unprotect', wrapped)
+      try {
+        if (unwrapped.length !== plain.length || !timingSafeEqual(plain, unwrapped))
+          throw new Error('O cofre DPAPI falhou na verificação local de criação.')
+      } finally {
+        unwrapped.fill(0)
+      }
+      file = { version: 1, mode: 'dpapi', wrappedKey: wrapped.toString('base64') }
+      writeFileSync(path, JSON.stringify(file) + '\n', { flag: 'wx', mode: 0o600 })
+    } finally {
+      plain.fill(0)
+    }
   } else {
     if (!password || password.length < 32)
       throw new Error('Defina AUTOFLOW_VAULT_KEY ou AUTH_SECRET com pelo menos 32 caracteres.')
