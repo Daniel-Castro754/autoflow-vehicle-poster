@@ -71,6 +71,8 @@ const imageBaseUrl = `${publicOrigin}/uploads/`
 
 initializeBaseSchema(db)
 applyMigrations(db)
+initializeCredentialVault(dataDir)
+migrateCredentials(db)
 const automationStatements = createAutomationStatements(db)
 const vehiclePageStatements = createVehiclePageStatements(db)
 const {
