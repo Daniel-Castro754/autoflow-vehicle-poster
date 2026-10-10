@@ -3302,6 +3302,7 @@ export function SettingsView({
     [fillGroups, setFillGroups] = useState(false),
     [autoPublish, setAutoPublish] = useState(false),
     [groups, setGroups] = useState<MarketplaceGroup[]>([])
+  const [deletedGroupIds, setDeletedGroupIds] = useState<number[]>([])
   const [autoRetry, setAutoRetry] = useState(false),
     [maxRetries, setMaxRetries] = useState(3),
     [autoCurateGroups, setAutoCurateGroups] = useState(false)
@@ -3466,21 +3467,43 @@ export function SettingsView({
   async function runAutoCurate() {
     setCurating(true)
     try {
+      const preview = await api<{ previewDigest: string; total: number; activeCount: number; changedOrder: number; location: string; groups: Array<{ group: MarketplaceGroup; score: number }> }>('/groups/curated')
+      const top = preview.groups.slice(0, 5).map((item, index) => String(index + 1) + '. ' + item.group.name)
+      const proceed = window.confirm([
+        'PRÉVIA — nenhuma alteração foi feita.',
+        'Referência: ' + (preview.location || 'localização da empresa não configurada'),
+        'Cadastrados: ' + preview.total + ' | Ativos: ' + preview.activeCount,
+        'Posições a alterar: ' + preview.changedOrder,
+        'Nenhum grupo será excluído ou desativado.',
+        ...top,
+        'Confirmar nova ordem?',
+      ].join('\n'))
+      if (!proceed) { setMessage('Reorganização cancelada.'); return }
       const res = await api<{ ok: boolean; curatedCount: number; groups: MarketplaceGroup[] }>(
-        '/groups/auto-curate',
+        '/groups/auto-curate?previewDigest=' + encodeURIComponent(preview.previewDigest),
         { method: 'POST' },
       )
-      if (res.groups)
-        setGroups(res.groups.map((g: MarketplaceGroup) => ({ ...g, active: Boolean(g.active) })))
-      setMessage(
-        `Curadoria concluída: ${res.curatedCount} grupos pontuados e reordenados por confiabilidade.`,
-      )
+      setGroups(res.groups.map((group) => ({ ...group, active: Boolean(group.active) })))
+      setDeletedGroupIds([])
+      setMessage('Ordem recalculada para ' + res.curatedCount + ' grupos, sem alterar estados ativos.')
       onSaved()
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Erro ao executar curadoria')
-    } finally {
-      setCurating(false)
-    }
+      setMessage(err instanceof Error ? err.message : 'Erro ao reorganizar grupos')
+    } finally { setCurating(false) }
+  }
+
+  async function undoGroupCuration() {
+    if (!window.confirm('Desfazer a última reorganização de grupos?')) return
+    setCurating(true)
+    try {
+      const result = await api<{ groups: MarketplaceGroup[] }>('/groups/undo-curation', { method: 'POST' })
+      setGroups(result.groups.map((group) => ({ ...group, active: Boolean(group.active) })))
+      setDeletedGroupIds([])
+      setMessage('Ordem anterior restaurada.')
+      onSaved()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Não foi possível desfazer a organização')
+    } finally { setCurating(false) }
   }
 
   async function save(e: React.FormEvent<HTMLFormElement>) {
@@ -3505,6 +3528,7 @@ export function SettingsView({
           autoAdvance,
           fillGroups,
           groups: normalizedGroups,
+          deletedGroupIds,
           targetGroups: normalizedGroups
             .filter((group) => group.active)
             .map((group) => (group.url ? `${group.name} | ${group.url}` : group.name)),
@@ -3530,6 +3554,7 @@ export function SettingsView({
             active: Boolean(group.active),
           })),
         )
+      setDeletedGroupIds([])
       setMessage('Configurações salvas com sucesso.')
       onSaved()
     } catch (err) {
@@ -3689,14 +3714,14 @@ export function SettingsView({
                       type="button"
                       disabled={curating || !groups.length}
                       onClick={runAutoCurate}
-                      title="Reordena os grupos pela taxa histórica de sucesso"
+                      title="Exibe uma prévia e altera apenas a ordem dos grupos"
                     >
                       <Sparkles size={14} />
-                      {curating ? 'Curando...' : 'Reordenar por IA'}
+                      {curating ? 'Reorganizando...' : 'Reordenar grupos'}
                     </button>
                     <button
                       type="button"
-                      disabled={groups.length >= 20}
+                      disabled={groups.length >= 2000}
                       onClick={() =>
                         setGroups((current) => [
                           ...current,
