@@ -16,7 +16,7 @@ Usa AES-256-GCM com chave derivada via scrypt de `AUTOFLOW_VAULT_KEY` (recomenda
 
 `npm run backup -- create .\backups` salva o banco, uploads e o arquivo `vault-key.json` (quando existente), com hashes SHA-256. `verify` valida a integridade; `restore` restaura os arquivos. O formato v2 mantém leitura de backups legados v1. Uma cópia contendo credenciais cifradas sem o cofre é recusada.
 
-**Importante:** o cofre DPAPI só funciona no perfil Windows que o criou. Para trocar de computador/usuário, use a instalação original para cadastrar as mesmas chaves em um novo perfil após restaurar o restante do banco (ou implemente uma rotina de exportação protegida com senha de recuperação antes de migrar). O comando de backup verifica integridade e não garante portabilidade das chaves. Backups podem conter outros dados sensíveis, como veículos e tokens de alertas, que ainda exigem proteção de acesso.
+**Importante:** o cofre DPAPI só funciona no perfil Windows que o criou. Para trocar de computador/usuário, **não restaure o banco criptografado esperando conseguir abrir as chaves**: o novo perfil não conseguirá iniciar com esse cofre. Neste estágio, a migração entre perfis exige um procedimento de recuperação ou exportação protegido que ainda não está implementado. O comando de backup verifica integridade e não garante portabilidade das chaves. Backups podem conter outros dados sensíveis, como veículos e tokens de alertas, que ainda exigem proteção de acesso.
 
 ### Fallback da IA
 
