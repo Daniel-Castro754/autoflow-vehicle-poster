@@ -4,8 +4,9 @@ import {
   randomBytes,
   scryptSync,
   timingSafeEqual,
+  createHash,
 } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import type { DatabaseSync } from 'node:sqlite'
@@ -206,4 +207,230 @@ export function migrateCredentials(db: DatabaseSync) {
     db.exec('ROLLBACK')
     throw error
   }
+}
+
+/**
+ * Password-protected, platform-independent recovery package for the AES master key.
+ * Only the encrypted master key leaves this module. The actual Gemini/OpenAI API
+ * credentials are never exported in plaintext or added to command-line arguments.
+ */
+const RECOVERY_PURPOSE = 'autoflow-ai-vault-recovery:v1'
+const RECOVERY_SCRYPT_N = 32768
+const RECOVERY_SCRYPT_OPTIONS = {
+  N: RECOVERY_SCRYPT_N,
+  r: 8,
+  p: 1,
+  maxmem: 128 * 1024 * 1024,
+} as const
+
+export interface PortableRecoveryPackage {
+  type: 'autoflow-ai-vault-recovery'
+  version: 1
+  kdf: 'scrypt'
+  salt: string
+  nonce: string
+  tag: string
+  ciphertext: string
+}
+
+function ensureRecoveryPassword(password: string) {
+  if (typeof password !== 'string' || password.length < 16 || Buffer.byteLength(password) > 1024)
+    throw new Error(
+      'A senha de recuperação deve conter pelo menos 16 caracteres e no máximo 1024 bytes.',
+    )
+}
+
+function readBase64Url(value: unknown, length: number) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/.test(value))
+    throw new Error('Arquivo de recuperação inválido.')
+  const result = Buffer.from(value, 'base64url')
+  if (result.length !== length || result.toString('base64url') !== value)
+    throw new Error('Arquivo de recuperação inválido.')
+  return result
+}
+
+function decodeRecoveryPackage(content: string): PortableRecoveryPackage {
+  if (typeof content !== 'string' || Buffer.byteLength(content) > 8192)
+    throw new Error('Arquivo de recuperação ausente ou grande demais.')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(content)
+  } catch {
+    throw new Error('Arquivo de recuperação inválido.')
+  }
+  if (!parsed || typeof parsed !== 'object') throw new Error('Arquivo de recuperação inválido.')
+  const item = parsed as Record<string, unknown>
+  if (item.type !== 'autoflow-ai-vault-recovery' || item.version !== 1 || item.kdf !== 'scrypt')
+    throw new Error('Versão de recuperação incompatível.')
+  readBase64Url(item.salt, 16)
+  readBase64Url(item.nonce, 12)
+  readBase64Url(item.tag, 16)
+  readBase64Url(item.ciphertext, 32)
+  return item as unknown as PortableRecoveryPackage
+}
+
+function decryptRecoveryPackage(content: string, password: string): Buffer {
+  ensureRecoveryPassword(password)
+  const envelope = decodeRecoveryPackage(content)
+  const salt = readBase64Url(envelope.salt, 16)
+  const nonce = readBase64Url(envelope.nonce, 12)
+  const tag = readBase64Url(envelope.tag, 16)
+  const ciphertext = readBase64Url(envelope.ciphertext, 32)
+  const derivedKey = scryptSync(password, salt, 32, RECOVERY_SCRYPT_OPTIONS)
+  try {
+    const decipher = createDecipheriv('aes-256-gcm', derivedKey, nonce)
+    decipher.setAAD(Buffer.from(RECOVERY_PURPOSE))
+    decipher.setAuthTag(tag)
+    const raw = Buffer.concat([decipher.update(ciphertext), decipher.final()])
+    if (raw.length !== 32) {
+      raw.fill(0)
+      throw new Error('Invalid master length')
+    }
+    return raw
+  } catch {
+    throw new Error(
+      'Senha de recuperação incorreta ou arquivo adulterado. Nenhum dado foi alterado.',
+    )
+  } finally {
+    derivedKey.fill(0)
+  }
+}
+
+function validateMasterAgainstDatabase(db: DatabaseSync, candidate: Buffer) {
+  const table = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_settings'")
+    .get()
+  if (!table) throw new Error('Banco de dados AutoFlow não encontrado neste diretório.')
+  const rows = db
+    .prepare(
+      'SELECT organization_id id, gemini_api_key gemini, openai_api_key openai FROM organization_settings',
+    )
+    .all() as Array<{ id: number; gemini: string; openai: string }>
+  let encryptedCount = 0
+  for (const row of rows) {
+    for (const [field, cipher] of [
+      ['gemini_api_key', row.gemini],
+      ['openai_api_key', row.openai],
+    ] as const) {
+      if (!cipher || !isEncryptedCredential(cipher)) continue
+      encryptedCount += 1
+      try {
+        const parts = cipher.slice(PREFIX.length).split(':')
+        if (parts.length !== 3) throw new Error('Invalid encoding')
+        const [iv, tag, body] = parts.map((v) => Buffer.from(v, 'base64url'))
+        if (!iv || !tag || !body || iv.length !== 12 || tag.length !== 16)
+          throw new Error('Invalid tag')
+        const decipher = createDecipheriv('aes-256-gcm', candidate, iv)
+        decipher.setAAD(Buffer.from(row.id + ':' + field))
+        decipher.setAuthTag(tag)
+        const plaintext = Buffer.concat([decipher.update(body), decipher.final()])
+        plaintext.fill(0)
+      } catch {
+        throw new Error(
+          'A chave recuperada não corresponde às credenciais deste banco. Nada foi alterado.',
+        )
+      }
+    }
+  }
+  if (!encryptedCount)
+    throw new Error('Este banco não contém chaves de IA criptografadas para validar a recuperação.')
+  return encryptedCount
+}
+
+export function createPortableRecoveryPackage(
+  db: DatabaseSync,
+  dataDir: string,
+  password: string,
+): string {
+  ensureRecoveryPassword(password)
+  if (!existsSync(join(dataDir, FILE)))
+    throw new Error('O cofre original não existe. Não crie um novo cofre sobre o banco restaurado.')
+  initializeCredentialVault(dataDir)
+  validateMasterAgainstDatabase(db, key())
+  const salt = randomBytes(16)
+  const nonce = randomBytes(12)
+  const derivedKey = scryptSync(password, salt, 32, RECOVERY_SCRYPT_OPTIONS)
+  try {
+    const cipher = createCipheriv('aes-256-gcm', derivedKey, nonce)
+    cipher.setAAD(Buffer.from(RECOVERY_PURPOSE))
+    const ciphertext = Buffer.concat([cipher.update(key()), cipher.final()])
+    const item: PortableRecoveryPackage = {
+      type: 'autoflow-ai-vault-recovery',
+      version: 1,
+      kdf: 'scrypt',
+      salt: salt.toString('base64url'),
+      nonce: nonce.toString('base64url'),
+      tag: cipher.getAuthTag().toString('base64url'),
+      ciphertext: ciphertext.toString('base64url'),
+    }
+    return JSON.stringify(item, null, 2) + '\n'
+  } finally {
+    derivedKey.fill(0)
+  }
+}
+
+/**
+ * Run on the new Windows user after restoring a complete AutoFlow backup.
+ * Validation happens BEFORE the old vault is replaced, even when its DPAPI
+ * envelope cannot be decrypted by the new Windows account.
+ */
+export function restorePortableRecoveryPackage(
+  db: DatabaseSync,
+  dataDir: string,
+  packageContents: string,
+  password: string,
+) {
+  if (process.platform !== 'win32')
+    throw new Error('A importação DPAPI portátil deve ser realizada em um computador Windows.')
+  const path = join(dataDir, FILE)
+  if (!existsSync(path))
+    throw new Error('O cofre original não foi encontrado. Restaure primeiro o backup completo.')
+  const current = JSON.parse(readFileSync(path, 'utf8')) as VaultFile
+  if (current.version !== 1 || current.mode !== 'dpapi')
+    throw new Error('A recuperação de perfis Windows exige um cofre DPAPI original.')
+  const master = decryptRecoveryPackage(packageContents, password)
+  try {
+    const verified = validateMasterAgainstDatabase(db, master)
+    const wrapped = dpapi('Protect', master)
+    const opened = dpapi('Unprotect', wrapped)
+    try {
+      if (opened.length !== master.length || !timingSafeEqual(opened, master))
+        throw new Error('A conta Windows atual não conseguiu abrir o cofre recém-criado.')
+    } finally {
+      opened.fill(0)
+    }
+    const nextFile: VaultFile = {
+      version: 1,
+      mode: 'dpapi',
+      wrappedKey: wrapped.toString('base64'),
+    }
+    // Preserve the old DPAPI envelope in case the replacement cannot be completed.
+    const suffix = createHash('sha256').update(randomBytes(24)).digest('hex').slice(0, 16)
+    const previousPath = join(dataDir, 'vault-key.pre-recovery-' + suffix + '.json')
+    const temporary = join(dataDir, 'vault-key.tmp-' + suffix + '.json')
+    try {
+      writeFileSync(temporary, JSON.stringify(nextFile) + '\n', { flag: 'wx', mode: 0o600 })
+      renameSync(path, previousPath)
+      try {
+        renameSync(temporary, path)
+      } catch (error) {
+        renameSync(previousPath, path)
+        throw error
+      }
+      vaultKey?.fill(0)
+      vaultKey = Buffer.from(master)
+      return { ok: true, verifiedCredentials: verified, previousVaultFile: previousPath }
+    } finally {
+      if (existsSync(temporary)) rmSync(temporary)
+    }
+  } finally {
+    master.fill(0)
+  }
+}
+
+/** Only checks the passphrase/envelope. Does not change the vault or database. */
+export function verifyPortableRecoveryPackage(content: string, password: string): boolean {
+  const recovered = decryptRecoveryPackage(content, password)
+  recovered.fill(0)
+  return true
 }
