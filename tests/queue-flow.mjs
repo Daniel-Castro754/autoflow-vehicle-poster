@@ -103,9 +103,9 @@ try {
     .prepare('SELECT version,checksum FROM schema_migrations ORDER BY version')
     .all()
   migrationDb.close()
-  const expectedVersions = Array.from({ length: 17 }, (_, i) => i + 1).join(',')
+  const expectedVersions = Array.from({ length: 18 }, (_, i) => i + 1).join(',')
   if (
-    migrations.length !== 17 ||
+    migrations.length !== 18 ||
     migrations.map((item) => item.version).join(',') !== expectedVersions ||
     migrations.some((item) => !/^[a-f0-9]{64}$/.test(item.checksum))
   )
