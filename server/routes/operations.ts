@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { operationalHealth, prometheusMetrics } from '../services/operational-health.ts'
 import { organizationScheduleHistory } from '../services/schedule-history.ts'
+import { systemReadiness } from '../services/system-readiness.ts'
 
 export function handleOperationsRoute(
   req: IncomingMessage,
@@ -10,7 +11,17 @@ export function handleOperationsRoute(
   auth: { organizationId: number },
   db: DatabaseSync,
   send: (res: ServerResponse, status: number, data: unknown) => void,
+  isAdmin = false,
 ): boolean {
+  if (req.method === 'GET' && url.pathname === '/api/health/readiness') {
+    res.setHeader('Cache-Control', 'no-store')
+    if (!isAdmin) {
+      send(res, 403, { error: 'Somente administradores podem consultar o diagnóstico.' })
+      return true
+    }
+    send(res, 200, systemReadiness(db, auth.organizationId))
+    return true
+  }
   if (req.method === 'GET' && url.pathname === '/api/operations/scheduling-insights') {
     const history = organizationScheduleHistory(db, auth.organizationId)
     const totalSamples = history.reduce((sum, hour) => sum + (hour.attemptCount || 0), 0)
