@@ -67,7 +67,9 @@ try {
     method: 'POST',
     body: JSON.stringify({ tone: 'vendedor' }),
   })
-  assert.equal(proposal.proposals.length, 2)
+  assert(proposal.proposals.length >= 2)
+  assert(proposal.proposals.some((item) => item.vehicleId === first.id))
+  assert(proposal.proposals.some((item) => item.vehicleId === second.id))
   assert(proposal.previewId)
   assert.equal(current(first.id), 'Texto curto.', 'Preview cannot write descriptions')
   assert.equal(current(second.id), 'Texto curto.')
