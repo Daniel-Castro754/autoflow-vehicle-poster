@@ -194,6 +194,8 @@ export default function VehiclesView({
   const [importing, setImporting] = useState(false)
   const [packagePreview, setPackagePreview] = useState<ZipPreview | null>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
+  const photoInputRef = useRef<HTMLInputElement>(null)
+  const [importingPhotos, setImportingPhotos] = useState(false)
   const deferredQuery = useDeferredValue(query)
 
   function changeStatusFilter(next: string) {
@@ -315,6 +317,87 @@ export default function VehiclesView({
       await reload()
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Erro ao marcar veículo como vendido')
+    }
+  }
+
+
+  async function importVehiclePhotos(selectedFiles?: FileList | null) {
+    if (!selectedFiles?.length) return
+    // Require an explicit stock code to avoid attaching photos to the wrong car.
+    const files = Array.from(selectedFiles)
+    const parseName = (name: string) => {
+      const match = name.match(/^([A-Za-z0-9._-]+)__(\d{1,2})\.(jpg|jpeg|png|webp)$/i)
+      return match ? { code: match[1].toUpperCase(), order: Number(match[2]) } : null
+    }
+    const invalid = files.filter((file) => !parseName(file.name))
+    if (invalid.length) {
+      notify('Use o padrão CODIGO__01.jpg para cada foto. Arquivos com nome inválido: ' + invalid.length)
+      return
+    }
+    setImportingPhotos(true)
+    try {
+      const stock = await api<{ vehicles: VehicleRecord[] }>('/vehicles')
+      const byCode = new Map<string, VehicleRecord>()
+      for (const vehicle of stock.vehicles) {
+        if (vehicle.stockCode) byCode.set(vehicle.stockCode.toUpperCase(), vehicle)
+      }
+      const groups = new Map<number, Array<{ file: File; order: number }>>()
+      const unmatched = new Set<string>()
+      for (const file of files) {
+        const parsed = parseName(file.name)!
+        const vehicle = byCode.get(parsed.code)
+        if (!vehicle) {
+          unmatched.add(parsed.code)
+          continue
+        }
+        const group = groups.get(vehicle.id) || []
+        group.push({ file, order: parsed.order })
+        groups.set(vehicle.id, group)
+      }
+      const planned = [...groups.entries()].reduce((total, [id, images]) => {
+        const count = stock.vehicles.find((v) => v.id === id)?.imageCount || 0
+        return total + Math.min(images.length, Math.max(0, 20 - count))
+      }, 0)
+      if (!planned) {
+        notify('Nenhuma foto corresponde a um código de estoque com espaço disponível.')
+        return
+      }
+      if (!window.confirm(
+        'Importar até ' + planned + ' foto(s) para ' + groups.size +
+        ' veículo(s)?\nCódigos não encontrados: ' + unmatched.size +
+        '.\nFotos existentes serão preservadas.',
+      )) return
+      let uploaded = 0
+      let duplicates = 0
+      let failures = 0
+      for (const [vehicleId, images] of groups) {
+        const vehicle = stock.vehicles.find((v) => v.id === vehicleId)!
+        let remaining = Math.max(0, 20 - (vehicle.imageCount || 0))
+        for (const { file } of images.sort((a, b) => a.order - b.order)) {
+          if (!remaining) break
+          try {
+            const response = await api<{ duplicate?: boolean }>(`/vehicles/${vehicleId}/images`, {
+              method: 'POST',
+              body: JSON.stringify(await filePayload(file)),
+            })
+            if (response.duplicate) duplicates++
+            else {
+              uploaded++
+              remaining--
+            }
+          } catch {
+            failures++
+          }
+        }
+      }
+      notify('Fotos: ' + uploaded + ' adicionada(s), ' + duplicates +
+        ' duplicada(s), ' + failures + ' falha(s), ' + unmatched.size + ' código(s) não localizado(s).')
+      await reload()
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Não foi possível importar as fotos.')
+    } finally {
+      setImportingPhotos(false)
+      if (photoInputRef.current) photoInputRef.current.value = ''
     }
   }
 
@@ -452,6 +535,23 @@ export default function VehiclesView({
           >
             <Upload size={18} />
             {importing ? 'Processando...' : 'Importar CSV ou ZIP'}
+          </button>
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+            multiple
+            hidden
+            onChange={(event) => void importVehiclePhotos(event.target.files)}
+          />
+          <button
+            className="secondary"
+            onClick={() => photoInputRef.current?.click()}
+            disabled={importing || importingPhotos}
+            title="Associe fotos pelo código de estoque: CODIGO__01.jpg"
+          >
+            <ImagePlus size={18} />
+            {importingPhotos ? 'Importando fotos...' : 'Importar fotos'}
           </button>
           <div className="action-with-help">
             <button className="primary" onClick={() => setEditor(null)}>
