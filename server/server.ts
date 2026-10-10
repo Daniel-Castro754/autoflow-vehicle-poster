@@ -418,7 +418,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       })
     )
       return
-    if (handleOperationsRoute(req, res, url, auth, db, send)) return
+    if (handleOperationsRoute(req, res, url, auth, db, send, isAdmin(auth))) return
     if (
       handleVehicleReadRoute(req, res, url, auth, {
         send,
