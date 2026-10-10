@@ -1,0 +1,37 @@
+name: Temporary branch formatting
+on:
+  push:
+    branches: [fix/group-curation-integrity]
+permissions:
+  contents: write
+jobs:
+  format:
+    if: "!contains(github.event.head_commit.message, '[style-bot]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: >
+          npx prettier --write
+          server/routes/groups.ts
+          server/routes/organization.ts
+          server/services/ai-agent.ts
+          server/services/group-curation-worker.ts
+          server/services/group-curator.ts
+          server/services/marketplace-groups.ts
+          src/Vehicles.tsx src/Views.tsx
+          tests/group-curation-integrity.mjs
+      - name: Commit formatting to feature branch
+        run: |
+          if test -z "$(git status --porcelain)"; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server/routes/groups.ts server/routes/organization.ts server/services/ai-agent.ts server/services/group-curation-worker.ts server/services/group-curator.ts server/services/marketplace-groups.ts src/Vehicles.tsx src/Views.tsx tests/group-curation-integrity.mjs
+          git commit -m "style: apply Prettier [style-bot]"
+          git push origin HEAD:fix/group-curation-integrity
