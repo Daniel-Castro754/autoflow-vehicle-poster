@@ -327,7 +327,7 @@ export default function VehiclesView({
     const files = Array.from(selectedFiles)
     const parseName = (name: string) => {
       const match = name.match(/^([A-Za-z0-9._-]+)__(\d{1,2})\.(jpg|jpeg|png|webp)$/i)
-      return match ? { code: match[1].toUpperCase(), order: Number(match[2]) } : null
+      return match?.[1] ? { code: match[1].toUpperCase(), order: Number(match[2]) } : null
     }
     const invalid = files.filter((file) => !parseName(file.name))
     if (invalid.length) {
