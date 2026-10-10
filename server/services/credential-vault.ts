@@ -52,7 +52,7 @@ function dpapi(operation: 'Protect' | 'Unprotect', bytes: Buffer): Buffer {
   if (result.status !== 0 || result.error || !result.stdout?.trim()) {
     // Record only error type; never print stdin or a credential.
     const category = result.stderr?.match(/DPAPI_ERROR_TYPE:([A-Za-z]+)/)?.[1]
-      || result.error?.code || 'exit-' + String(result.status)
+      || (result.error as NodeJS.ErrnoException | undefined)?.code || 'exit-' + String(result.status)
     throw new Error(
       'O Windows não conseguiu ' +
       (operation === 'Protect' ? 'proteger' : 'desbloquear') +
