@@ -242,6 +242,10 @@ export async function handleVehicleMutationRoute(
       send(res, 400, { error: 'Envie um CSV ou ZIP com os veículos.' })
       return true
     }
+    if (!packageData && Buffer.byteLength(csv, 'utf8') > 2 * 1024 * 1024) {
+      send(res, 413, { error: 'O CSV deve ter no máximo 2 MB.' })
+      return true
+    }
     const mode = body.mode === 'update' ? 'update' : 'skip'
     const dryRun = body.dryRun === true
     const previewDigest = typeof body.previewDigest === 'string' ? body.previewDigest : ''
@@ -362,12 +366,11 @@ export async function handleVehicleMutationRoute(
           continue
         }
         const duplicate = identifierConflicts[0]
-        const expectedImages = packageData?.rowPhotos[index]?.length || 0
         const label = [vehicleInput.year, vehicleInput.make, vehicleInput.model].join(' ')
         if (duplicate) {
           if (mode !== 'update') {
             skipped++
-            if (packageData) photoRows.push({ row: rowNumber, stockCode, label, images: expectedImages, action: 'Ignorar existente' })
+            if (packageData) photoRows.push({ row: rowNumber, stockCode, label, images: 0, action: 'Ignorar existente' })
             continue
           }
           if (!canWriteVehicle(duplicate.id, auth)) {
