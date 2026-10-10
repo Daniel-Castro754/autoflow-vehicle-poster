@@ -103,9 +103,10 @@ try {
     .prepare('SELECT version,checksum FROM schema_migrations ORDER BY version')
     .all()
   migrationDb.close()
+  const expectedVersions = Array.from({ length: 17 }, (_, i) => i + 1).join(',')
   if (
-    migrations.length !== 16 ||
-    migrations.map((item) => item.version).join(',') !== '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16' ||
+    migrations.length !== 17 ||
+    migrations.map((item) => item.version).join(',') !== expectedVersions ||
     migrations.some((item) => !/^[a-f0-9]{64}$/.test(item.checksum))
   )
     throw new Error('O banco não registrou as migrations versionadas com checksum.')

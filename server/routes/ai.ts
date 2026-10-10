@@ -2,7 +2,6 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import {
   auditInventory,
-  batchOptimizeDescriptions,
   executeAgentCommand,
   parseVehicleRawText,
   runAutopilotPipeline,
@@ -14,6 +13,12 @@ import {
   type VehicleInput,
 } from '../services/description-generator.ts'
 import { generateVehicleHashtags } from '../services/trending-hashtags.ts'
+import {
+  applyBatchDescriptionPreview,
+  consumeAutopilotPreview,
+  prepareAutopilotPreview,
+  prepareBatchDescriptionPreview,
+} from '../services/ai-operation-previews.ts'
 
 type AuthContext = { userId: number; organizationId: number }
 type Dependencies = {
@@ -90,7 +95,22 @@ export async function handleAIRoute(
     send(res, 200, { ok: true, audit: auditInventory(db, auth.organizationId) })
     return true
   }
+  if (req.method === 'GET' && url.pathname === '/api/ai/autopilot/preview') {
+    send(res, 200, prepareAutopilotPreview(db, auth.organizationId, auth.userId))
+    return true
+  }
   if (req.method === 'POST' && url.pathname === '/api/ai/autopilot/run') {
+    const body = (await jsonBody(req)) as Record<string, unknown>
+    if (typeof body.previewId !== 'string') {
+      send(res, 428, { error: 'Confira e confirme a prévia do piloto antes de agendar.' })
+      return true
+    }
+    try {
+      consumeAutopilotPreview(db, auth.organizationId, auth.userId, body.previewId)
+    } catch (err) {
+      send(res, 409, { error: err instanceof Error ? err.message : 'Prévia inválida.' })
+      return true
+    }
     send(res, 200, await runAutopilotPipeline(db, auth.organizationId, auth.userId))
     return true
   }
@@ -104,10 +124,47 @@ export async function handleAIRoute(
     send(res, 200, await executeAgentCommand(db, auth.organizationId, auth.userId, prompt))
     return true
   }
+  if (req.method === 'POST' && url.pathname === '/api/ai/batch-optimize/preview') {
+    const b = (await jsonBody(req)) as Record<string, unknown>
+    try {
+      send(
+        res,
+        200,
+        await prepareBatchDescriptionPreview(
+          db,
+          auth.organizationId,
+          auth.userId,
+          String(b.tone || 'vendedor') as CopyTone,
+        ),
+      )
+    } catch (err) {
+      send(res, 400, {
+        error: err instanceof Error ? err.message : 'Não foi possível gerar a prévia.',
+      })
+    }
+    return true
+  }
   if (req.method === 'POST' && url.pathname === '/api/ai/batch-optimize') {
     const b = (await jsonBody(req)) as Record<string, unknown>
-    const tone = String(b.tone || 'vendedor') as CopyTone
-    send(res, 200, await batchOptimizeDescriptions(db, auth.organizationId, tone))
+    if (typeof b.previewId !== 'string' || !Array.isArray(b.selectedVehicleIds)) {
+      send(res, 428, { error: 'Revise os textos e selecione quais descrições deseja aplicar.' })
+      return true
+    }
+    try {
+      send(
+        res,
+        200,
+        applyBatchDescriptionPreview(
+          db,
+          auth.organizationId,
+          auth.userId,
+          b.previewId,
+          b.selectedVehicleIds,
+        ),
+      )
+    } catch (err) {
+      send(res, 409, { error: err instanceof Error ? err.message : 'Prévia inválida.' })
+    }
     return true
   }
   if (req.method === 'POST' && url.pathname === '/api/ai/test-key') {

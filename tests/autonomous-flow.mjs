@@ -646,10 +646,19 @@ try {
   console.log('✓ Endpoint GET /api/ai/audit com Health Score validado.')
 
   // 3. Otimização em Lote de Descrições
-  const batchOptRes = await call('/ai/batch-optimize', token, {
+  const batchPreview = await call('/ai/batch-optimize/preview', token, {
     method: 'POST',
     body: JSON.stringify({ tone: 'profissional' }),
   })
+  const batchOptRes = batchPreview.previewId
+    ? await call('/ai/batch-optimize', token, {
+        method: 'POST',
+        body: JSON.stringify({
+          previewId: batchPreview.previewId,
+          selectedVehicleIds: batchPreview.proposals.map((item) => item.vehicleId),
+        }),
+      })
+    : { ok: true, updated: 0 }
   assert.equal(batchOptRes.ok, true)
   assert(typeof batchOptRes.updated === 'number')
   console.log('✓ Endpoint POST /api/ai/batch-optimize validado.')
@@ -703,7 +712,7 @@ try {
     body: JSON.stringify({ prompt: 'otimizar textos dos carros em tom vendedor' }),
   })
   assert.equal(cmdOptRes.ok, true)
-  assert.equal(cmdOptRes.intent, 'optimize_descriptions')
+  assert.equal(cmdOptRes.intent, 'optimize_descriptions_preview')
   console.log('✓ Endpoint POST /api/ai/command com despachante NLP validado.')
 
   // 5. Piloto Automático obedece aos mesmos requisitos da fila manual
@@ -799,7 +808,12 @@ try {
     .prepare("UPDATE vehicles SET vehicle_type='' WHERE id=?")
     .run(incompleteAutopilotVehicle.id)
 
-  const autopilotRes = await call('/ai/autopilot/run', token, { method: 'POST' })
+  const pilotPreview = await call('/ai/autopilot/preview', token)
+  assert(pilotPreview.previewId)
+  const autopilotRes = await call('/ai/autopilot/run', token, {
+    method: 'POST',
+    body: JSON.stringify({ previewId: pilotPreview.previewId }),
+  })
   assert.equal(autopilotRes.ok, true)
   assert.equal(
     autopilotRes.jobsCreated,

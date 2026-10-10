@@ -82,6 +82,19 @@ interface AutopilotResult {
   message: string
 }
 
+interface DescriptionPreview {
+  previewId: string | null
+  totalEligible: number
+  remainingAfterBatch: number
+  proposals: Array<{
+    vehicleId: number
+    label: string
+    original: string
+    proposed: string
+    provider: string
+  }>
+}
+
 interface CommandLog {
   id: string
   timestamp: string
@@ -135,6 +148,8 @@ export function AiCenterView({
 
   // Batch optimize state
   const [optimizingBatch, setOptimizingBatch] = useState(false)
+  const [descriptionPreview, setDescriptionPreview] = useState<DescriptionPreview | null>(null)
+  const [approvedDescriptionIds, setApprovedDescriptionIds] = useState<number[]>([])
   const [message, setMessage] = useState('')
   const [auditError, setAuditError] = useState(false)
 
@@ -177,7 +192,39 @@ export function AiCenterView({
     setRunningAutopilot(true)
     setAutopilotResult(null)
     try {
-      const res = await api<AutopilotResult>('/ai/autopilot/run', { method: 'POST' })
+      const preview = await api<{
+        previewId: string | null
+        connectedProfiles: number
+        potentialVehicles: Array<{ id: number; title: string }>
+        note: string
+      }>('/ai/autopilot/preview')
+      if (!preview.previewId) {
+        setMessage('Nenhum veículo e perfil conectados disponíveis para a prévia de agendamento.')
+        return
+      }
+      const list = preview.potentialVehicles.slice(0, 8).map((v) => v.title + ' (#' + v.id + ')')
+      if (
+        !window.confirm(
+          [
+            'PRÉVIA DO PILOTO AUTOMÁTICO — ainda não foi agendado nenhum veículo.',
+            'Perfis conectados: ' + preview.connectedProfiles,
+            'Candidatos: ' + preview.potentialVehicles.length,
+            ...list,
+            preview.potentialVehicles.length > 8 ? '(e outros veículos)' : '',
+            preview.note,
+            'Confirmar a criação dos agendamentos?',
+          ]
+            .filter(Boolean)
+            .join('\n'),
+        )
+      ) {
+        setMessage('Piloto cancelado sem alterações.')
+        return
+      }
+      const res = await api<AutopilotResult>('/ai/autopilot/run', {
+        method: 'POST',
+        body: JSON.stringify({ previewId: preview.previewId }),
+      })
       setAutopilotResult(res)
       setMessage(res.message)
       await loadAudit()
@@ -323,16 +370,52 @@ export function AiCenterView({
 
   async function handleBatchOptimize() {
     setOptimizingBatch(true)
+    setDescriptionPreview(null)
+    setApprovedDescriptionIds([])
     try {
-      const res = await api<{ ok: boolean; updated: number }>('/ai/batch-optimize', {
+      const preview = await api<DescriptionPreview>('/ai/batch-optimize/preview', {
         method: 'POST',
         body: JSON.stringify({ tone: 'vendedor' }),
       })
-      setMessage(`${res.updated} descrições enriquecidas com IA com sucesso!`)
+      setDescriptionPreview(preview)
+      setMessage(
+        preview.proposals.length
+          ? 'Compare os textos e selecione os veículos que deseja atualizar. Nenhum texto foi salvo.'
+          : 'Não há descrições elegíveis para esta rodada.',
+      )
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Erro ao gerar propostas de descrição.')
+    } finally {
+      setOptimizingBatch(false)
+    }
+  }
+
+  async function handleApplyDescriptions() {
+    if (!descriptionPreview?.previewId || !approvedDescriptionIds.length) return
+    if (
+      !window.confirm(
+        'Aplicar ' +
+          approvedDescriptionIds.length +
+          ' descrição(ões) revisada(s)? Esta ação modifica o cadastro dos veículos selecionados.',
+      )
+    )
+      return
+    setOptimizingBatch(true)
+    try {
+      const result = await api<{ ok: boolean; updated: number }>('/ai/batch-optimize', {
+        method: 'POST',
+        body: JSON.stringify({
+          previewId: descriptionPreview.previewId,
+          selectedVehicleIds: approvedDescriptionIds,
+        }),
+      })
+      setMessage(result.updated + ' descrição(ões) atualizada(s) após aprovação.')
+      setDescriptionPreview(null)
+      setApprovedDescriptionIds([])
       await reloadVehicles()
       await loadAudit()
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Erro ao otimizar descrições.')
+      setMessage(err instanceof Error ? err.message : 'Falha ao aplicar descrições.')
     } finally {
       setOptimizingBatch(false)
     }
@@ -530,9 +613,82 @@ export function AiCenterView({
                 title="Gera copies de IA para todos os carros que estiverem sem texto"
               >
                 <FileText size={16} />
-                {optimizingBatch ? 'Otimizando...' : 'Otimizar Todas as Descrições'}
+                {optimizingBatch ? 'Preparando prévia...' : 'Revisar descrições com IA'}
               </button>
             </div>
+
+            {descriptionPreview && descriptionPreview.proposals.length > 0 && (
+              <div
+                className="ai-result-box"
+                role="region"
+                aria-label="Revisão das descrições propostas"
+              >
+                <strong>Revisar descrições antes de salvar</strong>
+                <p>
+                  {descriptionPreview.proposals.length} proposta(s) nesta rodada de até 10.
+                  {descriptionPreview.remainingAfterBatch > 0
+                    ? ' Outras ' + descriptionPreview.remainingAfterBatch + ' aguardam nova rodada.'
+                    : ''}
+                  Nenhuma alteração será feita até sua confirmação.
+                </p>
+                {descriptionPreview.proposals.map((proposal) => (
+                  <div
+                    key={proposal.vehicleId}
+                    style={{ padding: '12px 0', borderBottom: '1px solid var(--border, #ccc)' }}
+                  >
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={approvedDescriptionIds.includes(proposal.vehicleId)}
+                        onChange={(event) =>
+                          setApprovedDescriptionIds((current) =>
+                            event.target.checked
+                              ? [...current, proposal.vehicleId]
+                              : current.filter((id) => id !== proposal.vehicleId),
+                          )
+                        }
+                      />
+                      <strong>{proposal.label}</strong>
+                      <small>Gerado por: {proposal.provider}</small>
+                    </label>
+                    <details>
+                      <summary>Comparar descrição atual e proposta</summary>
+                      <p>
+                        <strong>Original:</strong>
+                      </p>
+                      <p style={{ whiteSpace: 'pre-wrap' }}>
+                        {proposal.original || '(sem descrição)'}
+                      </p>
+                      <p>
+                        <strong>Proposta:</strong>
+                      </p>
+                      <p style={{ whiteSpace: 'pre-wrap' }}>{proposal.proposed}</p>
+                    </details>
+                  </div>
+                ))}
+                <div className="ai-actions-bar">
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={optimizingBatch || approvedDescriptionIds.length === 0}
+                    onClick={() => void handleApplyDescriptions()}
+                  >
+                    Aplicar {approvedDescriptionIds.length} descrição(ões) aprovada(s)
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={optimizingBatch}
+                    onClick={() => {
+                      setDescriptionPreview(null)
+                      setApprovedDescriptionIds([])
+                    }}
+                  >
+                    Descartar propostas
+                  </button>
+                </div>
+              </div>
+            )}
 
             {autopilotResult && (
               <div className="ai-result-box">
@@ -666,7 +822,7 @@ export function AiCenterView({
                     <div className="ai-chat-reply">
                       {log.reply}
                       {log.actionTaken && (
-                        <span className="ai-action-tag">Ação executada: {log.actionTaken}</span>
+                        <span className="ai-action-tag">Resultado: {log.actionTaken}</span>
                       )}
                     </div>
                   </div>

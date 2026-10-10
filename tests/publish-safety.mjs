@@ -33,7 +33,7 @@ for (const legacy of [true, false]) {
   }
   applyMigrations(migrationDb)
   applyMigrations(migrationDb)
-  assert.equal(migrationDb.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 16)
+  assert.equal(migrationDb.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 17)
   if (legacy)
     assert.equal(
       migrationDb.prepare('SELECT publish_attempt_at FROM publication_jobs WHERE id=1').get()
