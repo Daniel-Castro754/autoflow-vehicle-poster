@@ -10,6 +10,10 @@ export type MarketplaceGroup = {
   successCount: number
   failureCount: number
   lastFoundAt?: string
+  city?: string
+  state?: string
+  memberCount?: number
+  privacy?: string
 }
 
 export function createMarketplaceGroupService(db: DatabaseSync) {
@@ -56,7 +60,7 @@ export function createMarketplaceGroupService(db: DatabaseSync) {
   function marketplaceGroups(organizationId: number, activeOnly = false) {
     return db
       .prepare(
-        `SELECT id,name,url,group_key groupKey,active,priority,success_count successCount,failure_count failureCount,last_found_at lastFoundAt
+        `SELECT id,name,url,group_key groupKey,active,priority,success_count successCount,failure_count failureCount,last_found_at lastFoundAt,city,state,member_count memberCount,privacy
       FROM marketplace_groups WHERE organization_id=?${activeOnly ? ' AND active=1' : ''} ORDER BY priority,id`,
       )
       .all(organizationId) as MarketplaceGroup[]
@@ -66,7 +70,7 @@ export function createMarketplaceGroupService(db: DatabaseSync) {
     const existing = marketplaceGroups(organizationId),
       byId = new Map(existing.map((group) => [group.id, group]))
     const incoming = values
-      .slice(0, 20)
+      .slice(0, 2000)
       .map((value, index) => {
         if (typeof value === 'string')
           return { ...parseGroupTarget(value), id: 0, active: true, priority: index + 1 }
@@ -116,7 +120,7 @@ export function createMarketplaceGroupService(db: DatabaseSync) {
         )
       }
     }
-    const activeTargets = marketplaceGroups(organizationId, true).map(groupTarget)
+    const activeTargets = marketplaceGroups(organizationId, true).slice(0, 20).map(groupTarget)
     db.prepare(
       'UPDATE organization_settings SET target_groups=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=?',
     ).run(JSON.stringify(activeTargets), organizationId)
