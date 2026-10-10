@@ -36,7 +36,7 @@ function dpapi(operation: 'Protect' | 'Unprotect', bytes: Buffer): Buffer {
     "  [Console]::Error.WriteLine('DPAPI_ERROR_TYPE:' + $_.Exception.GetType().Name)",
     '  exit 23',
     '}',
-  ].join('; ')
+  ].join('\n')
   const encodedCommand = Buffer.from(script, 'utf16le').toString('base64')
   const result = spawnSync(
     'powershell.exe',
