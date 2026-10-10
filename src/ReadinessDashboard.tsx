@@ -11,12 +11,35 @@ type ReadinessCheck = {
   detail: string
   page: string
 }
+type GuidedAction = {
+  id: string
+  checkId: string
+  priority: 'critical' | 'high' | 'normal' | 'verification'
+  title: string
+  summary: string
+  reason: string
+  steps: string[]
+  destination: string
+  destinationLabel: string
+  safety: string
+  requiresHumanApproval: true
+  performsChanges: false
+}
+
+const guidancePriority: Record<GuidedAction['priority'], string> = {
+  critical: 'Prioridade alta · publicações e dados',
+  high: 'Prioridade de operação',
+  normal: 'Ajuste de configuração',
+  verification: 'Verificação recomendada',
+}
+
 type Report = {
   generatedAt: string
   evidence: string
   status: 'ready' | 'attention' | 'idle'
   summary: { attention: number; configured: number; inactive: number; unverified: number }
   checks: ReadinessCheck[]
+  guides: GuidedAction[]
   automation: {
     enabled: boolean
     autoPublish: boolean
@@ -70,6 +93,8 @@ export function ReadinessDashboard({
   const [report, setReport] = useState<Report | null>(null)
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  const [expandedGuide, setExpandedGuide] = useState<string | null>(null)
+  const [reviewed, setReviewed] = useState<Record<string, boolean>>({})
   const load = useCallback(async () => {
     setRefreshing(true)
     try {
@@ -180,6 +205,145 @@ export function ReadinessDashboard({
               </strong>
               .
             </p>
+          </article>
+          <article className="module-card" aria-label="Assistente de correção guiada">
+            <div className="module-head">
+              <div>
+                <h2>
+                  <ShieldCheck size={18} /> Assistente de correção guiada
+                </h2>
+                <span>
+                  {report.guides.length
+                    ? report.guides.length +
+                      ' roteiro(s) para revisão manual, em ordem de prioridade.'
+                    : 'Nenhuma pendência com roteiro disponível no diagnóstico atual.'}
+                </span>
+              </div>
+              {Object.values(reviewed).some(Boolean) && (
+                <button className="secondary" type="button" onClick={() => setReviewed({})}>
+                  Limpar marcações
+                </button>
+              )}
+            </div>
+            <p className="health-note">
+              Este assistente explica como verificar e corrigir problemas. Ele não altera
+              configurações, credenciais, grupos ou publicações. Marcar um passo significa apenas
+              que você o conferiu; não comprova que o problema foi resolvido.
+            </p>
+            <div style={{ display: 'grid', gap: 12 }}>
+              {report.guides.map((guide, index) => {
+                const opened = expandedGuide === guide.id
+                const checked = guide.steps.filter(
+                  (_, step) => reviewed[guide.id + ':' + step],
+                ).length
+                return (
+                  <div
+                    key={guide.id}
+                    style={{
+                      border: '1px solid var(--line, #dce5e4)',
+                      borderRadius: 12,
+                      padding: 16,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="secondary"
+                      aria-expanded={opened}
+                      aria-controls={'remediation-detail-' + guide.id}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: 12,
+                      }}
+                      onClick={() => setExpandedGuide(opened ? null : guide.id)}
+                    >
+                      <span>
+                        <strong>
+                          {index + 1}. {guide.title}
+                        </strong>
+                        <small style={{ display: 'block', marginTop: 5 }}>
+                          {guidancePriority[guide.priority]} · {guide.summary}
+                        </small>
+                      </span>
+                      <span aria-hidden="true">{opened ? '−' : '+'}</span>
+                    </button>
+                    {opened && (
+                      <div id={'remediation-detail-' + guide.id} style={{ marginTop: 15 }}>
+                        <p>
+                          <strong>Por que revisar:</strong> {guide.reason}
+                        </p>
+                        <ol style={{ display: 'grid', gap: 10, paddingLeft: 22 }}>
+                          {guide.steps.map((step, i) => (
+                            <li key={guide.id + ':' + i}>
+                              <label
+                                style={{
+                                  display: 'flex',
+                                  gap: 9,
+                                  alignItems: 'flex-start',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  aria-label={'Etapa ' + (i + 1) + ': ' + step}
+                                  checked={Boolean(reviewed[guide.id + ':' + i])}
+                                  onChange={(e) => {
+                                    const value = e.target.checked
+                                    setReviewed((current) => ({
+                                      ...current,
+                                      [guide.id + ':' + i]: value,
+                                    }))
+                                  }}
+                                />
+                                <span>{step}</span>
+                              </label>
+                            </li>
+                          ))}
+                        </ol>
+                        <p className="health-note">
+                          {checked} de {guide.steps.length} etapas conferidas nesta tela.
+                        </p>
+                        <p className="health-note">
+                          <strong>Limite de segurança:</strong> {guide.safety}
+                        </p>
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            alignItems: 'center',
+                            gap: 10,
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => navigate(guide.destination)}
+                          >
+                            {guide.destinationLabel} <ArrowRight size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary"
+                            disabled={refreshing}
+                            onClick={() => void load()}
+                          >
+                            <RefreshCcw size={14} /> Reavaliar diagnóstico
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+              {!report.guides.length && (
+                <p className="health-note">
+                  As condições básicas não mostraram alertas cobertos por roteiros. Integrações
+                  externas e backups continuam exigindo validação independente.
+                </p>
+              )}
+            </div>
           </article>
           {sections.map(({ id, title }) => (
             <article className="module-card" key={id} aria-label={title}>

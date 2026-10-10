@@ -50,6 +50,11 @@ try {
   let report = await admin('/health/readiness?organizationId=' + foreign)
   assert(report.checks.some((item) => item.id === 'vault' && item.status === 'attention'))
   assert(report.checks.some((item) => item.id === 'groups' && item.status === 'attention'))
+  assert(report.guides.some((item) => item.checkId === 'groups' && item.performsChanges === false))
+  assert(
+    report.guides.some((item) => item.checkId === 'backup' && item.priority === 'verification'),
+  )
+  assert(report.guides.every((guide) => guide.requiresHumanApproval && guide.steps.length >= 3))
   assert(report.checks.some((item) => item.id === 'webhook' && item.status === 'ok'))
   assert.equal(report.automation.activeGroups, 0)
   assert.equal(report.automation.enabled, true)
@@ -58,6 +63,7 @@ try {
     report.checks.filter((x) => x.status === 'attention').length,
   )
   assert(!JSON.stringify(report).includes(passwordLikeWebhook))
+  assert(report.guides.every((guide) => !('token' in guide) && !('apiKey' in guide)))
   assert(!JSON.stringify(report).includes(fakeGeminiKey))
   assert(!JSON.stringify(report).includes('Private tenant group'))
   assert(!JSON.stringify(report).includes('private-tenant'))
@@ -83,6 +89,8 @@ try {
 
   const otherReport = await other('/health/readiness')
   assert.equal(otherReport.automation.activeGroups, 1)
+  assert(!otherReport.guides.some((guide) => guide.checkId === 'groups'))
+  assert((await admin('/health/readiness')).guides.some((guide) => guide.checkId === 'groups'))
   assert.equal(otherReport.automation.enabled, true)
   assert.equal((await admin('/health/readiness')).automation.activeGroups, 0)
   assert(!JSON.stringify(otherReport).includes(passwordLikeWebhook))
