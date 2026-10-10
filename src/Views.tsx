@@ -3484,7 +3484,9 @@ export function SettingsView({
 
   async function runAutoCurate() {
     if (groupEditsPending) {
-      setMessage('Salve as alterações de grupos antes de reorganizar; seus dados foram preservados.')
+      setMessage(
+        'Salve as alterações de grupos antes de reorganizar; seus dados foram preservados.',
+      )
       return
     }
     setCurating(true)

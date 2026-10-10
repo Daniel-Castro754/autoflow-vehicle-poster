@@ -466,7 +466,11 @@ try {
 
   // 2.5 Curadoria de Grupos via API
   const groupPreview = await call('/groups/curated', token)
-  const curateRes = await call('/groups/auto-curate?previewDigest=' + groupPreview.previewDigest, token, { method: 'POST' })
+  const curateRes = await call(
+    '/groups/auto-curate?previewDigest=' + groupPreview.previewDigest,
+    token,
+    { method: 'POST' },
+  )
   assert.equal(curateRes.ok, true)
   assert(curateRes.curatedCount >= 2)
   console.log('✓ Endpoint POST /api/groups/auto-curate validado.')
