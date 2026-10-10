@@ -43,7 +43,7 @@ try {
   ).run(fakeGeminiKey, passwordLikeWebhook, org)
   db.prepare(
     'INSERT INTO marketplace_groups (organization_id,name,url,active) VALUES (?,?,?,1)',
-  ).run(foreign, 'Private tenant group', 'https://facebook.com/groups/private-tenant', 1)
+  ).run(foreign, 'Private tenant group', 'https://facebook.com/groups/private-tenant')
   db.prepare('UPDATE organization_settings SET autopilot_enabled=1 WHERE organization_id=?').run(
     foreign,
   )
