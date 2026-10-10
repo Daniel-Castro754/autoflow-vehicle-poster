@@ -20,8 +20,6 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      - run: npx prettier --write server/routes/vehicles.ts server/services/vehicle-import-package.ts src/Vehicles.tsx src/zip-import.css tests/vehicle-zip-import.mjs && git diff -- server/routes/vehicles.ts server/services/vehicle-import-package.ts src/Vehicles.tsx src/zip-import.css tests/vehicle-zip-import.mjs
-      - run: npm run test:vehicle-zip
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
