@@ -252,6 +252,17 @@ const migrations: Migration[] = [
         AND a.action='opened' AND a.note='Importado do estado atual durante a migração.'
     );`,
   },
+  {
+    version: 15,
+    columns: [
+      ['marketplace_groups', 'city', "TEXT NOT NULL DEFAULT ''"],
+      ['marketplace_groups', 'state', "TEXT NOT NULL DEFAULT ''"],
+      ['marketplace_groups', 'member_count', 'INTEGER NOT NULL DEFAULT 0'],
+      ['marketplace_groups', 'member_updated_at', 'TEXT'],
+      ['marketplace_groups', 'privacy', "TEXT NOT NULL DEFAULT ''"],
+    ],
+    sql: 'CREATE INDEX IF NOT EXISTS idx_groups_company_rank ON marketplace_groups (organization_id,active,priority);',
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {
