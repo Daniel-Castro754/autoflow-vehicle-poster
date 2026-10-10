@@ -19,3 +19,6 @@ backups/
 !.env.example
 .DS_Store
 coverage/
+
+# Banco e credenciais usados nos ambientes isolados de teste
+data-*/
