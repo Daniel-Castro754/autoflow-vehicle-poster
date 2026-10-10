@@ -3721,6 +3721,15 @@ export function SettingsView({
                     </button>
                     <button
                       type="button"
+                      disabled={curating}
+                      onClick={() => void undoGroupCuration()}
+                      title="Desfazer a última reorganização, se nenhum grupo foi modificado depois"
+                    >
+                      <RotateCcw size={14} />
+                      Desfazer ordem
+                    </button>
+                    <button
+                      type="button"
                       disabled={groups.length >= 2000}
                       onClick={() =>
                         setGroups((current) => [
@@ -3798,11 +3807,13 @@ export function SettingsView({
                         <button
                           type="button"
                           className="danger"
-                          onClick={() =>
-                            setGroups((current) =>
-                              current.filter((_, itemIndex) => itemIndex !== index),
-                            )
-                          }
+                          onClick={() => {
+                             if (group.id) {
+                               if (!window.confirm('Excluir o grupo ' + group.name + '? A exclusão só acontecerá após Salvar configurações.')) return
+                               setDeletedGroupIds((current) => [...new Set([...current, group.id!])])
+                             }
+                             setGroups((current) => current.filter((_, itemIndex) => itemIndex !== index))
+                           }}
                           aria-label="Excluir grupo"
                         >
                           <X />
