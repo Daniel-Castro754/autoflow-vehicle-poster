@@ -27,7 +27,7 @@ export function handleGroupsRoute(
   res: ServerResponse,
   url: URL,
   auth: AuthContext,
-  { db, send, isAdmin, marketplaceGroups }: Dependencies,
+  { db, send, isAdmin }: Dependencies,
 ): boolean {
   if (req.method === 'GET' && url.pathname === '/api/groups/curated') {
     // Ignore caller-supplied locations: only the company default is authoritative.
