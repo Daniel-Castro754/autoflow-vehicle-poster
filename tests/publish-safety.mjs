@@ -538,9 +538,9 @@ try {
     throw new Error(
       'O grupo com bom histórico deveria continuar ativo e em primeiro lugar após a curadoria automática.',
     )
-  if (curatedBad.active)
+  if (!curatedBad.active || curatedBad.priority !== 2)
     throw new Error(
-      'O grupo com histórico ruim deveria ter sido desativado pela curadoria automática.',
+      'A curadoria deve reduzir a prioridade do grupo com histórico ruim sem desativá-lo.',
     )
 
   // 6. O agendamento só deve usar histórico com amostra terminal suficiente
