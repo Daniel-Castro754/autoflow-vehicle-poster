@@ -95,6 +95,22 @@ interface DescriptionPreview {
   }>
 }
 
+interface AiOperationEvent {
+  id: number
+  action: string
+  outcome: string
+  provider: string | null
+  items: number
+  createdAt: string
+}
+
+interface AiProviderStatus {
+  preference: string
+  geminiConfigured: boolean
+  openaiConfigured: boolean
+  fallback: string
+}
+
 interface CommandLog {
   id: string
   timestamp: string
@@ -121,6 +137,8 @@ export function AiCenterView({
   navigate: (page: string) => void
 }) {
   const [audit, setAudit] = useState<InventoryAudit | null>(null)
+  const [aiHistory, setAiHistory] = useState<AiOperationEvent[]>([])
+  const [providerStatus, setProviderStatus] = useState<AiProviderStatus | null>(null)
   const [loadingAudit, setLoadingAudit] = useState(true)
   const [runningAutopilot, setRunningAutopilot] = useState(false)
   const [autopilotResult, setAutopilotResult] = useState<AutopilotResult | null>(null)
@@ -188,6 +206,33 @@ export function AiCenterView({
     }
   }, [api])
 
+  async function refreshAiHistory() {
+    try {
+      const [log, provider] = await Promise.all([
+        api<{ history: AiOperationEvent[] }>('/ai/history'),
+        api<AiProviderStatus>('/ai/provider-status'),
+      ])
+      setAiHistory(log.history)
+      setProviderStatus(provider)
+    } catch {
+      // History is informational and must not block operations.
+    }
+  }
+
+  useEffect(() => {
+    let active = true
+    Promise.all([
+      api<{ history: AiOperationEvent[] }>('/ai/history'),
+      api<AiProviderStatus>('/ai/provider-status'),
+    ]).then(([log, status]) => {
+      if (active) {
+        setAiHistory(log.history)
+        setProviderStatus(status)
+      }
+    }).catch(() => {})
+    return () => { active = false }
+  }, [api])
+
   async function handleRunAutopilot() {
     setRunningAutopilot(true)
     setAutopilotResult(null)
@@ -227,6 +272,7 @@ export function AiCenterView({
       })
       setAutopilotResult(res)
       setMessage(res.message)
+      await refreshAiHistory()
       await loadAudit()
       await reloadVehicles()
     } catch (err) {
@@ -258,6 +304,7 @@ export function AiCenterView({
         ...(res.actionTaken === undefined ? {} : { actionTaken: res.actionTaken }),
       }
       setCommandLogs((prev) => [logEntry, ...prev])
+      await refreshAiHistory()
       await loadAudit()
       await reloadVehicles()
     } catch (err) {
@@ -378,6 +425,7 @@ export function AiCenterView({
         body: JSON.stringify({ tone: 'vendedor' }),
       })
       setDescriptionPreview(preview)
+      await refreshAiHistory()
       setMessage(
         preview.proposals.length
           ? 'Compare os textos e selecione os veículos que deseja atualizar. Nenhum texto foi salvo.'
@@ -410,6 +458,7 @@ export function AiCenterView({
         }),
       })
       setMessage(result.updated + ' descrição(ões) atualizada(s) após aprovação.')
+      await refreshAiHistory()
       setDescriptionPreview(null)
       setApprovedDescriptionIds([])
       await reloadVehicles()
@@ -560,6 +609,45 @@ export function AiCenterView({
           </div>
         </div>
       )}
+      <article className="module-card" aria-label="Provedores e histórico da IA">
+        <div className="module-head">
+          <div>
+            <h2>Provedores e histórico da IA</h2>
+            <span>Eventos operacionais, sem armazenar textos completos nem chaves de API.</span>
+          </div>
+          <button className="secondary" type="button" onClick={() => void refreshAiHistory()}>
+            <RotateCcw size={15} /> Atualizar histórico
+          </button>
+        </div>
+        <p>
+          Preferência: <strong>{providerStatus?.preference || 'carregando'}</strong>.
+          {' '}Gemini: {providerStatus?.geminiConfigured ? 'configurado' : 'não configurado'}.
+          {' '}OpenAI: {providerStatus?.openaiConfigured ? 'configurada' : 'não configurada'}.
+          {' '}Fallback disponível: procedural (offline).
+        </p>
+        <p style={{ fontSize: 13 }}>
+          O provedor configurado pode não ser o utilizado. A geração de descrições
+          identifica o provedor real em cada proposta.
+        </p>
+        <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+          {aiHistory.length ? (
+            <table className="data-table">
+              <thead><tr><th>Horário (UTC)</th><th>Operação</th><th>Resultado</th><th>Provedor</th><th>Itens</th></tr></thead>
+              <tbody>
+                {aiHistory.slice(0, 20).map((event) => (
+                  <tr key={event.id}>
+                    <td>{event.createdAt}</td>
+                    <td>{event.action}</td>
+                    <td>{event.outcome}</td>
+                    <td>{event.provider || '—'}</td>
+                    <td>{event.items}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : <p>Nenhuma operação registrada neste ambiente.</p>}
+        </div>
+      </article>
       {/* Main Grid: Autopilot + Command Agent */}
       <div className="ai-two-column-grid">
         {/* Left Column: Autopilot Console & Quick Actions */}
