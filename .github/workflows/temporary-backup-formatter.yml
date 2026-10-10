@@ -1,0 +1,26 @@
+name: Temporary backup verification formatter
+on:
+  push:
+    branches: [feature/controlled-backup-verification]
+permissions:
+  contents: write
+jobs:
+  format:
+    if: "!contains(github.event.head_commit.message, '[style-bot]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx prettier --write scripts/verify-backup-worker.mjs server/server.ts server/services/backup-verification.ts src/ReadinessDashboard.tsx tests/backup-verification.mjs
+      - name: Commit formatting
+        run: |
+          if test -z "$(git status --porcelain)"; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/verify-backup-worker.mjs server/server.ts server/services/backup-verification.ts src/ReadinessDashboard.tsx tests/backup-verification.mjs
+          git commit -m "style: normalize backup verification [style-bot]"
+          git push origin HEAD:feature/controlled-backup-verification
