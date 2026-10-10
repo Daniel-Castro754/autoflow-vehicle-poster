@@ -1,4 +1,10 @@
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+  scryptSync,
+  timingSafeEqual,
+} from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -18,8 +24,7 @@ let vaultKey: Buffer | null = null
  * Credential bytes travel exclusively on stdin, never in argv or logs.
  */
 function dpapi(operation: 'Protect' | 'Unprotect', bytes: Buffer): Buffer {
-  if (process.platform !== 'win32')
-    throw new Error('DPAPI só está disponível no Windows.')
+  if (process.platform !== 'win32') throw new Error('DPAPI só está disponível no Windows.')
 
   const script = [
     "$ErrorActionPreference = 'Stop'",
@@ -30,7 +35,8 @@ function dpapi(operation: 'Protect' | 'Unprotect', bytes: Buffer): Buffer {
     '  [byte[]] $inputBytes = [Convert]::FromBase64String($encoded)',
     '  $scope = [System.Security.Cryptography.DataProtectionScope]::CurrentUser',
     '  [byte[]] $outputBytes = [System.Security.Cryptography.ProtectedData]::' +
-      operation + '($inputBytes, $null, $scope)',
+      operation +
+      '($inputBytes, $null, $scope)',
     '  [Console]::Out.Write([Convert]::ToBase64String($outputBytes))',
     '} catch {',
     "  [Console]::Error.WriteLine('DPAPI_ERROR_TYPE:' + $_.Exception.GetType().Name)",
@@ -51,12 +57,16 @@ function dpapi(operation: 'Protect' | 'Unprotect', bytes: Buffer): Buffer {
   )
   if (result.status !== 0 || result.error || !result.stdout?.trim()) {
     // Record only error type; never print stdin or a credential.
-    const category = result.stderr?.match(/DPAPI_ERROR_TYPE:([A-Za-z]+)/)?.[1]
-      || (result.error as NodeJS.ErrnoException | undefined)?.code || 'exit-' + String(result.status)
+    const category =
+      result.stderr?.match(/DPAPI_ERROR_TYPE:([A-Za-z]+)/)?.[1] ||
+      (result.error as NodeJS.ErrnoException | undefined)?.code ||
+      'exit-' + String(result.status)
     throw new Error(
       'O Windows não conseguiu ' +
-      (operation === 'Protect' ? 'proteger' : 'desbloquear') +
-      ' o cofre DPAPI (' + category + '). Os dados foram preservados.',
+        (operation === 'Protect' ? 'proteger' : 'desbloquear') +
+        ' o cofre DPAPI (' +
+        category +
+        '). Os dados foram preservados.',
     )
   }
   const base64 = result.stdout.trim()

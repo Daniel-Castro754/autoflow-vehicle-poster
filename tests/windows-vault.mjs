@@ -30,17 +30,29 @@ if (process.platform !== 'win32') {
     initializeCredentialVault(root)
     assert.equal(decryptCredential(encrypted, 7, 'gemini_api_key'), 'test-fake-gemini')
 
-    db.exec("CREATE TABLE organization_settings (organization_id INTEGER PRIMARY KEY,gemini_api_key TEXT NOT NULL DEFAULT '',openai_api_key TEXT NOT NULL DEFAULT '')")
-    db.prepare('INSERT INTO organization_settings VALUES(7,?,?)')
-      .run('legacy-gemini-fake-key','legacy-openai-fake-key')
+    db.exec(
+      "CREATE TABLE organization_settings (organization_id INTEGER PRIMARY KEY,gemini_api_key TEXT NOT NULL DEFAULT '',openai_api_key TEXT NOT NULL DEFAULT '')",
+    )
+    db.prepare('INSERT INTO organization_settings VALUES(7,?,?)').run(
+      'legacy-gemini-fake-key',
+      'legacy-openai-fake-key',
+    )
     migrateCredentials(db)
-    const row = db.prepare('SELECT gemini_api_key gemini,openai_api_key openai FROM organization_settings WHERE organization_id=7').get()
+    const row = db
+      .prepare(
+        'SELECT gemini_api_key gemini,openai_api_key openai FROM organization_settings WHERE organization_id=7',
+      )
+      .get()
     assert(row.gemini.startsWith('enc:v1:') && row.openai.startsWith('enc:v1:'))
-    assert.equal(decryptCredential(row.gemini, 7, 'gemini_api_key'),'legacy-gemini-fake-key')
-    assert.equal(decryptCredential(row.openai, 7, 'openai_api_key'),'legacy-openai-fake-key')
+    assert.equal(decryptCredential(row.gemini, 7, 'gemini_api_key'), 'legacy-gemini-fake-key')
+    assert.equal(decryptCredential(row.openai, 7, 'openai_api_key'), 'legacy-openai-fake-key')
     initializeCredentialVault(root)
     migrateCredentials(db)
-    const same = db.prepare('SELECT gemini_api_key gemini,openai_api_key openai FROM organization_settings WHERE organization_id=7').get()
+    const same = db
+      .prepare(
+        'SELECT gemini_api_key gemini,openai_api_key openai FROM organization_settings WHERE organization_id=7',
+      )
+      .get()
     assert.deepEqual(same, row, 'Restart must not rewrite encrypted credentials')
     console.log('✓ Windows DPAPI protect/unprotect, encrypted credential migration and restart')
   } finally {
