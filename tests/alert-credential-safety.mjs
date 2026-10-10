@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
 import { startTestServer, createApiClient } from './helpers/server.mjs'
-import { getAlertCredentials } from '../server/services/credential-vault.ts'
 import { validateWebhookAddress } from '../server/services/alert-secrets.ts'
 
 const server = await startTestServer()
