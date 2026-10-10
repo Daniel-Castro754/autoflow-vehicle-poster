@@ -261,7 +261,13 @@ const migrations: Migration[] = [
       ['marketplace_groups', 'member_updated_at', 'TEXT'],
       ['marketplace_groups', 'privacy', "TEXT NOT NULL DEFAULT ''"],
     ],
-    sql: 'CREATE INDEX IF NOT EXISTS idx_groups_company_rank ON marketplace_groups (organization_id,active,priority);',
+    sql: `CREATE INDEX IF NOT EXISTS idx_groups_company_rank ON marketplace_groups (organization_id,active,priority);
+    CREATE TABLE IF NOT EXISTS group_ranking_refresh (
+      organization_id INTEGER PRIMARY KEY,
+      confirmed_count INTEGER NOT NULL DEFAULT 0,
+      refreshed_at TEXT,
+      FOREIGN KEY (organization_id) REFERENCES organizations(id)
+    );`,
   },
 ]
 
