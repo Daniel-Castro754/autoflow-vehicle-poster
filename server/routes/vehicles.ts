@@ -4,6 +4,12 @@ import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  MAX_VEHICLE_ZIP_BODY_BYTES,
+  MAX_VEHICLE_ZIP_BYTES,
+  parseVehiclePackage,
+  type PackagePhoto,
+} from '../services/vehicle-import-package.ts'
+import {
   applyVehicleDefaults,
   validImageContent,
   validateVehicleBody,
@@ -207,10 +213,37 @@ export async function handleVehicleMutationRoute(
   }: MutationDependencies,
 ): Promise<boolean> {
   if (req.method === 'POST' && url.pathname === '/api/vehicles/import') {
-    const body = (await jsonBody(req, 2 * 1024 * 1024)) as Record<string, unknown>
-    const csv = String(body.csv || '')
+    const body = (await jsonBody(req, MAX_VEHICLE_ZIP_BODY_BYTES)) as Record<string, unknown>
+    const archiveEncoded = typeof body?.zipBase64 === 'string' ? body.zipBase64 : ''
+    let packageData: Awaited<ReturnType<typeof parseVehiclePackage>> | null = null
+    if (archiveEncoded) {
+      if (
+        archiveEncoded.length > Math.ceil((MAX_VEHICLE_ZIP_BYTES * 4) / 3) ||
+        archiveEncoded.length % 4 !== 0 ||
+        !/^[A-Za-z0-9+/]+={0,2}$/.test(archiveEncoded)
+      ) {
+        send(res, 400, { error: 'Arquivo ZIP em base64 inválido ou acima de 48 MB.' })
+        return true
+      }
+      const archiveBytes = Buffer.from(archiveEncoded, 'base64')
+      if (archiveBytes.toString('base64') !== archiveEncoded) {
+        send(res, 400, { error: 'Arquivo ZIP codificado incorretamente.' })
+        return true
+      }
+      try {
+        packageData = await parseVehiclePackage(archiveBytes)
+      } catch (error) {
+        send(res, 400, { error: error instanceof Error ? error.message : 'ZIP inválido.' })
+        return true
+      }
+    }
+    const csv = packageData?.csv || String(body?.csv || '')
     if (!csv.trim()) {
-      send(res, 400, { error: 'Envie o conteúdo do arquivo CSV.' })
+      send(res, 400, { error: 'Envie um CSV ou ZIP com os veículos.' })
+      return true
+    }
+    if (!packageData && Buffer.byteLength(csv, 'utf8') > 2 * 1024 * 1024) {
+      send(res, 413, { error: 'O CSV deve ter no máximo 2 MB.' })
       return true
     }
     const mode = body.mode === 'update' ? 'update' : 'skip'
@@ -218,7 +251,7 @@ export async function handleVehicleMutationRoute(
     const previewDigest = typeof body.previewDigest === 'string' ? body.previewDigest : ''
     let rows: Array<Record<string, unknown>>
     try {
-      rows = csvVehicles(csv, 2000)
+      rows = packageData?.rows || csvVehicles(csv, 2000)
     } catch (error) {
       send(res, 400, { error: error instanceof Error ? error.message : 'CSV inválido.' })
       return true
@@ -229,8 +262,70 @@ export async function handleVehicleMutationRoute(
     }
     let created = 0,
       updated = 0,
-      skipped = 0
+      skipped = 0,
+      attachedPhotos = 0
     const errors: Array<{ row: number; error: string }> = []
+    const photoRows: Array<{
+      row: number
+      stockCode: string
+      label: string
+      images: number
+      action: string
+    }> = []
+    const writtenFiles: string[] = []
+    // Photo plans are computed while the stock is locked; existing photographs
+    // and their hashes are read for the same organization before any changes.
+    function photoPlan(vehicleId: number | null, index: number) {
+      const requested = packageData?.rowPhotos[index] || []
+      const saved = vehicleId
+        ? (db
+            .prepare(
+              'SELECT content_hash contentHash FROM vehicle_images WHERE vehicle_id=? AND organization_id=?',
+            )
+            .all(vehicleId, auth.organizationId) as Array<{ contentHash: string }>)
+        : []
+      const hashes = new Set(saved.map((photo) => photo.contentHash))
+      const fresh = requested.filter((photo) => {
+        if (hashes.has(photo.hash)) return false
+        hashes.add(photo.hash)
+        return true
+      })
+      return {
+        fresh,
+        error:
+          saved.length + fresh.length > 20 ? 'O veículo ultrapassaria o limite de 20 fotos.' : '',
+      }
+    }
+    function attach(vehicleId: number, images: PackagePhoto[]) {
+      attachedPhotos += images.length
+      if (dryRun) return
+      const next = (
+        db
+          .prepare(
+            'SELECT COALESCE(MAX(position),-1)+1 next FROM vehicle_images WHERE vehicle_id=? AND organization_id=?',
+          )
+          .get(vehicleId, auth.organizationId) as { next: number }
+      ).next
+      images.forEach((image, offset) => {
+        const extension =
+          image.mime === 'image/png' ? 'png' : image.mime === 'image/webp' ? 'webp' : 'jpg'
+        const name = randomBytes(12).toString('hex') + '.' + extension
+        const path = join(uploadsDir, name)
+        writeFileSync(path, image.bytes, { flag: 'wx' })
+        writtenFiles.push(path)
+        db.prepare(
+          'INSERT INTO vehicle_images (organization_id,vehicle_id,file_name,original_name,mime_type,position,content_hash) VALUES (?,?,?,?,?,?,?)',
+        ).run(
+          auth.organizationId,
+          vehicleId,
+          name,
+          image.originalName,
+          image.mime,
+          next + offset,
+          image.hash,
+        )
+      })
+    }
     // The preview and commit use a snapshot of the relevant organization's stock
     // and publication state. This prevents confirming a stale preview.
     db.exec('BEGIN IMMEDIATE')
@@ -240,15 +335,28 @@ export async function handleVehicleMutationRoute(
         .prepare(
           `SELECT v.id,v.stock_code stockCode,v.vin,v.status,v.updated_at updatedAt,
           v.year,v.make,v.model,v.price,v.km,
+          (SELECT group_concat(i.id || ':' || i.content_hash || ':' || i.position, ',')
+           FROM vehicle_images i WHERE i.organization_id=v.organization_id AND i.vehicle_id=v.id) photos,
           (SELECT group_concat(j.id || ':' || j.status || ':' || j.updated_at, ',')
            FROM publication_jobs j WHERE j.organization_id=v.organization_id AND j.vehicle_id=v.id) jobs
          FROM vehicles v WHERE v.organization_id=? ORDER BY v.id`,
         )
         .all(auth.organizationId)
       digest = createHash('sha256')
-        .update(JSON.stringify({ organizationId: auth.organizationId, csv, mode, snapshot }))
+        .update(
+          JSON.stringify({
+            organizationId: auth.organizationId,
+            csv,
+            mode,
+            snapshot,
+            archiveHash: packageData?.archiveHash || null,
+          }),
+        )
         .digest('hex')
-      if (!dryRun && previewDigest && previewDigest !== digest) {
+      if (
+        !dryRun &&
+        ((packageData && !previewDigest) || (previewDigest && previewDigest !== digest))
+      ) {
         db.exec('ROLLBACK')
         send(res, 409, {
           error: 'O estoque mudou após a prévia. Gere uma nova prévia antes de importar.',
@@ -288,9 +396,22 @@ export async function handleVehicleMutationRoute(
           continue
         }
         const duplicate = identifierConflicts[0]
+        const label = [vehicleInput.year, vehicleInput.make, vehicleInput.model].join(' ')
         if (duplicate) {
           if (mode !== 'update') {
             skipped++
+            if (packageData)
+              photoRows.push({
+                row: rowNumber,
+                stockCode,
+                label,
+                images: 0,
+                action: 'Ignorar existente',
+              })
+            continue
+          }
+          if (!canWriteVehicle(duplicate.id, auth)) {
+            errors.push({ row: rowNumber, error: 'Sem permissão para atualizar este veículo.' })
             continue
           }
           const current = db
@@ -318,6 +439,11 @@ export async function handleVehicleMutationRoute(
             })
             continue
           }
+          const plan = photoPlan(duplicate.id, index)
+          if (plan.error) {
+            errors.push({ row: rowNumber, error: plan.error })
+            continue
+          }
           db.prepare(
             `UPDATE vehicles SET year=?,make=?,model=?,trim=?,price=?,km=?,stock_code=?,vin=?,vehicle_type=?,location=?,transmission=?,fuel_type=?,body_type=?,exterior_color=?,interior_color=?,vehicle_condition=?,description=?,status=?,assigned_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`,
           ).run(
@@ -343,39 +469,71 @@ export async function handleVehicleMutationRoute(
             duplicate.id,
             auth.organizationId,
           )
+          attach(duplicate.id, plan.fresh)
+          if (packageData)
+            photoRows.push({
+              row: rowNumber,
+              stockCode,
+              label,
+              images: plan.fresh.length,
+              action: 'Atualizar',
+            })
           updated++
           continue
         }
-        db.prepare(
-          `INSERT INTO vehicles (organization_id,year,make,model,trim,price,km,stock_code,vin,status,assigned_user_id,vehicle_type,location,transmission,fuel_type,body_type,exterior_color,interior_color,vehicle_condition,description)
+        const plan = photoPlan(null, index)
+        if (plan.error) {
+          errors.push({ row: rowNumber, error: plan.error })
+          continue
+        }
+        const inserted = db
+          .prepare(
+            `INSERT INTO vehicles (organization_id,year,make,model,trim,price,km,stock_code,vin,status,assigned_user_id,vehicle_type,location,transmission,fuel_type,body_type,exterior_color,interior_color,vehicle_condition,description)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        ).run(
-          auth.organizationId,
-          Number(vehicleInput.year),
-          String(vehicleInput.make),
-          String(vehicleInput.model).trim(),
-          String(vehicleInput.trim || ''),
-          Number(vehicleInput.price),
-          Number(vehicleInput.km),
-          stockCode,
-          vin,
-          String(vehicleInput.status || 'Rascunho'),
-          auth.userId,
-          String(vehicleInput.vehicleType),
-          String(vehicleInput.location).trim(),
-          String(vehicleInput.transmission),
-          String(vehicleInput.fuelType),
-          String(vehicleInput.bodyType),
-          String(vehicleInput.exteriorColor),
-          String(vehicleInput.interiorColor),
-          String(vehicleInput.condition),
-          String(vehicleInput.description).trim(),
-        )
+          )
+          .run(
+            auth.organizationId,
+            Number(vehicleInput.year),
+            String(vehicleInput.make),
+            String(vehicleInput.model).trim(),
+            String(vehicleInput.trim || ''),
+            Number(vehicleInput.price),
+            Number(vehicleInput.km),
+            stockCode,
+            vin,
+            String(vehicleInput.status || 'Rascunho'),
+            auth.userId,
+            String(vehicleInput.vehicleType),
+            String(vehicleInput.location).trim(),
+            String(vehicleInput.transmission),
+            String(vehicleInput.fuelType),
+            String(vehicleInput.bodyType),
+            String(vehicleInput.exteriorColor),
+            String(vehicleInput.interiorColor),
+            String(vehicleInput.condition),
+            String(vehicleInput.description).trim(),
+          ).lastInsertRowid
+        attach(Number(inserted), plan.fresh)
+        if (packageData)
+          photoRows.push({
+            row: rowNumber,
+            stockCode,
+            label,
+            images: plan.fresh.length,
+            action: 'Criar',
+          })
         created++
       }
       db.exec(dryRun ? 'ROLLBACK' : 'COMMIT')
     } catch (error) {
       db.exec('ROLLBACK')
+      for (const file of writtenFiles) {
+        try {
+          if (existsSync(file)) unlinkSync(file)
+        } catch {
+          // Preserve the original failure; orphan cleanup can be retried.
+        }
+      }
       throw error
     }
     send(res, 200, {
@@ -385,6 +543,8 @@ export async function handleVehicleMutationRoute(
       created,
       updated,
       skipped,
+      photos: attachedPhotos,
+      photoRows: packageData ? photoRows : undefined,
       failed: errors.length,
       errors: errors.slice(0, 100),
     })

@@ -86,6 +86,24 @@ export type VehicleRecord = {
 }
 
 type ImageRecord = { id: number; originalName: string; url: string; mimeType: string }
+type ImportSummary = {
+  total: number
+  created: number
+  updated: number
+  skipped: number
+  failed: number
+  photos?: number
+  previewDigest?: string
+  photoRows?: Array<{
+    row: number
+    stockCode: string
+    label: string
+    images: number
+    action: string
+  }>
+  errors: Array<{ row: number; error: string }>
+}
+type ZipPreview = { zipBase64: string; mode: 'skip' | 'update'; summary: ImportSummary }
 const money = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
   currency: 'BRL',
@@ -174,6 +192,7 @@ export default function VehiclesView({
   })
   const [summary, setSummary] = useState<VehicleSummary | null>(null)
   const [importing, setImporting] = useState(false)
+  const [packagePreview, setPackagePreview] = useState<ZipPreview | null>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
   const deferredQuery = useDeferredValue(query)
 
@@ -301,8 +320,13 @@ export default function VehiclesView({
 
   async function importCsv(file?: File) {
     if (!file) return
-    if (file.size > 2 * 1024 * 1024) {
-      notify('O CSV deve ter no máximo 2 MB.')
+    const isZip = file.name.toLowerCase().endsWith('.zip')
+    if (!isZip && !file.name.toLowerCase().endsWith('.csv')) {
+      notify('Selecione um arquivo CSV ou ZIP.')
+      return
+    }
+    if (file.size > (isZip ? 48 : 2) * 1024 * 1024) {
+      notify(isZip ? 'O ZIP deve ter no máximo 48 MB.' : 'O CSV deve ter no máximo 2 MB.')
       return
     }
     const mode = window.confirm(
@@ -312,20 +336,26 @@ export default function VehiclesView({
       : 'skip'
     setImporting(true)
     try {
-      const csv = await file.text()
-      type ImportSummary = {
-        total: number
-        created: number
-        updated: number
-        skipped: number
-        failed: number
-        previewDigest?: string
-        errors: Array<{ row: number; error: string }>
-      }
+      const zipBase64 = isZip
+        ? await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(String(reader.result).split(',')[1] || '')
+            reader.onerror = () => reject(reader.error || new Error('Não foi possível ler o ZIP.'))
+            reader.readAsDataURL(file)
+          })
+        : ''
+      const csv = isZip ? '' : await file.text()
       const preview = await api<ImportSummary>('/vehicles/import', {
         method: 'POST',
-        body: JSON.stringify({ csv, mode, dryRun: true }),
+        body: JSON.stringify(
+          isZip ? { zipBase64, mode, dryRun: true } : { csv, mode, dryRun: true },
+        ),
       })
+      if (isZip) {
+        if (!preview.previewDigest) throw new Error('Não foi possível validar a prévia do ZIP.')
+        setPackagePreview({ zipBase64, mode, summary: preview })
+        return
+      }
       const proceed = window.confirm(
         [
           'PRÉVIA — nenhuma alteração foi gravada.',
@@ -366,6 +396,39 @@ export default function VehiclesView({
     }
   }
 
+  async function confirmPackageImport() {
+    if (!packagePreview || importing) return
+    setImporting(true)
+    try {
+      const result = await api<ImportSummary>('/vehicles/import', {
+        method: 'POST',
+        body: JSON.stringify({
+          zipBase64: packagePreview.zipBase64,
+          mode: packagePreview.mode,
+          previewDigest: packagePreview.summary.previewDigest,
+        }),
+      })
+      setPackagePreview(null)
+      notify(
+        `Pacote importado: ${result.created} novos, ${result.updated} atualizados, ${result.photos || 0} fotos, ${result.skipped} ignorados, ${result.failed} erros.`,
+      )
+      if (result.errors.length)
+        window.alert(
+          result.errors
+            .slice(0, 15)
+            .map((item) => `Linha ${item.row}: ${item.error}`)
+            .join('\n'),
+        )
+      setPage(1)
+      await reload()
+    } catch (error) {
+      setPackagePreview(null)
+      notify(error instanceof Error ? error.message : 'Falha na importação. Gere uma nova prévia.')
+    } finally {
+      setImporting(false)
+    }
+  }
+
   return (
     <section className="content vehicles-page">
       <div className="title-row">
@@ -378,7 +441,7 @@ export default function VehiclesView({
           <input
             ref={importInputRef}
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,.zip,text/csv,application/zip"
             hidden
             onChange={(event) => void importCsv(event.target.files?.[0])}
           />
@@ -388,7 +451,7 @@ export default function VehiclesView({
             disabled={importing}
           >
             <Upload size={18} />
-            {importing ? 'Importando...' : 'Importar CSV'}
+            {importing ? 'Processando...' : 'Importar CSV ou ZIP'}
           </button>
           <div className="action-with-help">
             <button className="primary" onClick={() => setEditor(null)}>
@@ -402,6 +465,112 @@ export default function VehiclesView({
           </div>
         </div>
       </div>
+      {packagePreview &&
+        createPortal(
+          <div
+            className="overlay package-import-overlay"
+            onMouseDown={() => !importing && setPackagePreview(null)}
+          >
+            <aside
+              className="drawer package-import-drawer"
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <DrawerFocusGuard
+                label="Prévia de importação de veículos com fotos"
+                onClose={() => !importing && setPackagePreview(null)}
+              />
+              <button
+                className="close"
+                type="button"
+                aria-label="Fechar prévia"
+                disabled={importing}
+                onClick={() => setPackagePreview(null)}
+              >
+                <X size={20} />
+              </button>
+              <span className="page-kicker">IMPORTAÇÃO EM LOTE</span>
+              <h2>Confira os veículos e suas fotos</h2>
+              <p>Nenhuma alteração foi gravada. A importação só começa após sua confirmação.</p>
+              <div className="package-import-totals">
+                <div>
+                  <strong>{packagePreview.summary.created}</strong>
+                  <span>Novos</span>
+                </div>
+                <div>
+                  <strong>{packagePreview.summary.updated}</strong>
+                  <span>Atualizados</span>
+                </div>
+                <div>
+                  <strong>{packagePreview.summary.photos || 0}</strong>
+                  <span>Fotos novas</span>
+                </div>
+                <div>
+                  <strong>{packagePreview.summary.failed}</strong>
+                  <span>Erros</span>
+                </div>
+              </div>
+              <div
+                className="package-import-list"
+                role="region"
+                aria-label="Veículos encontrados no pacote"
+              >
+                {(packagePreview.summary.photoRows || []).map((row) => (
+                  <div className="package-import-row" key={row.row}>
+                    <div>
+                      <strong>{row.label}</strong>
+                      <small>
+                        Estoque {row.stockCode} · Linha {row.row}
+                      </small>
+                    </div>
+                    <span>
+                      {row.action} · {row.images} {row.images === 1 ? 'foto' : 'fotos'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {packagePreview.summary.errors.length > 0 && (
+                <div className="package-import-errors" role="alert">
+                  <strong>
+                    {packagePreview.summary.failed} linha(s) com erro serão ignoradas.
+                  </strong>
+                  {packagePreview.summary.errors.slice(0, 10).map((item) => (
+                    <p key={item.row}>
+                      Linha {item.row}: {item.error}
+                    </p>
+                  ))}
+                </div>
+              )}
+              <p className="package-import-disclaimer">
+                Fotos novas serão associadas ao código de estoque. Fotos existentes não serão
+                substituídas; registros duplicados ou com anúncios ativos permanecem protegidos. O
+                pacote não publica anúncios.
+              </p>
+              <div className="package-import-actions">
+                <button
+                  className="secondary"
+                  type="button"
+                  disabled={importing}
+                  onClick={() => setPackagePreview(null)}
+                >
+                  Cancelar
+                </button>
+                <button
+                  className="primary"
+                  type="button"
+                  disabled={
+                    importing ||
+                    packagePreview.summary.created + packagePreview.summary.updated === 0
+                  }
+                  onClick={() => void confirmPackageImport()}
+                >
+                  <Upload size={17} />
+                  {importing ? 'Importando fotos e veículos...' : 'Confirmar importação'}
+                </button>
+              </div>
+            </aside>
+          </div>,
+          document.body,
+        )}
       <div className="stats">
         <article>
           <span className="stat-icon blue">

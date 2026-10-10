@@ -15,7 +15,7 @@ const packageJson = JSON.parse(read('package.json'))
 // Each dynamically opened drawer gets a labeled dialog with Escape/Tab
 // navigation, initial focus and restored focus; existing close actions stay.
 assert.equal((app.match(/<DrawerFocusGuard/g) || []).length, 1)
-assert.equal((vehicles.match(/<DrawerFocusGuard/g) || []).length, 2)
+assert.equal((vehicles.match(/<DrawerFocusGuard/g) || []).length, 3) // Includes ZIP preview
 assert.equal((views.match(/<DrawerFocusGuard/g) || []).length, 5)
 for (const part of [
   "drawer.setAttribute('role', 'dialog')",
