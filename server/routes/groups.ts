@@ -31,7 +31,8 @@ export function handleGroupsRoute(
   { db, send, isAdmin, marketplaceGroups }: Dependencies,
 ): boolean {
   if (req.method === 'GET' && url.pathname === '/api/groups/curated') {
-    const locationQuery = String(url.searchParams.get('location') || '')
+    const company = db.prepare('SELECT default_location location FROM organization_settings WHERE organization_id=?').get(auth.organizationId) as { location: string } | undefined
+    const locationQuery = company?.location || ''
     const rawGroups = marketplaceGroups(auth.organizationId)
     const curated = curateMarketplaceGroups(
       rawGroups.map((group) => ({ ...group, active: Boolean(group.active) })),
