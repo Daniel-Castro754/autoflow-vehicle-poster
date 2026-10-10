@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { sendCriticalAlert } from './alerting.ts'
+import { getAlertCredentials } from './credential-vault.ts'
 import { logger } from '../lib/logger.ts'
 import { recordOperationalSignal } from './operational-incidents.ts'
 
@@ -11,8 +12,7 @@ export async function warnSlowExecutions(
     .prepare(
       `SELECT j.id,j.organization_id organizationId,j.attempt_count attemptCount,
     j.started_at startedAt,a.label accountLabel,s.stuck_timeout_minutes timeoutMinutes,
-    (unixepoch('now')-unixepoch(j.started_at))/60.0 elapsedMinutes,
-    s.alert_telegram_token telegramBotToken,s.alert_telegram_chat_id telegramChatId,s.alert_webhook_url webhookUrl
+    (unixepoch('now')-unixepoch(j.started_at))/60.0 elapsedMinutes
     FROM publication_jobs j JOIN organization_settings s ON s.organization_id=j.organization_id
     LEFT JOIN social_accounts a ON a.id=j.social_account_id AND a.organization_id=j.organization_id
     WHERE j.status='filling' AND datetime(j.lease_expires_at)>CURRENT_TIMESTAMP
@@ -27,9 +27,6 @@ export async function warnSlowExecutions(
     accountLabel: string | null
     timeoutMinutes: number
     elapsedMinutes: number
-    telegramBotToken: string
-    telegramChatId: string
-    webhookUrl: string
   }>
   const deliveries: Promise<void>[] = []
   let warnings = 0
@@ -81,7 +78,7 @@ export async function warnSlowExecutions(
         attemptCount: job.attemptCount,
         message: `Preenchimento em execução há ${Math.round(job.elapsedMinutes)} min (limite configurado: ${job.timeoutMinutes} min). A execução continua ativa.`,
       },
-      job,
+      getAlertCredentials(db, job.organizationId),
     )
       .then((delivery) => {
         db.prepare(
