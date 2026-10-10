@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { sendCriticalAlert } from '../services/alerting.ts'
+import { getAlertCredentials } from '../services/credential-vault.ts'
 
 type AuthContext = { userId: number; organizationId: number }
 type Dependencies = {
@@ -21,13 +22,7 @@ export async function handleAlertRoute(
     send(res, 403, { error: 'Somente administradores podem testar alertas.' })
     return true
   }
-  const settings = db
-    .prepare(
-      'SELECT alert_telegram_token alertTelegramToken, alert_telegram_chat_id alertTelegramChatId, alert_webhook_url alertWebhookUrl FROM organization_settings WHERE organization_id = ?',
-    )
-    .get(auth.organizationId) as
-    | { alertTelegramToken?: string; alertTelegramChatId?: string; alertWebhookUrl?: string }
-    | undefined
+  const settings = getAlertCredentials(db, auth.organizationId)
   const result = await sendCriticalAlert(
     {
       jobId: 0,
@@ -37,9 +32,9 @@ export async function handleAlertRoute(
       attemptCount: 1,
     },
     {
-      telegramBotToken: settings?.alertTelegramToken,
-      telegramChatId: settings?.alertTelegramChatId,
-      webhookUrl: settings?.alertWebhookUrl,
+      telegramBotToken: settings.telegramBotToken,
+      telegramChatId: settings.telegramChatId,
+      webhookUrl: settings.webhookUrl,
     },
   )
   send(res, 200, { ok: true, result })
