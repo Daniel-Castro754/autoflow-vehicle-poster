@@ -712,7 +712,7 @@ try {
     body: JSON.stringify({ prompt: 'otimizar textos dos carros em tom vendedor' }),
   })
   assert.equal(cmdOptRes.ok, true)
-  assert.equal(cmdOptRes.intent, 'optimize_descriptions')
+  assert.equal(cmdOptRes.intent, 'optimize_descriptions_preview')
   console.log('✓ Endpoint POST /api/ai/command com despachante NLP validado.')
 
   // 5. Piloto Automático obedece aos mesmos requisitos da fila manual
@@ -808,7 +808,12 @@ try {
     .prepare("UPDATE vehicles SET vehicle_type='' WHERE id=?")
     .run(incompleteAutopilotVehicle.id)
 
-  const autopilotRes = await call('/ai/autopilot/run', token, { method: 'POST' })
+  const pilotPreview = await call('/ai/autopilot/preview', token)
+  assert(pilotPreview.previewId)
+  const autopilotRes = await call('/ai/autopilot/run', token, {
+    method: 'POST',
+    body: JSON.stringify({ previewId: pilotPreview.previewId }),
+  })
   assert.equal(autopilotRes.ok, true)
   assert.equal(
     autopilotRes.jobsCreated,
