@@ -3303,6 +3303,7 @@ export function SettingsView({
     [autoPublish, setAutoPublish] = useState(false),
     [groups, setGroups] = useState<MarketplaceGroup[]>([])
   const [deletedGroupIds, setDeletedGroupIds] = useState<number[]>([])
+  const [groupEditsPending, setGroupEditsPending] = useState(false)
   const [autoRetry, setAutoRetry] = useState(false),
     [maxRetries, setMaxRetries] = useState(3),
     [autoCurateGroups, setAutoCurateGroups] = useState(false)
@@ -3365,11 +3366,13 @@ export function SettingsView({
   }, [api])
 
   function updateGroup(index: number, patch: Partial<MarketplaceGroup>) {
+    setGroupEditsPending(true)
     setGroups((current) =>
       current.map((group, itemIndex) => (itemIndex === index ? { ...group, ...patch } : group)),
     )
   }
   function moveGroup(index: number, direction: -1 | 1) {
+    setGroupEditsPending(true)
     setGroups((current) => {
       const target = index + direction
       if (target < 0 || target >= current.length) return current
@@ -3470,6 +3473,7 @@ export function SettingsView({
         priority: index + 1,
       }))
       setGroups(merged)
+      setGroupEditsPending(true)
       setMessage(
         imported.length + ' grupo(s) preparados. Clique em Salvar configurações para gravar.',
       )
@@ -3479,6 +3483,10 @@ export function SettingsView({
   }
 
   async function runAutoCurate() {
+    if (groupEditsPending) {
+      setMessage('Salve as alterações de grupos antes de reorganizar; seus dados foram preservados.')
+      return
+    }
     setCurating(true)
     try {
       const preview = await api<{
@@ -3525,6 +3533,10 @@ export function SettingsView({
   }
 
   async function undoGroupCuration() {
+    if (groupEditsPending) {
+      setMessage('Salve as alterações de grupos antes de desfazer a última reorganização.')
+      return
+    }
     if (!window.confirm('Desfazer a última reorganização de grupos?')) return
     setCurating(true)
     try {
@@ -3591,6 +3603,7 @@ export function SettingsView({
           })),
         )
       setDeletedGroupIds([])
+      setGroupEditsPending(false)
       setMessage('Configurações salvas com sucesso.')
       onSaved()
     } catch (err) {
@@ -3767,12 +3780,13 @@ export function SettingsView({
                     <button
                       type="button"
                       disabled={groups.length >= 2000}
-                      onClick={() =>
+                      onClick={() => {
+                        setGroupEditsPending(true)
                         setGroups((current) => [
                           ...current,
                           { name: '', url: '', active: true, priority: current.length + 1 },
                         ])
-                      }
+                      }}
                     >
                       <Plus />
                       Adicionar grupo
@@ -3860,6 +3874,7 @@ export function SettingsView({
                                 return
                               setDeletedGroupIds((current) => [...new Set([...current, group.id!])])
                             }
+                            setGroupEditsPending(true)
                             setGroups((current) =>
                               current.filter((_, itemIndex) => itemIndex !== index),
                             )
