@@ -195,6 +195,7 @@ REGRAS:
         if (text) {
           return { description: text, provider: 'gemini', attemptedProviders }
         }
+        failures.push('Gemini retornou uma resposta vazia')
       } else {
         logger.warn('AutoFlowAI', `Gemini API respondeu com status ${response.status}`)
         failures.push('Gemini indisponível (HTTP ' + response.status + ')')
@@ -233,6 +234,7 @@ REGRAS:
           return { description: text, provider: 'openai', attemptedProviders,
             ...(failures.length ? { fallbackReason: failures.join('; ') } : {}) }
         }
+        failures.push('OpenAI retornou uma resposta vazia')
       } else {
         logger.warn('AutoFlowAI', `OpenAI API respondeu com status ${response.status}`)
         failures.push('OpenAI indisponível (HTTP ' + response.status + ')')
