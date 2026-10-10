@@ -9,7 +9,7 @@ function groupTarget(group: { name: string; url: string }) {
 function listGroups(db: DatabaseSync, organizationId: number, activeOnly = false) {
   return db
     .prepare(
-      `SELECT id,name,url,group_key groupKey,active,priority,success_count successCount,failure_count failureCount,last_found_at lastFoundAt
+      `SELECT id,name,url,group_key groupKey,active,priority,success_count successCount,failure_count failureCount,last_found_at lastFoundAt,city,state,member_count memberCount
       FROM marketplace_groups WHERE organization_id=?${activeOnly ? ' AND active=1' : ''} ORDER BY priority,id`,
     )
     .all(organizationId) as Array<{
@@ -22,6 +22,9 @@ function listGroups(db: DatabaseSync, organizationId: number, activeOnly = false
     successCount: number
     failureCount: number
     lastFoundAt?: string
+    city?: string
+    state?: string
+    memberCount?: number
   }>
 }
 
@@ -33,10 +36,11 @@ function listGroups(db: DatabaseSync, organizationId: number, activeOnly = false
  */
 export function applyGroupCuration(db: DatabaseSync, organizationId: number) {
   const rawGroups = listGroups(db, organizationId)
+  const company = db.prepare('SELECT default_location location FROM organization_settings WHERE organization_id=?').get(organizationId) as { location: string } | undefined
   const curated = curateMarketplaceGroups(
     rawGroups.map((g) => ({ ...g, active: Boolean(g.active) }) as GroupRecord),
-    '',
-    10,
+    company?.location || '',
+    20,
   )
   db.exec('BEGIN')
   try {
@@ -46,7 +50,7 @@ export function applyGroupCuration(db: DatabaseSync, organizationId: number) {
         'UPDATE marketplace_groups SET priority=?,active=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?',
       ).run(i + 1, item.recommendedActive ? 1 : 0, item.group.id, organizationId)
     }
-    const activeTargets = listGroups(db, organizationId, true).map(groupTarget)
+    const activeTargets = listGroups(db, organizationId, true).slice(0, 20).map(groupTarget)
     db.prepare(
       'UPDATE organization_settings SET target_groups=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=?',
     ).run(JSON.stringify(activeTargets), organizationId)
