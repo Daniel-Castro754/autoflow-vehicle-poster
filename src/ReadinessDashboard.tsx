@@ -52,7 +52,12 @@ function displayMoment(iso: string) {
   const parsed = new Date(iso)
   return Number.isNaN(parsed.getTime())
     ? '—'
-    : parsed.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : parsed.toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
 }
 
 export function ReadinessDashboard({
@@ -96,7 +101,10 @@ export function ReadinessDashboard({
       }
     }
     void poll()
-    return () => { active = false; clearTimeout(timer) }
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
   }, [api])
 
   return (
@@ -107,63 +115,134 @@ export function ReadinessDashboard({
           <h1>Saúde e autonomia</h1>
           <p>Verifique integrações, segurança e prontidão básica antes de executar automações.</p>
         </div>
-        <button className="secondary" type="button" disabled={refreshing} onClick={() => void load()}>
+        <button
+          className="secondary"
+          type="button"
+          disabled={refreshing}
+          onClick={() => void load()}
+        >
           <RefreshCcw size={16} /> {refreshing ? 'Atualizando...' : 'Atualizar diagnóstico'}
         </button>
       </div>
-      {error && <p role="status" className="health-error">{error}</p>}
+      {error && (
+        <p role="status" className="health-error">
+          {error}
+        </p>
+      )}
       {report ? (
         <>
           <article className="module-card" aria-label="Resumo do diagnóstico">
             <div className="module-head">
               <div>
-                <h2><Activity size={18}/> Resumo do ambiente</h2>
+                <h2>
+                  <Activity size={18} /> Resumo do ambiente
+                </h2>
                 <span>Última leitura: {displayMoment(report.generatedAt)}</span>
               </div>
-              <span className={'health-badge ' + (report.status === 'ready' ? 'healthy' : 'attention')}>
-                {report.status === 'attention' ? 'Requer revisão' :
-                  report.status === 'ready' ? 'Pré-condições presentes' : 'Aguardando condições'}
+              <span
+                className={'health-badge ' + (report.status === 'ready' ? 'healthy' : 'attention')}
+              >
+                {report.status === 'attention'
+                  ? 'Requer revisão'
+                  : report.status === 'ready'
+                    ? 'Pré-condições presentes'
+                    : 'Aguardando condições'}
               </span>
             </div>
             <dl className="health-counts">
-              <div><dt>Precisam de atenção</dt><dd>{report.summary.attention}</dd></div>
-              <div><dt>Condições básicas</dt><dd>{report.summary.configured}</dd></div>
-              <div><dt>Inativos / aguardando</dt><dd>{report.summary.inactive}</dd></div>
-              <div><dt>Sem verificação</dt><dd>{report.summary.unverified}</dd></div>
+              <div>
+                <dt>Precisam de atenção</dt>
+                <dd>{report.summary.attention}</dd>
+              </div>
+              <div>
+                <dt>Condições básicas</dt>
+                <dd>{report.summary.configured}</dd>
+              </div>
+              <div>
+                <dt>Inativos / aguardando</dt>
+                <dd>{report.summary.inactive}</dd>
+              </div>
+              <div>
+                <dt>Sem verificação</dt>
+                <dd>{report.summary.unverified}</dd>
+              </div>
             </dl>
-            <p className="health-note"><ShieldCheck size={16}/> {report.evidence}</p>
             <p className="health-note">
-              Modo autônomo: <strong>{report.automation.enabled ? 'ligado' : 'desligado'}</strong>.
-              {' '}Publicação automática: <strong>{report.automation.autoPublish ? 'ligada' : 'desligada'}</strong>.
-              {' '}Veículos candidatos: <strong>{report.automation.basicCandidates}</strong>.
-              {' '}Extensões recentes: <strong>{report.automation.recentProfiles}/{report.automation.totalProfiles}</strong>.
+              <ShieldCheck size={16} /> {report.evidence}
+            </p>
+            <p className="health-note">
+              Modo autônomo: <strong>{report.automation.enabled ? 'ligado' : 'desligado'}</strong>.{' '}
+              Publicação automática:{' '}
+              <strong>{report.automation.autoPublish ? 'ligada' : 'desligada'}</strong>. Veículos
+              candidatos: <strong>{report.automation.basicCandidates}</strong>. Extensões recentes:{' '}
+              <strong>
+                {report.automation.recentProfiles}/{report.automation.totalProfiles}
+              </strong>
+              .
             </p>
           </article>
           {sections.map(({ id, title }) => (
             <article className="module-card" key={id} aria-label={title}>
-              <div className="module-head"><div><h2>{title}</h2>
-                <span>O diagnóstico não altera configurações nem agenda trabalhos.</span>
-              </div></div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 12 }}>
-                {report.checks.filter((item) => item.section === id).map((item) => (
-                  <div key={item.id} style={{ border: '1px solid var(--line, #dce5e4)', borderRadius: 12, padding: 16 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                      <strong>{item.title}</strong>
-                      <span style={{ color: colorByStatus[item.status], fontWeight: 650, fontSize: 12 }}>
-                        {textByStatus[item.status]}
-                      </span>
+              <div className="module-head">
+                <div>
+                  <h2>{title}</h2>
+                  <span>O diagnóstico não altera configurações nem agenda trabalhos.</span>
+                </div>
+              </div>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))',
+                  gap: 12,
+                }}
+              >
+                {report.checks
+                  .filter((item) => item.section === id)
+                  .map((item) => (
+                    <div
+                      key={item.id}
+                      style={{
+                        border: '1px solid var(--line, #dce5e4)',
+                        borderRadius: 12,
+                        padding: 16,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'flex-start',
+                          gap: 8,
+                        }}
+                      >
+                        <strong>{item.title}</strong>
+                        <span
+                          style={{
+                            color: colorByStatus[item.status],
+                            fontWeight: 650,
+                            fontSize: 12,
+                          }}
+                        >
+                          {textByStatus[item.status]}
+                        </span>
+                      </div>
+                      <p style={{ marginTop: 10, marginBottom: 14, fontSize: 14 }}>{item.detail}</p>
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => navigate(item.page)}
+                      >
+                        Ver {item.page.toLowerCase()} <ArrowRight size={14} />
+                      </button>
                     </div>
-                    <p style={{ marginTop: 10, marginBottom: 14, fontSize: 14 }}>{item.detail}</p>
-                    <button type="button" className="secondary" onClick={() => navigate(item.page)}>
-                      Ver {item.page.toLowerCase()} <ArrowRight size={14}/>
-                    </button>
-                  </div>
-                ))}
+                  ))}
               </div>
             </article>
           ))}
         </>
-      ) : !error ? <p role="status">Consultando indicadores locais...</p> : null}
+      ) : !error ? (
+        <p role="status">Consultando indicadores locais...</p>
+      ) : null}
     </section>
   )
 }

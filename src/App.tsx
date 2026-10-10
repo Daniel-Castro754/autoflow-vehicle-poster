@@ -631,23 +631,25 @@ export default function App() {
           <ChevronDown size={16} />
         </button>
         <nav aria-label="Páginas principais">
-          {nav.filter(([label]) => label !== 'Saúde e autonomia' || currentUser?.role === 'admin').map(([label, Icon]) => (
-            <button
-              key={label}
-              className={active === label ? 'active' : ''}
-              aria-current={active === label ? 'page' : undefined}
-              onClick={() => {
-                setActive(label)
-                setMobileMenuOpen(false)
-              }}
-            >
-              <Icon size={19} />
-              {label}
-              {label === 'Publicações' && (operationalStats?.vehicles.ready || 0) > 0 && (
-                <span className="count">{operationalStats?.vehicles.ready}</span>
-              )}
-            </button>
-          ))}
+          {nav
+            .filter(([label]) => label !== 'Saúde e autonomia' || currentUser?.role === 'admin')
+            .map(([label, Icon]) => (
+              <button
+                key={label}
+                className={active === label ? 'active' : ''}
+                aria-current={active === label ? 'page' : undefined}
+                onClick={() => {
+                  setActive(label)
+                  setMobileMenuOpen(false)
+                }}
+              >
+                <Icon size={19} />
+                {label}
+                {label === 'Publicações' && (operationalStats?.vehicles.ready || 0) > 0 && (
+                  <span className="count">{operationalStats?.vehicles.ready}</span>
+                )}
+              </button>
+            ))}
         </nav>
         <div className="sidebar-foot">
           <button
