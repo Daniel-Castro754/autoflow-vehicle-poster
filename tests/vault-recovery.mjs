@@ -35,10 +35,7 @@ try {
       () => verifyPortableRecoveryPackage(exported, 'different password length 2026'),
       /Senha de recuperação incorreta|arquivo adulterado/,
     )
-    assert.throws(
-      () => createPortableRecoveryPackage(db, root, 'weak'),
-      /pelo menos 16/,
-    )
+    assert.throws(() => createPortableRecoveryPackage(db, root, 'weak'), /pelo menos 16/)
     const modified = JSON.parse(exported)
     modified.tag = modified.tag.slice(0, -1) + (modified.tag.endsWith('A') ? 'B' : 'A')
     assert.throws(
@@ -51,12 +48,11 @@ try {
     )
     assert.equal(decryptCredential(encrypted, 1, 'gemini_api_key'), credential)
     if (process.platform !== 'win32') {
-      assert.throws(
-        () => restorePortableRecoveryPackage(db, root, exported, password),
-        /Windows/,
-      )
+      assert.throws(() => restorePortableRecoveryPackage(db, root, exported, password), /Windows/)
     }
-    console.log('✓ Password-wrapped recovery: no plaintext, correct/wrong password, tampering and platform guard')
+    console.log(
+      '✓ Password-wrapped recovery: no plaintext, correct/wrong password, tampering and platform guard',
+    )
   } finally {
     db.close()
   }

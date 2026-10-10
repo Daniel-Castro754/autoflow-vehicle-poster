@@ -21,7 +21,9 @@ if (process.platform !== 'win32') {
   mkdirSync(target)
   const db = new DatabaseSync(join(root, 'autoflow.db'))
   try {
-    db.exec("CREATE TABLE organization_settings(organization_id INTEGER PRIMARY KEY,gemini_api_key TEXT NOT NULL DEFAULT '',openai_api_key TEXT NOT NULL DEFAULT '')")
+    db.exec(
+      "CREATE TABLE organization_settings(organization_id INTEGER PRIMARY KEY,gemini_api_key TEXT NOT NULL DEFAULT '',openai_api_key TEXT NOT NULL DEFAULT '')",
+    )
     initializeCredentialVault(source)
     const encrypted = encryptCredential('example-credential-not-real', 7, 'gemini_api_key')
     db.prepare('INSERT INTO organization_settings VALUES (7,?,?)').run(encrypted, '')
@@ -36,7 +38,8 @@ if (process.platform !== 'win32') {
     })
     writeFileSync(vaultFile, oldContents)
     assert.throws(
-      () => restorePortableRecoveryPackage(db, target, bundle, 'wrong-password-with-many-characters'),
+      () =>
+        restorePortableRecoveryPackage(db, target, bundle, 'wrong-password-with-many-characters'),
       /Senha de recuperação incorreta/,
     )
     assert.equal(readFileSync(vaultFile, 'utf8'), oldContents)

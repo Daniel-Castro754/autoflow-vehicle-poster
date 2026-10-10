@@ -14,7 +14,9 @@ import {
  */
 async function readSecret(label) {
   if (!process.stdin.isTTY || !process.stdout.isTTY || !process.stdin.setRawMode)
-    throw new Error('Use o PowerShell interativo para informar a senha de recuperação com segurança.')
+    throw new Error(
+      'Use o PowerShell interativo para informar a senha de recuperação com segurança.',
+    )
   return new Promise((resolvePassword, rejectPassword) => {
     const stdin = process.stdin
     const rawBefore = stdin.isRaw
@@ -75,14 +77,17 @@ async function run(args) {
     log('Pacote de recuperação válido. Nenhum dado foi alterado.')
     return
   }
-  if (!existsSync(dbPath))
-    throw new Error('Banco AutoFlow não encontrado em DATA_DIR: ' + dataDir)
+  if (!existsSync(dbPath)) throw new Error('Banco AutoFlow não encontrado em DATA_DIR: ' + dataDir)
   const db = new DatabaseSync(dbPath, { readOnly: true })
   try {
     if (action === 'export') {
       if (existsSync(filePath))
-        throw new Error('O arquivo já existe. Escolha outro nome para não sobrescrever uma recuperação.')
-      const password = await readSecret('Crie uma senha FORTE de recuperação (mínimo 16 caracteres): ')
+        throw new Error(
+          'O arquivo já existe. Escolha outro nome para não sobrescrever uma recuperação.',
+        )
+      const password = await readSecret(
+        'Crie uma senha FORTE de recuperação (mínimo 16 caracteres): ',
+      )
       const again = await readSecret('Repita a senha de recuperação: ')
       if (password !== again) throw new Error('As senhas não conferem. Nada foi salvo.')
       const content = createPortableRecoveryPackage(db, dataDir, password)
@@ -99,7 +104,10 @@ async function run(args) {
     if (confirmed !== 'IMPORTAR') throw new Error('Operação cancelada sem mudanças.')
     const password = await readSecret('Senha de recuperação (não aparece na tela): ')
     const outcome = restorePortableRecoveryPackage(
-      db, dataDir, readFileSync(filePath, 'utf8'), password,
+      db,
+      dataDir,
+      readFileSync(filePath, 'utf8'),
+      password,
     )
     log('Recuperação concluída: ' + outcome.verifiedCredentials + ' chave(s) verificada(s).')
     log('O invólucro DPAPI anterior foi preservado em: ' + outcome.previousVaultFile)

@@ -209,7 +209,6 @@ export function migrateCredentials(db: DatabaseSync) {
   }
 }
 
-
 /**
  * Password-protected, platform-independent recovery package for the AES master key.
  * Only the encrypted master key leaves this module. The actual Gemini/OpenAI API
@@ -236,7 +235,9 @@ export interface PortableRecoveryPackage {
 
 function ensureRecoveryPassword(password: string) {
   if (typeof password !== 'string' || password.length < 16 || Buffer.byteLength(password) > 1024)
-    throw new Error('A senha de recuperação deve conter pelo menos 16 caracteres e no máximo 1024 bytes.')
+    throw new Error(
+      'A senha de recuperação deve conter pelo menos 16 caracteres e no máximo 1024 bytes.',
+    )
 }
 
 function readBase64Url(value: unknown, length: number) {
@@ -259,8 +260,7 @@ function decodeRecoveryPackage(content: string): PortableRecoveryPackage {
   }
   if (!parsed || typeof parsed !== 'object') throw new Error('Arquivo de recuperação inválido.')
   const item = parsed as Record<string, unknown>
-  if (item.type !== 'autoflow-ai-vault-recovery' ||
-    item.version !== 1 || item.kdf !== 'scrypt')
+  if (item.type !== 'autoflow-ai-vault-recovery' || item.version !== 1 || item.kdf !== 'scrypt')
     throw new Error('Versão de recuperação incompatível.')
   readBase64Url(item.salt, 16)
   readBase64Url(item.nonce, 12)
@@ -288,20 +288,24 @@ function decryptRecoveryPackage(content: string, password: string): Buffer {
     }
     return raw
   } catch {
-    throw new Error('Senha de recuperação incorreta ou arquivo adulterado. Nenhum dado foi alterado.')
+    throw new Error(
+      'Senha de recuperação incorreta ou arquivo adulterado. Nenhum dado foi alterado.',
+    )
   } finally {
     derivedKey.fill(0)
   }
 }
 
 function validateMasterAgainstDatabase(db: DatabaseSync, candidate: Buffer) {
-  const table = db.prepare(
-    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_settings'",
-  ).get()
+  const table = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_settings'")
+    .get()
   if (!table) throw new Error('Banco de dados AutoFlow não encontrado neste diretório.')
-  const rows = db.prepare(
-    'SELECT organization_id id, gemini_api_key gemini, openai_api_key openai FROM organization_settings',
-  ).all() as Array<{ id: number; gemini: string; openai: string }>
+  const rows = db
+    .prepare(
+      'SELECT organization_id id, gemini_api_key gemini, openai_api_key openai FROM organization_settings',
+    )
+    .all() as Array<{ id: number; gemini: string; openai: string }>
   let encryptedCount = 0
   for (const row of rows) {
     for (const [field, cipher] of [
@@ -322,7 +326,9 @@ function validateMasterAgainstDatabase(db: DatabaseSync, candidate: Buffer) {
         const plaintext = Buffer.concat([decipher.update(body), decipher.final()])
         plaintext.fill(0)
       } catch {
-        throw new Error('A chave recuperada não corresponde às credenciais deste banco. Nada foi alterado.')
+        throw new Error(
+          'A chave recuperada não corresponde às credenciais deste banco. Nada foi alterado.',
+        )
       }
     }
   }
@@ -391,7 +397,11 @@ export function restorePortableRecoveryPackage(
     } finally {
       opened.fill(0)
     }
-    const nextFile: VaultFile = { version: 1, mode: 'dpapi', wrappedKey: wrapped.toString('base64') }
+    const nextFile: VaultFile = {
+      version: 1,
+      mode: 'dpapi',
+      wrappedKey: wrapped.toString('base64'),
+    }
     // Preserve the old DPAPI envelope in case the replacement cannot be completed.
     const suffix = createHash('sha256').update(randomBytes(24)).digest('hex').slice(0, 16)
     const previousPath = join(dataDir, 'vault-key.pre-recovery-' + suffix + '.json')
