@@ -34,6 +34,7 @@ type Proposal = {
   original: string
   proposed: string
   provider: string
+  fallbackReason?: string
   fingerprint: string
 }
 
@@ -127,6 +128,7 @@ export async function prepareBatchDescriptionPreview(
         original: v.description || '',
         proposed,
         provider: generated.provider,
+        fallbackReason: generated.fallbackReason,
         fingerprint: sha(v),
       })
   }
@@ -139,12 +141,8 @@ export async function prepareBatchDescriptionPreview(
     expiresInMinutes: 15,
     totalEligible: candidates.length,
     remainingAfterBatch: Math.max(0, candidates.length - proposals.length),
-    proposals: proposals.map(({ vehicleId, label, original, proposed, provider }) => ({
-      vehicleId,
-      label,
-      original,
-      proposed,
-      provider,
+    proposals: proposals.map(({ vehicleId, label, original, proposed, provider, fallbackReason }) => ({
+      vehicleId, label, original, proposed, provider, fallbackReason,
     })),
   }
 }
