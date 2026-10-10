@@ -10,7 +10,7 @@ import { calculateOptimalSchedule } from './smart-scheduler.ts'
 import { organizationScheduleHistory } from './schedule-history.ts'
 import { findBestAccountForVehicle } from './session-manager.ts'
 import { coordinateAutopilot, skippedAutopilot } from './autopilot-coordinator.ts'
-import { curateMarketplaceGroups } from './group-curator.ts'
+import { previewGroupCuration } from './group-curation-worker.ts'
 import { publicationDuplicateRisk, publicationReadinessIssues } from './publication-policy.ts'
 
 export interface ParsedVehicle {
@@ -961,55 +961,22 @@ export async function executeAgentCommand(
     }
   }
 
-  // Intent 4: Curate Groups
-  if (
-    !isQuestion &&
-    hasExplicitCommand &&
-    (p.includes('grupo') || p.includes('curador') || p.includes('reordenar'))
-  ) {
-    const rawGroups = db
-      .prepare(
-        `SELECT id, name, url, group_key groupKey, active, priority, success_count successCount, failure_count failureCount, last_found_at lastFoundAt
-      FROM marketplace_groups WHERE organization_id = ? ORDER BY priority, id`,
-      )
-      .all(organizationId) as Array<{
-      id: number
-      name: string
-      url: string
-      groupKey: string
-      active: number
-      priority: number
-      successCount: number
-      failureCount: number
-      lastFoundAt?: string
-    }>
-    const curated = curateMarketplaceGroups(
-      rawGroups.map((g) => ({ ...g, active: Boolean(g.active) })),
-      '',
-      10,
-    )
-    db.exec('BEGIN')
-    try {
-      for (let i = 0; i < curated.length; i++) {
-        const item = curated[i]
-        db.prepare(
-          'UPDATE marketplace_groups SET priority = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?',
-        ).run(i + 1, item.recommendedActive ? 1 : 0, item.group.id, organizationId)
-      }
-      db.exec('COMMIT')
-    } catch (err) {
-      db.exec('ROLLBACK')
-      throw err
-    }
+  // Intent 4: Group-ranking commands are read-only suggestions.
+  // The administrator must approve the preview in Marketplace settings.
+  if (!isQuestion && hasExplicitCommand && (
+    p.includes('grupo') || p.includes('curador') || p.includes('reordenar')
+  )) {
+    const preview = previewGroupCuration(db, organizationId)
     return {
       ok: true,
-      intent: 'curate_groups',
-      reply: `${curated.length} grupos do Marketplace foram pontuados e reordenados por confiabilidade e taxa de conversão.`,
-      actionTaken: 'curate_groups',
-      details: { count: curated.length },
+      intent: 'curate_groups_preview',
+      reply: 'Prévia calculada: ' + preview.total + ' grupos cadastrados, ' +
+        preview.activeCount + ' ativos e ' + preview.changedOrder +
+        ' posições a reorganizar. Nenhum registro foi alterado. Confirme em Configurações > Marketplace > Reordenar grupos.',
+      actionTaken: 'preview_group_ranking',
+      details: { total: preview.total, changedOrder: preview.changedOrder },
     }
   }
-
   // Default Fallback
   return {
     ok: true,
