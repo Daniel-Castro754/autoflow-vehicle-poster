@@ -60,11 +60,20 @@ function validateDatabase(path, uploadNames) {
       .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_settings'")
       .get()
     if (hasCredentialTable) {
-      const encrypted = database
-        .prepare(
-          "SELECT 1 FROM organization_settings WHERE gemini_api_key LIKE 'enc:v1:%' OR openai_api_key LIKE 'enc:v1:%' OR alert_telegram_token LIKE 'enc:v1:%' OR alert_telegram_chat_id LIKE 'enc:v1:%' OR alert_webhook_url LIKE 'enc:v1:%' LIMIT 1",
-        )
-        .get()
+      const available = new Set(
+        database.prepare('PRAGMA table_info(organization_settings)').all().map((column) => column.name),
+      )
+      const fields = [
+        'gemini_api_key', 'openai_api_key', 'alert_telegram_token',
+        'alert_telegram_chat_id', 'alert_webhook_url',
+      ].filter((field) => available.has(field))
+      const encrypted = fields.length
+        ? database.prepare(
+            'SELECT 1 FROM organization_settings WHERE ' +
+              fields.map((field) => field + " LIKE 'enc:v1:%'").join(' OR ') +
+              ' LIMIT 1',
+          ).get()
+        : undefined
       if (encrypted && !uploadNames.has('__vault_present__')) {
         throw new Error('O banco contém chaves criptografadas, mas o backup não inclui o cofre.')
       }
