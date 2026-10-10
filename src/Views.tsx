@@ -282,6 +282,10 @@ type MarketplaceGroup = {
   successCount?: number
   failureCount?: number
   lastFoundAt?: string
+  city?: string
+  state?: string
+  memberCount?: number
+  privacy?: string
 }
 const money = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
@@ -3411,6 +3415,54 @@ export function SettingsView({
     }
   }
 
+  async function importGroupCsv(file?: File) {
+    if (!file) return
+    if (file.size > 1024 * 1024) {
+      setMessage('CSV de grupos deve ter até 1 MB.')
+      return
+    }
+    try {
+      const csv = (await file.text()).replace(/^\uFEFF/, '')
+      const lines = csv.split(/\r?\n/).filter((line) => line.trim())
+      if (lines.length < 2 || lines.length > 2001) throw new Error('CSV vazio ou com mais de 2.000 grupos.')
+      const delimiter = lines[0].includes(';') ? ';' : ','
+      const cols = lines[0].split(delimiter).map((v) => v.trim().toLowerCase())
+      const field = (values: string[], key: string) => values[cols.indexOf(key)]?.trim() || ''
+      if (!cols.includes('nome')) throw new Error('O CSV precisa ter a coluna nome.')
+      const imported: MarketplaceGroup[] = []
+      for (const line of lines.slice(1)) {
+        const values = line.split(delimiter)
+        const name = field(values, 'nome')
+        const url = field(values, 'url')
+        if (!name || (url && !/^https:\/\/(?:www\.|m\.)?facebook\.com\/groups\/[^/?#]+/i.test(url))) {
+          throw new Error('Grupo com nome vazio ou URL inválida: ' + name)
+        }
+        const rawMembers = field(values, 'membros').replace(/\./g, '')
+        const count = rawMembers ? Number(rawMembers) : 0
+        if (!Number.isSafeInteger(count) || count < 0) throw new Error('Número de membros inválido: ' + name)
+        imported.push({
+          name, url, city: field(values, 'cidade'), state: field(values, 'uf'),
+          memberCount: count, privacy: field(values, 'privacidade'),
+          active: !['não','nao','false','0'].includes(field(values, 'ativo').toLowerCase()),
+          priority: 0,
+        })
+      }
+      const byIdentity = new Map<string, MarketplaceGroup>()
+      for (const group of groups) byIdentity.set(group.url || group.name.toLocaleLowerCase('pt-BR'), group)
+      for (const group of imported) {
+        const key = group.url || group.name.toLocaleLowerCase('pt-BR')
+        byIdentity.set(key, { ...byIdentity.get(key), ...group })
+      }
+      const merged = [...byIdentity.values()].slice(0, 2000).map((group,index)=>({
+        ...group, priority: index + 1,
+      }))
+      setGroups(merged)
+      setMessage(imported.length + ' grupo(s) preparados. Clique em Salvar configurações para gravar.')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Falha ao ler CSV de grupos.')
+    }
+  }
+
   async function runAutoCurate() {
     setCurating(true)
     try {
@@ -3655,6 +3707,13 @@ export function SettingsView({
                       <Plus />
                       Adicionar grupo
                     </button>
+                    <label className="secondary" style={{ cursor: 'pointer', padding: 8 }}>
+                      Importar CSV
+                      <input type="file" hidden accept=".csv,text/csv" onChange={(event) => {
+                        void importGroupCsv(event.target.files?.[0])
+                        event.target.value = ''
+                      }} />
+                    </label>
                   </div>
                 </div>
                 <div className="managed-groups">
