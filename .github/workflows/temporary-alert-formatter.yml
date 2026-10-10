@@ -1,0 +1,40 @@
+name: Temporary alert security formatter
+on:
+  push:
+    branches: [fix/alert-secret-integrity]
+permissions:
+  contents: write
+jobs:
+  format:
+    if: "!contains(github.event.head_commit.message, '[style-bot]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: >
+          npx prettier --write
+          server/services/credential-vault.ts
+          server/services/alert-secrets.ts
+          server/services/alerting.ts
+          server/services/proactive-alerts.ts
+          server/routes/organization.ts
+          server/routes/alerts.ts
+          src/Views.tsx
+          scripts/backup.mjs
+          tests/alert-credential-safety.mjs
+          tests/vault-recovery.mjs
+          tests/windows-vault.mjs
+          tests/windows-recovery.mjs
+          docs/ALERT_SECRET_SECURITY.md
+      - name: Commit normalized files
+        run: |
+          if test -z "$(git status --porcelain)"; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server/services/credential-vault.ts server/services/alert-secrets.ts server/services/alerting.ts server/services/proactive-alerts.ts server/routes/organization.ts server/routes/alerts.ts src/Views.tsx scripts/backup.mjs tests/alert-credential-safety.mjs tests/vault-recovery.mjs tests/windows-vault.mjs tests/windows-recovery.mjs docs/ALERT_SECRET_SECURITY.md
+          git commit -m "style: format alert protection changes [style-bot]"
+          git push origin HEAD:fix/alert-secret-integrity
