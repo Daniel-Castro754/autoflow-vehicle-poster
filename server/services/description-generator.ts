@@ -56,6 +56,8 @@ export function resolveAIProviderSettings(settings?: AIProviderSettings) {
 export interface GenerationResult {
   description: string
   provider: 'gemini' | 'openai' | 'procedural'
+  attemptedProviders?: Array<'gemini' | 'openai'>
+  fallbackReason?: string
 }
 
 const moneyFormatter = new Intl.NumberFormat('pt-BR', {
@@ -125,6 +127,8 @@ export async function generateVehicleDescription(
     options?.apiKeys?.openai ||
     process.env.OPENAI_API_KEY ||
     ''
+  const attemptedProviders: Array<'gemini' | 'openai'> = []
+  const failures: string[] = []
 
   const fipeInfo =
     vehicle.fipeDiff && vehicle.fipeDiff > 500 && vehicle.fipePrice
@@ -165,11 +169,13 @@ REGRAS:
 
   // 1. Tentar Gemini se disponível
   if (geminiKey && (provider === 'auto' || provider === 'gemini')) {
+    attemptedProviders.push('gemini')
     try {
       const response = await fetch(
         'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
         {
           method: 'POST',
+          signal: AbortSignal.timeout(12000),
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
@@ -187,23 +193,25 @@ REGRAS:
         }
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
         if (text) {
-          return { description: text, provider: 'gemini' }
+          return { description: text, provider: 'gemini', attemptedProviders }
         }
       } else {
         logger.warn('AutoFlowAI', `Gemini API respondeu com status ${response.status}`)
+        failures.push('Gemini indisponível (HTTP ' + response.status + ')')
       }
     } catch (err) {
-      logger.warn('AutoFlowAI', 'Falha na chamada ao Gemini API', {
-        error: err instanceof Error ? err.message : err,
-      })
+      logger.warn('AutoFlowAI', 'Falha na chamada ao Gemini API', { name: err instanceof Error ? err.name : 'unknown' })
+      failures.push('Gemini indisponível por falha de rede')
     }
   }
 
   // 2. Tentar OpenAI se disponível
   if (openaiKey && (provider === 'auto' || provider === 'openai')) {
+    attemptedProviders.push('openai')
     try {
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
+        signal: AbortSignal.timeout(12000),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${openaiKey}`,
@@ -222,15 +230,16 @@ REGRAS:
         }
         const text = data.choices?.[0]?.message?.content?.trim()
         if (text) {
-          return { description: text, provider: 'openai' }
+          return { description: text, provider: 'openai', attemptedProviders,
+            ...(failures.length ? { fallbackReason: failures.join('; ') } : {}) }
         }
       } else {
         logger.warn('AutoFlowAI', `OpenAI API respondeu com status ${response.status}`)
+        failures.push('OpenAI indisponível (HTTP ' + response.status + ')')
       }
     } catch (err) {
-      logger.warn('AutoFlowAI', 'Falha na chamada à OpenAI API', {
-        error: err instanceof Error ? err.message : err,
-      })
+      logger.warn('AutoFlowAI', 'Falha na chamada à OpenAI API', { name: err instanceof Error ? err.name : 'unknown' })
+      failures.push('OpenAI indisponível por falha de rede')
     }
   }
 
@@ -238,5 +247,9 @@ REGRAS:
   return {
     description: generateProceduralDescription(vehicle, tone),
     provider: 'procedural',
+    attemptedProviders,
+    ...(provider === 'procedural'
+      ? {}
+      : { fallbackReason: failures.join('; ') || 'Nenhuma chave disponível para o provedor selecionado.' }),
   }
 }
