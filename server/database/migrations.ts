@@ -300,6 +300,22 @@ const migrations: Migration[] = [
     CREATE INDEX IF NOT EXISTS idx_ai_operation_previews_scope
       ON ai_operation_previews (organization_id,user_id,operation,expires_at);`,
   },
+  {
+    version: 18,
+    columns: [],
+    sql: `CREATE TABLE IF NOT EXISTS ai_operation_history (
+      id INTEGER PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      user_id INTEGER REFERENCES users(id),
+      action TEXT NOT NULL,
+      outcome TEXT NOT NULL CHECK(outcome IN ('preview','applied','rejected','tested','configured')),
+      provider TEXT,
+      items INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_operation_history_org
+      ON ai_operation_history (organization_id,id DESC);`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

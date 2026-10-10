@@ -13,6 +13,7 @@ import {
   type VehicleInput,
 } from '../services/description-generator.ts'
 import { generateVehicleHashtags } from '../services/trending-hashtags.ts'
+import { getAiAuditHistory, recordAiAudit } from '../services/ai-audit-history.ts'
 import {
   applyBatchDescriptionPreview,
   consumeAutopilotPreview,
@@ -73,6 +74,15 @@ export async function handleAIRoute(
       ...resolveAIProviderSettings(aiConf),
     })
     const hashtags = generateVehicleHashtags(input)
+    recordAiAudit(
+      db,
+      auth.organizationId,
+      auth.userId,
+      'description_generated',
+      'applied',
+      result.provider,
+      1,
+    )
     send(res, 200, {
       ok: true,
       description: result.description,
@@ -91,12 +101,42 @@ export async function handleAIRoute(
     send(res, 200, { ok: true, vehicle: parseVehicleRawText(rawText) })
     return true
   }
+  if (req.method === 'GET' && url.pathname === '/api/ai/history') {
+    send(res, 200, { ok: true, history: getAiAuditHistory(db, auth.organizationId) })
+    return true
+  }
+  if (req.method === 'GET' && url.pathname === '/api/ai/provider-status') {
+    const stored = db
+      .prepare(
+        'SELECT gemini_api_key gemini,openai_api_key openai,ai_provider preference FROM organization_settings WHERE organization_id=?',
+      )
+      .get(auth.organizationId) as
+      { gemini: string; openai: string; preference: string } | undefined
+    send(res, 200, {
+      ok: true,
+      preference: stored?.preference || 'auto',
+      geminiConfigured: Boolean(stored?.gemini || process.env.GEMINI_API_KEY),
+      openaiConfigured: Boolean(stored?.openai || process.env.OPENAI_API_KEY),
+      fallback: 'procedural',
+    })
+    return true
+  }
   if (req.method === 'GET' && url.pathname === '/api/ai/audit') {
     send(res, 200, { ok: true, audit: auditInventory(db, auth.organizationId) })
     return true
   }
   if (req.method === 'GET' && url.pathname === '/api/ai/autopilot/preview') {
-    send(res, 200, prepareAutopilotPreview(db, auth.organizationId, auth.userId))
+    const preview = prepareAutopilotPreview(db, auth.organizationId, auth.userId)
+    recordAiAudit(
+      db,
+      auth.organizationId,
+      auth.userId,
+      'manual_pilot_preview',
+      'preview',
+      null,
+      preview.potentialVehicles.length,
+    )
+    send(res, 200, preview)
     return true
   }
   if (req.method === 'POST' && url.pathname === '/api/ai/autopilot/run') {
@@ -111,7 +151,17 @@ export async function handleAIRoute(
       send(res, 409, { error: err instanceof Error ? err.message : 'Prévia inválida.' })
       return true
     }
-    send(res, 200, await runAutopilotPipeline(db, auth.organizationId, auth.userId))
+    const result = await runAutopilotPipeline(db, auth.organizationId, auth.userId)
+    recordAiAudit(
+      db,
+      auth.organizationId,
+      auth.userId,
+      'manual_pilot_executed',
+      result.ok ? 'applied' : 'rejected',
+      null,
+      result.jobsCreated,
+    )
+    send(res, 200, result)
     return true
   }
   if (req.method === 'POST' && url.pathname === '/api/ai/command') {
@@ -121,22 +171,30 @@ export async function handleAIRoute(
       send(res, 400, { error: 'O comando não pode estar vazio.' })
       return true
     }
-    send(res, 200, await executeAgentCommand(db, auth.organizationId, auth.userId, prompt))
+    const result = await executeAgentCommand(db, auth.organizationId, auth.userId, prompt)
+    recordAiAudit(db, auth.organizationId, auth.userId, 'assistant_command', 'preview')
+    send(res, 200, result)
     return true
   }
   if (req.method === 'POST' && url.pathname === '/api/ai/batch-optimize/preview') {
     const b = (await jsonBody(req)) as Record<string, unknown>
     try {
-      send(
-        res,
-        200,
-        await prepareBatchDescriptionPreview(
-          db,
-          auth.organizationId,
-          auth.userId,
-          String(b.tone || 'vendedor') as CopyTone,
-        ),
+      const preview = await prepareBatchDescriptionPreview(
+        db,
+        auth.organizationId,
+        auth.userId,
+        String(b.tone || 'vendedor') as CopyTone,
       )
+      recordAiAudit(
+        db,
+        auth.organizationId,
+        auth.userId,
+        'description_preview',
+        'preview',
+        null,
+        preview.proposals.length,
+      )
+      send(res, 200, preview)
     } catch (err) {
       send(res, 400, {
         error: err instanceof Error ? err.message : 'Não foi possível gerar a prévia.',
@@ -151,17 +209,23 @@ export async function handleAIRoute(
       return true
     }
     try {
-      send(
-        res,
-        200,
-        applyBatchDescriptionPreview(
-          db,
-          auth.organizationId,
-          auth.userId,
-          b.previewId,
-          b.selectedVehicleIds,
-        ),
+      const result = applyBatchDescriptionPreview(
+        db,
+        auth.organizationId,
+        auth.userId,
+        b.previewId,
+        b.selectedVehicleIds,
       )
+      recordAiAudit(
+        db,
+        auth.organizationId,
+        auth.userId,
+        'description_approved',
+        'applied',
+        null,
+        result.updated,
+      )
+      send(res, 200, result)
     } catch (err) {
       send(res, 409, { error: err instanceof Error ? err.message : 'Prévia inválida.' })
     }
@@ -188,10 +252,10 @@ export async function handleAIRoute(
     if (provider === 'gemini') {
       try {
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
           {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
             body: JSON.stringify({
               contents: [{ parts: [{ text: 'ping' }] }],
               generationConfig: { maxOutputTokens: 5 },
@@ -210,6 +274,7 @@ export async function handleAIRoute(
           })
           return true
         }
+        recordAiAudit(db, auth.organizationId, auth.userId, 'api_key_test', 'tested', 'gemini')
         send(res, 200, {
           ok: true,
           message: '✓ Chave do Google Gemini validada com sucesso! Conexão estabelecida.',
@@ -232,6 +297,7 @@ export async function handleAIRoute(
           send(res, 400, { ok: false, error: `Chave OpenAI inválida (status ${response.status}).` })
           return true
         }
+        recordAiAudit(db, auth.organizationId, auth.userId, 'api_key_test', 'tested', 'openai')
         send(res, 200, { ok: true, message: '✓ Chave OpenAI validada com sucesso!' })
         return true
       } catch (err) {
