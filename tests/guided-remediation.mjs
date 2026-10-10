@@ -15,14 +15,19 @@ const checks = [
 ]
 const original = JSON.stringify(checks)
 const guides = guidedRemediation(checks)
-assert.deepEqual(guides.map((g) => g.checkId), [
-  'jobs', 'vault', 'groups', 'pilot', 'profiles', 'ai', 'telegram', 'backup',
-])
+assert.deepEqual(
+  guides.map((g) => g.checkId),
+  ['jobs', 'vault', 'groups', 'pilot', 'profiles', 'ai', 'telegram', 'backup'],
+)
 assert.equal(JSON.stringify(checks), original, 'Guidance must not mutate diagnostics')
 assert.equal(new Set(guides.map((g) => g.id)).size, guides.length)
 assert(guides.every((g) => g.requiresHumanApproval === true && g.performsChanges === false))
 assert(guides.every((g) => g.destination && g.steps.length >= 3 && g.safety && g.reason))
-assert(guides.every((g) => !g.steps.some((s) => /execute automaticamente|exclua todos os grupos/i.test(s))))
+assert(
+  guides.every(
+    (g) => !g.steps.some((s) => /execute automaticamente|exclua todos os grupos/i.test(s)),
+  ),
+)
 
 const groups = guides.find((g) => g.checkId === 'groups')
 assert(groups.steps.some((step) => /backup/i.test(step)))
@@ -44,6 +49,11 @@ assert.equal(malicious[0].destination, 'Central de IA')
 assert(!JSON.stringify(malicious).includes(supplied))
 assert.deepEqual(guidedRemediation([{ id: 'vault', status: 'ok' }]), [])
 assert.deepEqual(guidedRemediation([{ id: 'backup', status: 'ok' }]), [])
-assert.deepEqual(guidedRemediation([{ id: 'backup', status: 'unknown' }]).map((g) => g.checkId), ['backup'])
+assert.deepEqual(
+  guidedRemediation([{ id: 'backup', status: 'unknown' }]).map((g) => g.checkId),
+  ['backup'],
+)
 
-console.log('✓ Guided remediation: static prioritized instructions, no destructive actions and no untrusted-data leakage')
+console.log(
+  '✓ Guided remediation: static prioritized instructions, no destructive actions and no untrusted-data leakage',
+)

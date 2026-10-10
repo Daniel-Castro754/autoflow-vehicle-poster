@@ -51,7 +51,9 @@ try {
   assert(report.checks.some((item) => item.id === 'vault' && item.status === 'attention'))
   assert(report.checks.some((item) => item.id === 'groups' && item.status === 'attention'))
   assert(report.guides.some((item) => item.checkId === 'groups' && item.performsChanges === false))
-  assert(report.guides.some((item) => item.checkId === 'backup' && item.priority === 'verification'))
+  assert(
+    report.guides.some((item) => item.checkId === 'backup' && item.priority === 'verification'),
+  )
   assert(report.guides.every((guide) => guide.requiresHumanApproval && guide.steps.length >= 3))
   assert(report.checks.some((item) => item.id === 'webhook' && item.status === 'ok'))
   assert.equal(report.automation.activeGroups, 0)

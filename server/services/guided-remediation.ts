@@ -46,7 +46,8 @@ const templates: Record<string, GuideTemplate> = {
     priority: 'verification',
     title: 'Verificar backup e restauração',
     summary: 'Comprove que existe uma cópia recuperável antes de usar automações de maior risco.',
-    reason: 'Este painel não executa restaurações; o estado é desconhecido, não uma falha confirmada.',
+    reason:
+      'Este painel não executa restaurações; o estado é desconhecido, não uma falha confirmada.',
     steps: [
       'Pare o servidor antes de copiar manualmente o DATA_DIR ou use o comando de backup do projeto.',
       'Execute a verificação de integridade prevista em npm run backup e guarde uma cópia fora da pasta do projeto.',
@@ -159,23 +160,26 @@ const priorityOrder: Record<GuidePriority, number> = {
 /** Fixed, deterministic playbooks. Ignores untrusted descriptions and stored secrets. */
 export function guidedRemediation(checks: readonly CheckInput[]): GuidedAction[] {
   return checks
-    .filter((item) => item.status === 'attention' || (item.id === 'backup' && item.status === 'unknown'))
+    .filter(
+      (item) => item.status === 'attention' || (item.id === 'backup' && item.status === 'unknown'),
+    )
     .flatMap((item) => {
       const template = Object.hasOwn(templates, item.id) ? templates[item.id] : undefined
       return template
-        ? [{
-            ...template,
-            id: 'guide-' + item.id,
-            checkId: item.id,
-            steps: [...template.steps],
-            requiresHumanApproval: true as const,
-            performsChanges: false as const,
-          }]
+        ? [
+            {
+              ...template,
+              id: 'guide-' + item.id,
+              checkId: item.id,
+              steps: [...template.steps],
+              requiresHumanApproval: true as const,
+              performsChanges: false as const,
+            },
+          ]
         : []
     })
     .sort(
       (a, b) =>
-        priorityOrder[a.priority] - priorityOrder[b.priority] ||
-        a.checkId.localeCompare(b.checkId),
+        priorityOrder[a.priority] - priorityOrder[b.priority] || a.checkId.localeCompare(b.checkId),
     )
 }
