@@ -320,18 +320,19 @@ export default function VehiclesView({
     }
   }
 
-
   async function importVehiclePhotos(selectedFiles?: FileList | null) {
     if (!selectedFiles?.length) return
     // Require an explicit stock code to avoid attaching photos to the wrong car.
     const files = Array.from(selectedFiles)
     const parseName = (name: string) => {
       const match = name.match(/^([A-Za-z0-9._-]+)__(\d{1,2})\.(jpg|jpeg|png|webp)$/i)
-      return match ? { code: match[1].toUpperCase(), order: Number(match[2]) } : null
+      return match?.[1] ? { code: match[1].toUpperCase(), order: Number(match[2]) } : null
     }
     const invalid = files.filter((file) => !parseName(file.name))
     if (invalid.length) {
-      notify('Use o padrão CODIGO__01.jpg para cada foto. Arquivos com nome inválido: ' + invalid.length)
+      notify(
+        'Use o padrão CODIGO__01.jpg para cada foto. Arquivos com nome inválido: ' + invalid.length,
+      )
       return
     }
     setImportingPhotos(true)
@@ -362,11 +363,18 @@ export default function VehiclesView({
         notify('Nenhuma foto corresponde a um código de estoque com espaço disponível.')
         return
       }
-      if (!window.confirm(
-        'Importar até ' + planned + ' foto(s) para ' + groups.size +
-        ' veículo(s)?\nCódigos não encontrados: ' + unmatched.size +
-        '.\nFotos existentes serão preservadas.',
-      )) return
+      if (
+        !window.confirm(
+          'Importar até ' +
+            planned +
+            ' foto(s) para ' +
+            groups.size +
+            ' veículo(s)?\nCódigos não encontrados: ' +
+            unmatched.size +
+            '.\nFotos existentes serão preservadas.',
+        )
+      )
+        return
       let uploaded = 0
       let duplicates = 0
       let failures = 0
@@ -390,8 +398,17 @@ export default function VehiclesView({
           }
         }
       }
-      notify('Fotos: ' + uploaded + ' adicionada(s), ' + duplicates +
-        ' duplicada(s), ' + failures + ' falha(s), ' + unmatched.size + ' código(s) não localizado(s).')
+      notify(
+        'Fotos: ' +
+          uploaded +
+          ' adicionada(s), ' +
+          duplicates +
+          ' duplicada(s), ' +
+          failures +
+          ' falha(s), ' +
+          unmatched.size +
+          ' código(s) não localizado(s).',
+      )
       await reload()
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Não foi possível importar as fotos.')

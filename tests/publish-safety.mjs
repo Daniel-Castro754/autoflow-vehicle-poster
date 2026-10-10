@@ -33,7 +33,7 @@ for (const legacy of [true, false]) {
   }
   applyMigrations(migrationDb)
   applyMigrations(migrationDb)
-  assert.equal(migrationDb.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 14)
+  assert.equal(migrationDb.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 16)
   if (legacy)
     assert.equal(
       migrationDb.prepare('SELECT publish_attempt_at FROM publication_jobs WHERE id=1').get()
@@ -538,9 +538,9 @@ try {
     throw new Error(
       'O grupo com bom histórico deveria continuar ativo e em primeiro lugar após a curadoria automática.',
     )
-  if (curatedBad.active)
+  if (!curatedBad.active || curatedBad.priority !== 2)
     throw new Error(
-      'O grupo com histórico ruim deveria ter sido desativado pela curadoria automática.',
+      'A curadoria deve reduzir a prioridade do grupo com histórico ruim sem desativá-lo.',
     )
 
   // 6. O agendamento só deve usar histórico com amostra terminal suficiente

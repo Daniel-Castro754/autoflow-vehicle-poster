@@ -1,7 +1,10 @@
-import { applyGroupCuration } from '../services/group-curation-worker.ts'
+import {
+  applyGroupCuration,
+  previewGroupCuration,
+  undoLastGroupCuration,
+} from '../services/group-curation-worker.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
-import { curateMarketplaceGroups } from '../services/group-curator.ts'
 
 type AuthContext = { userId: number; organizationId: number }
 type Group = {
@@ -28,26 +31,44 @@ export function handleGroupsRoute(
   res: ServerResponse,
   url: URL,
   auth: AuthContext,
-  { db, send, isAdmin, marketplaceGroups }: Dependencies,
+  { db, send, isAdmin }: Dependencies,
 ): boolean {
   if (req.method === 'GET' && url.pathname === '/api/groups/curated') {
-    const company = db.prepare('SELECT default_location location FROM organization_settings WHERE organization_id=?').get(auth.organizationId) as { location: string } | undefined
-    const locationQuery = company?.location || ''
-    const rawGroups = marketplaceGroups(auth.organizationId)
-    const curated = curateMarketplaceGroups(
-      rawGroups.map((group) => ({ ...group, active: Boolean(group.active) })),
-      locationQuery,
-    )
-    send(res, 200, { ok: true, groups: curated })
+    // Ignore caller-supplied locations: only the company default is authoritative.
+    const preview = previewGroupCuration(db, auth.organizationId)
+    send(res, 200, { ok: true, ...preview })
     return true
   }
   if (req.method === 'POST' && url.pathname === '/api/groups/auto-curate') {
     if (!isAdmin(auth)) {
-      send(res, 403, { error: 'Somente administradores podem aplicar curadoria de grupos.' })
+      send(res, 403, { error: 'Somente administradores podem reorganizar grupos.' })
       return true
     }
-    const result = applyGroupCuration(db, auth.organizationId)
-    send(res, 200, { ok: true, ...result })
+    const digest = url.searchParams.get('previewDigest')
+    if (!digest || !/^[a-f0-9]{64}$/.test(digest)) {
+      send(res, 428, { error: 'Consulte e confirme a prévia antes de reorganizar.' })
+      return true
+    }
+    try {
+      const result = applyGroupCuration(db, auth.organizationId, digest)
+      send(res, 200, { ok: true, ...result })
+    } catch (error) {
+      send(res, 409, {
+        error: error instanceof Error ? error.message : 'A prévia está desatualizada.',
+      })
+    }
+    return true
+  }
+  if (req.method === 'POST' && url.pathname === '/api/groups/undo-curation') {
+    if (!isAdmin(auth)) {
+      send(res, 403, { error: 'Somente administradores podem desfazer reorganizações.' })
+      return true
+    }
+    try {
+      send(res, 200, undoLastGroupCuration(db, auth.organizationId))
+    } catch (error) {
+      send(res, 409, { error: error instanceof Error ? error.message : 'Não é possível desfazer.' })
+    }
     return true
   }
   return false

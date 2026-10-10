@@ -269,6 +269,21 @@ const migrations: Migration[] = [
       FOREIGN KEY (organization_id) REFERENCES organizations(id)
     );`,
   },
+  {
+    version: 16,
+    columns: [],
+    sql: `CREATE TABLE IF NOT EXISTS group_curation_history (
+      id INTEGER PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      before_state TEXT NOT NULL,
+      after_digest TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'manual',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      undone_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_group_curation_history_org
+      ON group_curation_history (organization_id,id DESC);`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {
