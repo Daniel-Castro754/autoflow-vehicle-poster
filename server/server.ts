@@ -13,6 +13,7 @@ import { startGroupCurationWorker } from './services/group-curation-worker.ts'
 import { startHealthMonitor, stopHealthMonitor } from './services/health-monitor.ts'
 import { createAutonomousScheduler } from './services/autonomous-scheduler.ts'
 import { handleOperationsRoute } from './routes/operations.ts'
+import { handleBackupVerificationRoute } from './routes/backup-verification.ts'
 import { handleInterventionsRoute } from './routes/interventions.ts'
 import { recordOperationalSignal } from './services/operational-incidents.ts'
 import { requestIdFor, withRequestContext } from './lib/request-context.ts'
@@ -415,6 +416,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         send,
         jsonBody,
         isAdmin,
+      })
+    )
+      return
+    if (
+      await handleBackupVerificationRoute(req, res, url, auth, {
+        db,
+        send,
+        jsonBody,
+        isAdmin: isAdmin(auth),
       })
     )
       return
