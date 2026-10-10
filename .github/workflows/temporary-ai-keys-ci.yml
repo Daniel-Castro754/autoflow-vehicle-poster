@@ -1,0 +1,48 @@
+name: Temporary AI keys audit validation
+on:
+  push:
+    branches: [fix/ai-key-persistence-audit]
+permissions:
+  contents: write
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[style-bot]')"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx prettier --write server/routes/ai.ts server/routes/organization.ts server/services/ai-audit-history.ts server/services/description-generator.ts src/Views.tsx src/AiCenterView.tsx tests/ai-key-persistence.mjs tests/queue-flow.mjs tests/publish-safety.mjs
+      - run: |
+          if test -z "$(git status --porcelain)"; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server/routes/ai.ts server/routes/organization.ts server/services/ai-audit-history.ts server/services/description-generator.ts src/Views.tsx src/AiCenterView.tsx tests/ai-key-persistence.mjs tests/queue-flow.mjs tests/publish-safety.mjs
+          git commit -m "style: format AI key audit [style-bot]"
+          git push origin HEAD:fix/ai-key-persistence-audit
+  validate:
+    needs: format
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.18.0','24']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/ai-key-persistence-audit
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run build
+      - run: npm run build:extension
+      - run: npm test
+      - run: npm audit --audit-level=high
