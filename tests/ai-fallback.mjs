@@ -22,7 +22,7 @@ try {
   assert.equal(calls[0].headers['x-goog-api-key'], SECRET)
   calls.length = 0
 
-  globalThis.fetch = async (_url) => {
+  globalThis.fetch = async () => {
     calls.push('failed')
     return new Response('{}', { status: 503 })
   }
