@@ -1,4 +1,5 @@
 import { logger } from '../lib/logger.ts'
+import { validateWebhookAddress } from './alert-secrets.ts'
 
 export interface AlertConfig {
   telegramBotToken?: string
@@ -22,7 +23,7 @@ export function escapeMarkdownV2(text: string) {
 }
 
 function fetchWithTimeout(url: string, init: RequestInit) {
-  return fetch(url, { ...init, signal: AbortSignal.timeout(8000) })
+  return fetch(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(8000) })
 }
 
 export async function sendCriticalAlert(
@@ -79,7 +80,8 @@ export async function sendCriticalAlert(
 
   if (webhookUrl) {
     try {
-      const response = await fetchWithTimeout(webhookUrl, {
+      const safeWebhookUrl = validateWebhookAddress(webhookUrl)
+      const response = await fetchWithTimeout(safeWebhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -95,8 +97,8 @@ export async function sendCriticalAlert(
         logger.warn('AutoFlowAlert', `Webhook respondeu com status ${response.status}`)
       }
     } catch (err) {
-      logger.warn('AutoFlowAlert', 'Erro ao enviar alerta para webhook', {
-        error: err instanceof Error ? err.message : err,
+      logger.warn('AutoFlowAlert', 'Webhook indisponível ou destino inseguro', {
+        errorType: err instanceof Error ? err.name : 'unknown',
       })
     }
   }
