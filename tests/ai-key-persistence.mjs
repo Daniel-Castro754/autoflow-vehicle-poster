@@ -2,9 +2,14 @@ import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
 import { startTestServer, createApiClient } from './helpers/server.mjs'
+import { initializeCredentialVault, decryptCredential } from '../server/services/credential-vault.ts'
 
 const server = await startTestServer()
 const db = new DatabaseSync(join(server.dataDir, 'autoflow.db'))
+const previousVaultKey = process.env.AUTOFLOW_VAULT_KEY
+process.env.AUTOFLOW_VAULT_KEY = 'audit-test-secret-at-least-32-characters'
+initializeCredentialVault(server.dataDir)
+const plaintext = (cipher, org, field) => decryptCredential(cipher, org, field)
 try {
   const anonymous = createApiClient(server.base, '')
   const login = await anonymous('/auth/login', {
@@ -36,8 +41,10 @@ try {
   assert(!('geminiApiKey' in initial.settings) && !('openaiApiKey' in initial.settings))
   await patch({ geminiApiKey: gemini, openaiApiKey: openai, aiProvider: 'gemini' })
   let stored = dbKeys()
-  assert.equal(stored.gemini, gemini)
-  assert.equal(stored.openai, openai)
+  assert(stored.gemini.startsWith('enc:v1:'), 'Key must be encrypted at rest')
+  assert.equal(plaintext(stored.gemini, org, 'gemini_api_key'), gemini)
+  assert(stored.openai.startsWith('enc:v1:'))
+  assert.equal(plaintext(stored.openai, org, 'openai_api_key'), openai)
   assert.equal(stored.preference, 'gemini')
   const saved = await api('/settings')
   assert.equal(saved.settings.geminiKeyConfigured, true)
@@ -49,8 +56,8 @@ try {
   await patch({ defaultLocation: 'Içara, SC' })
   await patch({ geminiApiKey: '', openaiApiKey: '', aiProvider: 'openai' })
   stored = dbKeys()
-  assert.equal(stored.gemini, gemini, 'empty must not erase stored API key')
-  assert.equal(stored.openai, openai)
+  assert.equal(plaintext(stored.gemini, org, 'gemini_api_key'), gemini, 'empty must not erase stored API key')
+  assert.equal(plaintext(stored.openai, org, 'openai_api_key'), openai)
   assert.equal(stored.preference, 'openai')
   // Open a second connection to verify credentials are persisted on disk, not in memory.
   const secondDb = new DatabaseSync(join(server.dataDir, 'autoflow.db'), { readOnly: true })
@@ -58,7 +65,7 @@ try {
     secondDb
       .prepare('SELECT gemini_api_key key FROM organization_settings WHERE organization_id=?')
       .get(org).key,
-    gemini,
+    stored.gemini,
   )
   secondDb.close()
 
@@ -90,7 +97,7 @@ try {
   assert.equal(provider.openaiConfigured, true)
 
   await assert.rejects(patch({ clearGeminiApiKey: 'yes' }), (err) => err.status === 400)
-  assert.equal(dbKeys().gemini, gemini)
+  assert.equal(plaintext(dbKeys().gemini, org, 'gemini_api_key'), gemini)
   await patch({ clearGeminiApiKey: true, clearOpenaiApiKey: true })
   assert.equal(dbKeys().gemini, '')
   assert.equal(dbKeys().openai, '')
@@ -114,4 +121,6 @@ try {
 } finally {
   db.close()
   await server.close()
+  if (previousVaultKey === undefined) delete process.env.AUTOFLOW_VAULT_KEY
+  else process.env.AUTOFLOW_VAULT_KEY = previousVaultKey
 }
