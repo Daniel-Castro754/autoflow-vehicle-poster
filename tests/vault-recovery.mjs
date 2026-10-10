@@ -25,7 +25,9 @@ try {
     initializeCredentialVault(root)
     const credential = 'fake-test-gemini-credential'
     const encrypted = encryptCredential(credential, 1, 'gemini_api_key')
-    db.prepare('INSERT INTO organization_settings (organization_id,gemini_api_key,openai_api_key) VALUES(1,?,?)').run(encrypted, '')
+    db.prepare(
+      'INSERT INTO organization_settings (organization_id,gemini_api_key,openai_api_key) VALUES(1,?,?)',
+    ).run(encrypted, '')
     const password = 'correct horse battery safe repository 2026'
     const exported = createPortableRecoveryPackage(db, root, password)
     assert(!exported.includes(credential), 'Recovery package must not expose credentials')
@@ -48,8 +50,11 @@ try {
     )
     assert.equal(decryptCredential(encrypted, 1, 'gemini_api_key'), credential)
     // Recovery also works for an installation configured only for alert integrations.
-    db.prepare("UPDATE organization_settings SET gemini_api_key='',alert_telegram_token=? WHERE organization_id=1")
-      .run(encryptCredential('123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi', 1, 'alert_telegram_token'))
+    db.prepare(
+      "UPDATE organization_settings SET gemini_api_key='',alert_telegram_token=? WHERE organization_id=1",
+    ).run(
+      encryptCredential('123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi', 1, 'alert_telegram_token'),
+    )
     const alertOnlyExport = createPortableRecoveryPackage(db, root, password)
     assert.equal(verifyPortableRecoveryPackage(alertOnlyExport, password), true)
     if (process.platform !== 'win32') {

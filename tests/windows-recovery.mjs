@@ -26,7 +26,9 @@ if (process.platform !== 'win32') {
     )
     initializeCredentialVault(source)
     const encrypted = encryptCredential('example-credential-not-real', 7, 'gemini_api_key')
-    db.prepare('INSERT INTO organization_settings (organization_id,gemini_api_key,openai_api_key) VALUES (7,?,?)').run(encrypted, '')
+    db.prepare(
+      'INSERT INTO organization_settings (organization_id,gemini_api_key,openai_api_key) VALUES (7,?,?)',
+    ).run(encrypted, '')
     const password = 'long-portable-recovery-password-2026'
     const bundle = createPortableRecoveryPackage(db, source, password)
 

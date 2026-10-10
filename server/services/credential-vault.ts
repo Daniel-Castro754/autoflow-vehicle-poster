@@ -13,7 +13,12 @@ import type { DatabaseSync } from 'node:sqlite'
 
 const FILE = 'vault-key.json'
 const PREFIX = 'enc:v1:'
-export type CredentialField = 'gemini_api_key' | 'openai_api_key' | 'alert_telegram_token' | 'alert_telegram_chat_id' | 'alert_webhook_url'
+export type CredentialField =
+  | 'gemini_api_key'
+  | 'openai_api_key'
+  | 'alert_telegram_token'
+  | 'alert_telegram_chat_id'
+  | 'alert_webhook_url'
 type Field = CredentialField
 type VaultFile =
   | { version: 1; mode: 'dpapi'; wrappedKey: string }
@@ -178,20 +183,23 @@ export function getAiCredentials(db: DatabaseSync, org: number) {
 /** Run after schema migration, before opening the server. Corruption or lost keys fail closed. */
 export function migrateCredentials(db: DatabaseSync) {
   const fields: CredentialField[] = [
-    'gemini_api_key', 'openai_api_key', 'alert_telegram_token',
-    'alert_telegram_chat_id', 'alert_webhook_url',
+    'gemini_api_key',
+    'openai_api_key',
+    'alert_telegram_token',
+    'alert_telegram_chat_id',
+    'alert_webhook_url',
   ]
-  const rows = db.prepare(
-    'SELECT organization_id id,' + fields.join(',') + ' FROM organization_settings',
-  ).all() as Array<{ id: number } & Record<CredentialField, string>>
+  const rows = db
+    .prepare('SELECT organization_id id,' + fields.join(',') + ' FROM organization_settings')
+    .all() as Array<{ id: number } & Record<CredentialField, string>>
   // Validate every existing ciphertext BEFORE starting the migration.
   for (const row of rows)
-    for (const field of fields)
-      decryptCredential(row[field] || '', row.id, field)
+    for (const field of fields) decryptCredential(row[field] || '', row.id, field)
   db.exec('BEGIN IMMEDIATE')
   try {
     const update = db.prepare(
-      'UPDATE organization_settings SET ' + fields.map(field => field + '=?').join(',') +
+      'UPDATE organization_settings SET ' +
+        fields.map((field) => field + '=?').join(',') +
         ' WHERE organization_id=?',
     )
     for (const row of rows) {
@@ -201,8 +209,7 @@ export function migrateCredentials(db: DatabaseSync) {
           ? encryptCredential(previous, row.id, field)
           : previous
       })
-      if (values.some((value, i) => value !== row[fields[i]!]))
-        update.run(...values, row.id)
+      if (values.some((value, i) => value !== row[fields[i]!])) update.run(...values, row.id)
     }
     db.exec('COMMIT')
   } catch (error) {
@@ -213,10 +220,12 @@ export function migrateCredentials(db: DatabaseSync) {
 
 /** Decipher alert endpoints in the backend, never in an API settings response. */
 export function getAlertCredentials(db: DatabaseSync, org: number) {
-  const row = db.prepare(
-    'SELECT alert_telegram_token token,alert_telegram_chat_id chat,alert_webhook_url webhook ' +
-      'FROM organization_settings WHERE organization_id=?',
-  ).get(org) as { token: string; chat: string; webhook: string } | undefined
+  const row = db
+    .prepare(
+      'SELECT alert_telegram_token token,alert_telegram_chat_id chat,alert_webhook_url webhook ' +
+        'FROM organization_settings WHERE organization_id=?',
+    )
+    .get(org) as { token: string; chat: string; webhook: string } | undefined
   return {
     telegramBotToken: decryptCredential(row?.token || '', org, 'alert_telegram_token'),
     telegramChatId: decryptCredential(row?.chat || '', org, 'alert_telegram_chat_id'),
@@ -321,7 +330,14 @@ function validateMasterAgainstDatabase(db: DatabaseSync, candidate: Buffer) {
       'SELECT organization_id id, gemini_api_key gemini, openai_api_key openai,' +
         ' alert_telegram_token telegram,alert_telegram_chat_id chat,alert_webhook_url webhook FROM organization_settings',
     )
-    .all() as Array<{ id: number; gemini: string; openai: string; telegram: string; chat: string; webhook: string }>
+    .all() as Array<{
+    id: number
+    gemini: string
+    openai: string
+    telegram: string
+    chat: string
+    webhook: string
+  }>
   let encryptedCount = 0
   for (const row of rows) {
     for (const [field, cipher] of [

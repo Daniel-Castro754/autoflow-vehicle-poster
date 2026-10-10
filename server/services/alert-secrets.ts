@@ -7,7 +7,10 @@ import { isIP } from 'node:net'
 export function validateWebhookAddress(value: string): string {
   const input = value.trim()
   if (!input) return ''
-  if (input.length > 2048 || Array.from(input).some((ch) => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127))
+  if (
+    input.length > 2048 ||
+    Array.from(input).some((ch) => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127)
+  )
     throw new Error('A URL do webhook é muito longa ou contém caracteres inválidos.')
   let url: URL
   try {
@@ -19,12 +22,18 @@ export function validateWebhookAddress(value: string): string {
   const blockedSuffix = /(?:^|\.)(?:localhost|local|internal|lan|home|arpa)$/
   if (
     url.protocol !== 'https:' ||
-    url.username || url.password ||
-    !host.includes('.') || isIP(host) !== 0 ||
-    blockedSuffix.test(host) || host === 'metadata.google.internal' ||
-    url.hash || (url.port && url.port !== '443')
+    url.username ||
+    url.password ||
+    !host.includes('.') ||
+    isIP(host) !== 0 ||
+    blockedSuffix.test(host) ||
+    host === 'metadata.google.internal' ||
+    url.hash ||
+    (url.port && url.port !== '443')
   ) {
-    throw new Error('Use um domínio público HTTPS sem credenciais, IP literal ou porta alternativa.')
+    throw new Error(
+      'Use um domínio público HTTPS sem credenciais, IP literal ou porta alternativa.',
+    )
   }
   return url.toString()
 }

@@ -3441,7 +3441,12 @@ export function SettingsView({
         ok: boolean
         result: { telegram: boolean; webhook: boolean }
       }>('/alerts/test', { method: 'POST' })
-      setMessage('Teste de alertas: Telegram ' + (res.result.telegram ? 'enviado' : 'não enviado') + ' · Webhook ' + (res.result.webhook ? 'enviado' : 'não enviado'))
+      setMessage(
+        'Teste de alertas: Telegram ' +
+          (res.result.telegram ? 'enviado' : 'não enviado') +
+          ' · Webhook ' +
+          (res.result.webhook ? 'enviado' : 'não enviado'),
+      )
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Erro ao testar alerta')
     } finally {
@@ -4281,8 +4286,15 @@ export function SettingsView({
                   type="password"
                   autoComplete="off"
                   value={alertTelegramToken}
-                  onChange={(e) => { setAlertTelegramToken(e.target.value); setClearAlertTelegram(false) }}
-                  placeholder={alertTelegramConfigured ? 'Configurado — digite para substituir' : '123456:ABC-DEF...'}
+                  onChange={(e) => {
+                    setAlertTelegramToken(e.target.value)
+                    setClearAlertTelegram(false)
+                  }}
+                  placeholder={
+                    alertTelegramConfigured
+                      ? 'Configurado — digite para substituir'
+                      : '123456:ABC-DEF...'
+                  }
                 />
               </label>
               <label>
@@ -4292,8 +4304,13 @@ export function SettingsView({
                 <input
                   name="alertTelegramChatId"
                   value={alertTelegramChatId}
-                  onChange={(e) => { setAlertTelegramChatId(e.target.value); setClearAlertChat(false) }}
-                  placeholder={alertChatConfigured ? 'Configurado — digite para substituir' : '-1001234567890'}
+                  onChange={(e) => {
+                    setAlertTelegramChatId(e.target.value)
+                    setClearAlertChat(false)
+                  }}
+                  placeholder={
+                    alertChatConfigured ? 'Configurado — digite para substituir' : '-1001234567890'
+                  }
                 />
               </label>
             </div>
@@ -4304,25 +4321,72 @@ export function SettingsView({
               <input
                 name="alertWebhookUrl"
                 value={alertWebhookUrl}
-                onChange={(e) => { setAlertWebhookUrl(e.target.value); setClearAlertWebhook(false) }}
-                placeholder={alertWebhookConfigured ? 'Configurado — digite para substituir' : 'https://discord.com/api/webhooks/...'}
+                onChange={(e) => {
+                  setAlertWebhookUrl(e.target.value)
+                  setClearAlertWebhook(false)
+                }}
+                placeholder={
+                  alertWebhookConfigured
+                    ? 'Configurado — digite para substituir'
+                    : 'https://discord.com/api/webhooks/...'
+                }
               />
             </label>
             <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-              {([
-                ['Telegram', alertTelegramConfigured, alertTelegramSource, clearAlertTelegram,
-                  () => { setClearAlertTelegram(true); setAlertTelegramToken('') }],
-                ['Chat', alertChatConfigured, alertChatSource, clearAlertChat,
-                  () => { setClearAlertChat(true); setAlertTelegramChatId('') }],
-                ['Webhook', alertWebhookConfigured, alertWebhookSource, clearAlertWebhook,
-                  () => { setClearAlertWebhook(true); setAlertWebhookUrl('') }],
-              ] as Array<[string, boolean, string, boolean, () => void]>).map(([name, configured, source, pending, clear]) => (
+              {(
+                [
+                  [
+                    'Telegram',
+                    alertTelegramConfigured,
+                    alertTelegramSource,
+                    clearAlertTelegram,
+                    () => {
+                      setClearAlertTelegram(true)
+                      setAlertTelegramToken('')
+                    },
+                  ],
+                  [
+                    'Chat',
+                    alertChatConfigured,
+                    alertChatSource,
+                    clearAlertChat,
+                    () => {
+                      setClearAlertChat(true)
+                      setAlertTelegramChatId('')
+                    },
+                  ],
+                  [
+                    'Webhook',
+                    alertWebhookConfigured,
+                    alertWebhookSource,
+                    clearAlertWebhook,
+                    () => {
+                      setClearAlertWebhook(true)
+                      setAlertWebhookUrl('')
+                    },
+                  ],
+                ] as Array<[string, boolean, string, boolean, () => void]>
+              ).map(([name, configured, source, pending, clear]) => (
                 <div key={name}>
-                  <small>{name}: {configured ? 'Configurado (' + (source === 'database' ? 'banco local' : 'ambiente') + ')' : 'Não configurado'}</small>
+                  <small>
+                    {name}:{' '}
+                    {configured
+                      ? 'Configurado (' + (source === 'database' ? 'banco local' : 'ambiente') + ')'
+                      : 'Não configurado'}
+                  </small>
                   {configured && source === 'database' && (
-                    <button type="button" className="secondary" onClick={() => {
-                      if (window.confirm('Remover ' + name + ' do banco ao salvar as configurações?')) clear()
-                    }}>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            'Remover ' + name + ' do banco ao salvar as configurações?',
+                          )
+                        )
+                          clear()
+                      }}
+                    >
                       {pending ? 'Remoção pendente' : 'Remover'}
                     </button>
                   )}
@@ -4334,7 +4398,10 @@ export function SettingsView({
                 type="button"
                 className="secondary"
                 onClick={testAlert}
-                disabled={testingAlert || (!(alertTelegramConfigured && alertChatConfigured) && !alertWebhookConfigured)}
+                disabled={
+                  testingAlert ||
+                  (!(alertTelegramConfigured && alertChatConfigured) && !alertWebhookConfigured)
+                }
               >
                 <Bell size={15} />
                 {testingAlert ? 'Enviando teste...' : 'Testar envio de alerta'}
