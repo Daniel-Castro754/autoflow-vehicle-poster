@@ -83,7 +83,7 @@ export async function prepareBatchDescriptionPreview(db: DatabaseSync, org: numb
   const previewId = proposals.length ? store(db, org, user, 'batch_descriptions', { proposals }) : null
   return { ok:true, previewId, expiresInMinutes:15, totalEligible:candidates.length,
     remainingAfterBatch:Math.max(0,candidates.length-proposals.length),
-    proposals:proposals.map(({ fingerprint: _fingerprint, ...item }) => item) }
+    proposals:proposals.map(({ vehicleId, label, original, proposed, provider }) => ({ vehicleId, label, original, proposed, provider })) }
 }
 
 export function applyBatchDescriptionPreview(db: DatabaseSync, org: number, user: number, id: string, selectedIds: number[]) {
