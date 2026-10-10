@@ -1,4 +1,8 @@
-import { applyGroupCuration, previewGroupCuration, undoLastGroupCuration } from '../services/group-curation-worker.ts'
+import {
+  applyGroupCuration,
+  previewGroupCuration,
+  undoLastGroupCuration,
+} from '../services/group-curation-worker.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 
@@ -49,7 +53,9 @@ export function handleGroupsRoute(
       const result = applyGroupCuration(db, auth.organizationId, digest)
       send(res, 200, { ok: true, ...result })
     } catch (error) {
-      send(res, 409, { error: error instanceof Error ? error.message : 'A prévia está desatualizada.' })
+      send(res, 409, {
+        error: error instanceof Error ? error.message : 'A prévia está desatualizada.',
+      })
     }
     return true
   }

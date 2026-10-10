@@ -3425,7 +3425,8 @@ export function SettingsView({
     try {
       const csv = (await file.text()).replace(/^\uFEFF/, '')
       const lines = csv.split(/\r?\n/).filter((line) => line.trim())
-      if (lines.length < 2 || lines.length > 2001) throw new Error('CSV vazio ou com mais de 2.000 grupos.')
+      if (lines.length < 2 || lines.length > 2001)
+        throw new Error('CSV vazio ou com mais de 2.000 grupos.')
       const header = lines[0] || ''
       const delimiter = header.includes(';') ? ';' : ','
       const cols = header.split(delimiter).map((v) => v.trim().toLowerCase())
@@ -3436,30 +3437,42 @@ export function SettingsView({
         const values = line.split(delimiter)
         const name = field(values, 'nome')
         const url = field(values, 'url')
-        if (!name || (url && !/^https:\/\/(?:www\.|m\.)?facebook\.com\/groups\/[^/?#]+/i.test(url))) {
+        if (
+          !name ||
+          (url && !/^https:\/\/(?:www\.|m\.)?facebook\.com\/groups\/[^/?#]+/i.test(url))
+        ) {
           throw new Error('Grupo com nome vazio ou URL inválida: ' + name)
         }
         const rawMembers = field(values, 'membros').replace(/\./g, '')
         const count = rawMembers ? Number(rawMembers) : 0
-        if (!Number.isSafeInteger(count) || count < 0) throw new Error('Número de membros inválido: ' + name)
+        if (!Number.isSafeInteger(count) || count < 0)
+          throw new Error('Número de membros inválido: ' + name)
         imported.push({
-          name, url, city: field(values, 'cidade'), state: field(values, 'uf'),
-          memberCount: count, privacy: field(values, 'privacidade'),
-          active: !['não','nao','false','0'].includes(field(values, 'ativo').toLowerCase()),
+          name,
+          url,
+          city: field(values, 'cidade'),
+          state: field(values, 'uf'),
+          memberCount: count,
+          privacy: field(values, 'privacidade'),
+          active: !['não', 'nao', 'false', '0'].includes(field(values, 'ativo').toLowerCase()),
           priority: 0,
         })
       }
       const byIdentity = new Map<string, MarketplaceGroup>()
-      for (const group of groups) byIdentity.set(group.url || group.name.toLocaleLowerCase('pt-BR'), group)
+      for (const group of groups)
+        byIdentity.set(group.url || group.name.toLocaleLowerCase('pt-BR'), group)
       for (const group of imported) {
         const key = group.url || group.name.toLocaleLowerCase('pt-BR')
         byIdentity.set(key, { ...byIdentity.get(key), ...group })
       }
-      const merged = [...byIdentity.values()].slice(0, 2000).map((group,index)=>({
-        ...group, priority: index + 1,
+      const merged = [...byIdentity.values()].slice(0, 2000).map((group, index) => ({
+        ...group,
+        priority: index + 1,
       }))
       setGroups(merged)
-      setMessage(imported.length + ' grupo(s) preparados. Clique em Salvar configurações para gravar.')
+      setMessage(
+        imported.length + ' grupo(s) preparados. Clique em Salvar configurações para gravar.',
+      )
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Falha ao ler CSV de grupos.')
     }
@@ -3468,43 +3481,65 @@ export function SettingsView({
   async function runAutoCurate() {
     setCurating(true)
     try {
-      const preview = await api<{ previewDigest: string; total: number; activeCount: number; changedOrder: number; location: string; groups: Array<{ group: MarketplaceGroup; score: number }> }>('/groups/curated')
-      const top = preview.groups.slice(0, 5).map((item, index) => String(index + 1) + '. ' + item.group.name)
-      const proceed = window.confirm([
-        'PRÉVIA — nenhuma alteração foi feita.',
-        'Referência: ' + (preview.location || 'localização da empresa não configurada'),
-        'Cadastrados: ' + preview.total + ' | Ativos: ' + preview.activeCount,
-        'Posições a alterar: ' + preview.changedOrder,
-        'Nenhum grupo será excluído ou desativado.',
-        ...top,
-        'Confirmar nova ordem?',
-      ].join('\n'))
-      if (!proceed) { setMessage('Reorganização cancelada.'); return }
+      const preview = await api<{
+        previewDigest: string
+        total: number
+        activeCount: number
+        changedOrder: number
+        location: string
+        groups: Array<{ group: MarketplaceGroup; score: number }>
+      }>('/groups/curated')
+      const top = preview.groups
+        .slice(0, 5)
+        .map((item, index) => String(index + 1) + '. ' + item.group.name)
+      const proceed = window.confirm(
+        [
+          'PRÉVIA — nenhuma alteração foi feita.',
+          'Referência: ' + (preview.location || 'localização da empresa não configurada'),
+          'Cadastrados: ' + preview.total + ' | Ativos: ' + preview.activeCount,
+          'Posições a alterar: ' + preview.changedOrder,
+          'Nenhum grupo será excluído ou desativado.',
+          ...top,
+          'Confirmar nova ordem?',
+        ].join('\n'),
+      )
+      if (!proceed) {
+        setMessage('Reorganização cancelada.')
+        return
+      }
       const res = await api<{ ok: boolean; curatedCount: number; groups: MarketplaceGroup[] }>(
         '/groups/auto-curate?previewDigest=' + encodeURIComponent(preview.previewDigest),
         { method: 'POST' },
       )
       setGroups(res.groups.map((group) => ({ ...group, active: Boolean(group.active) })))
       setDeletedGroupIds([])
-      setMessage('Ordem recalculada para ' + res.curatedCount + ' grupos, sem alterar estados ativos.')
+      setMessage(
+        'Ordem recalculada para ' + res.curatedCount + ' grupos, sem alterar estados ativos.',
+      )
       onSaved()
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Erro ao reorganizar grupos')
-    } finally { setCurating(false) }
+    } finally {
+      setCurating(false)
+    }
   }
 
   async function undoGroupCuration() {
     if (!window.confirm('Desfazer a última reorganização de grupos?')) return
     setCurating(true)
     try {
-      const result = await api<{ groups: MarketplaceGroup[] }>('/groups/undo-curation', { method: 'POST' })
+      const result = await api<{ groups: MarketplaceGroup[] }>('/groups/undo-curation', {
+        method: 'POST',
+      })
       setGroups(result.groups.map((group) => ({ ...group, active: Boolean(group.active) })))
       setDeletedGroupIds([])
       setMessage('Ordem anterior restaurada.')
       onSaved()
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Não foi possível desfazer a organização')
-    } finally { setCurating(false) }
+    } finally {
+      setCurating(false)
+    }
   }
 
   async function save(e: React.FormEvent<HTMLFormElement>) {
@@ -3744,10 +3779,15 @@ export function SettingsView({
                     </button>
                     <label className="secondary" style={{ cursor: 'pointer', padding: 8 }}>
                       Importar CSV
-                      <input type="file" hidden accept=".csv,text/csv" onChange={(event) => {
-                        void importGroupCsv(event.target.files?.[0])
-                        event.target.value = ''
-                      }} />
+                      <input
+                        type="file"
+                        hidden
+                        accept=".csv,text/csv"
+                        onChange={(event) => {
+                          void importGroupCsv(event.target.files?.[0])
+                          event.target.value = ''
+                        }}
+                      />
                     </label>
                   </div>
                 </div>
@@ -3809,12 +3849,21 @@ export function SettingsView({
                           type="button"
                           className="danger"
                           onClick={() => {
-                             if (group.id) {
-                               if (!window.confirm('Excluir o grupo ' + group.name + '? A exclusão só acontecerá após Salvar configurações.')) return
-                               setDeletedGroupIds((current) => [...new Set([...current, group.id!])])
-                             }
-                             setGroups((current) => current.filter((_, itemIndex) => itemIndex !== index))
-                           }}
+                            if (group.id) {
+                              if (
+                                !window.confirm(
+                                  'Excluir o grupo ' +
+                                    group.name +
+                                    '? A exclusão só acontecerá após Salvar configurações.',
+                                )
+                              )
+                                return
+                              setDeletedGroupIds((current) => [...new Set([...current, group.id!])])
+                            }
+                            setGroups((current) =>
+                              current.filter((_, itemIndex) => itemIndex !== index),
+                            )
+                          }}
                           aria-label="Excluir grupo"
                         >
                           <X />

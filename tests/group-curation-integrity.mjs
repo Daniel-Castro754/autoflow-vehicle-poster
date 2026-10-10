@@ -12,8 +12,7 @@ try {
     body: JSON.stringify({ email: server.email, password: server.password }),
   })
   const api = createApiClient(server.base, login.token)
-  const org = db.prepare('SELECT organization_id id FROM users WHERE email=?')
-    .get(server.email).id
+  const org = db.prepare('SELECT organization_id id FROM users WHERE email=?').get(server.email).id
   const groups = Array.from({ length: 39 }, (_, index) => ({
     name: 'Grupo local ' + (index + 1),
     url: '',
@@ -32,9 +31,12 @@ try {
       groups,
     }),
   })
-  const rows = () => db.prepare(
-    'SELECT id,name,active,priority,member_count members FROM marketplace_groups WHERE organization_id=? ORDER BY id',
-  ).all(org)
+  const rows = () =>
+    db
+      .prepare(
+        'SELECT id,name,active,priority,member_count members FROM marketplace_groups WHERE organization_id=? ORDER BY id',
+      )
+      .all(org)
   const before = rows()
   assert.equal(before.length, 39)
   const activeBefore = before.filter((g) => g.active).length
@@ -52,8 +54,10 @@ try {
     api('/groups/auto-curate?previewDigest=' + preview.previewDigest, { method: 'POST' }),
     (error) => error.status === 409,
   )
-  db.prepare('UPDATE marketplace_groups SET active=? WHERE id=?')
-    .run(before[0].active, before[0].id)
+  db.prepare('UPDATE marketplace_groups SET active=? WHERE id=?').run(
+    before[0].active,
+    before[0].id,
+  )
   const valid = await api('/groups/curated')
   const curated = await api('/groups/auto-curate?previewDigest=' + valid.previewDigest, {
     method: 'POST',
@@ -69,7 +73,10 @@ try {
   }
   const settings = await api('/settings')
   assert.equal(settings.settings.targetGroups.length, Math.min(20, activeBefore))
-  assert.equal(db.prepare('SELECT COUNT(*) n FROM group_curation_history WHERE organization_id=?').get(org).n, 1)
+  assert.equal(
+    db.prepare('SELECT COUNT(*) n FROM group_curation_history WHERE organization_id=?').get(org).n,
+    1,
+  )
 
   // Assistant command must only suggest a ranking, never change the database.
   const beforeCommand = rows()
@@ -111,14 +118,19 @@ try {
   })
   assert.equal(rows().length, 38, 'Explicit deletion must remove exactly one group')
 
-  const secondOrg = Number(db.prepare("INSERT INTO organizations(name) VALUES('Outra empresa')")
-    .run().lastInsertRowid)
-  db.prepare("INSERT INTO marketplace_groups(organization_id,name,priority) VALUES(?,'Outra empresa grupo',1)")
-    .run(secondOrg)
-  const foreign = db.prepare('SELECT COUNT(*) n FROM marketplace_groups WHERE organization_id=?')
+  const secondOrg = Number(
+    db.prepare("INSERT INTO organizations(name) VALUES('Outra empresa')").run().lastInsertRowid,
+  )
+  db.prepare(
+    "INSERT INTO marketplace_groups(organization_id,name,priority) VALUES(?,'Outra empresa grupo',1)",
+  ).run(secondOrg)
+  const foreign = db
+    .prepare('SELECT COUNT(*) n FROM marketplace_groups WHERE organization_id=?')
     .get(secondOrg).n
   assert.equal(foreign, 1, 'Cross-organization catalog must remain isolated')
-  console.log('✓ Group safety: 39 groups, active preservation, preview fencing, undo and explicit deletions')
+  console.log(
+    '✓ Group safety: 39 groups, active preservation, preview fencing, undo and explicit deletions',
+  )
 } finally {
   db.close()
   await server.close()

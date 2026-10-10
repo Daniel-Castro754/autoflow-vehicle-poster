@@ -58,9 +58,7 @@ function rank(groups: RankedGroup[], location: string) {
 export function previewGroupCuration(db: DatabaseSync, organizationId: number) {
   const { groups, location } = rankingInput(db, organizationId)
   const curated = rank(groups, location)
-  const changedOrder = curated.filter(
-    (item, index) => item.group.priority !== index + 1,
-  ).length
+  const changedOrder = curated.filter((item, index) => item.group.priority !== index + 1).length
   return {
     groups: curated,
     total: groups.length,
@@ -92,12 +90,14 @@ export function applyGroupCuration(
     const curated = rank(groups, location)
     const changedOrder = curated.some((item, index) => item.group.priority !== index + 1)
     if (changedOrder) {
-      const previousTargets = db.prepare(
-        'SELECT target_groups targets FROM organization_settings WHERE organization_id=?',
-      ).get(organizationId) as { targets: string } | undefined
+      const previousTargets = db
+        .prepare('SELECT target_groups targets FROM organization_settings WHERE organization_id=?')
+        .get(organizationId) as { targets: string } | undefined
       const snapshot = {
         groups: groups.map((group) => ({
-          id: group.id, priority: group.priority, active: group.active,
+          id: group.id,
+          priority: group.priority,
+          active: group.active,
         })),
         targetGroups: previousTargets?.targets || '[]',
       }
@@ -106,20 +106,24 @@ export function applyGroupCuration(
           'UPDATE marketplace_groups SET priority=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?',
         ).run(index + 1, item.group.id, organizationId)
       }
-      const activeTargets = listGroups(db, organizationId, true)
-        .slice(0, 20)
-        .map(groupTarget)
+      const activeTargets = listGroups(db, organizationId, true).slice(0, 20).map(groupTarget)
       db.prepare(
         'UPDATE organization_settings SET target_groups=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=?',
       ).run(JSON.stringify(activeTargets), organizationId)
       const after = rankingInput(db, organizationId)
       db.prepare(
         'INSERT INTO group_curation_history (organization_id,before_state,after_digest,source) VALUES (?,?,?,?)',
-      ).run(organizationId, JSON.stringify(snapshot), rankingDigest(after.groups, after.location), source)
+      ).run(
+        organizationId,
+        JSON.stringify(snapshot),
+        rankingDigest(after.groups, after.location),
+        source,
+      )
     }
     db.exec('COMMIT')
     return {
-      curatedCount: curated.length, changedOrder: changedOrder ? 1 : 0,
+      curatedCount: curated.length,
+      changedOrder: changedOrder ? 1 : 0,
       groups: listGroups(db, organizationId),
     }
   } catch (error) {
@@ -132,15 +136,17 @@ export function applyGroupCuration(
 export function undoLastGroupCuration(db: DatabaseSync, organizationId: number) {
   db.exec('BEGIN IMMEDIATE')
   try {
-    const history = db.prepare(
-      'SELECT id,before_state beforeState,after_digest afterDigest FROM group_curation_history WHERE organization_id=? AND undone_at IS NULL ORDER BY id DESC LIMIT 1',
-    ).get(organizationId) as
-      | { id: number; beforeState: string; afterDigest: string }
-      | undefined
+    const history = db
+      .prepare(
+        'SELECT id,before_state beforeState,after_digest afterDigest FROM group_curation_history WHERE organization_id=? AND undone_at IS NULL ORDER BY id DESC LIMIT 1',
+      )
+      .get(organizationId) as { id: number; beforeState: string; afterDigest: string } | undefined
     if (!history) throw new Error('Não há reorganização anterior para desfazer.')
     const current = rankingInput(db, organizationId)
     if (rankingDigest(current.groups, current.location) !== history.afterDigest)
-      throw new Error('A lista foi modificada desde a reorganização. Não é seguro desfazer automaticamente.')
+      throw new Error(
+        'A lista foi modificada desde a reorganização. Não é seguro desfazer automaticamente.',
+      )
     const before = JSON.parse(history.beforeState) as {
       groups: Array<{ id: number; priority: number; active: number }>
       targetGroups: string
@@ -148,11 +154,14 @@ export function undoLastGroupCuration(db: DatabaseSync, organizationId: number) 
     if (
       before.groups.length !== current.groups.length ||
       before.groups.some((group) => !current.groups.some((item) => item.id === group.id))
-    ) throw new Error('Os grupos mudaram. Não é seguro desfazer.')
+    )
+      throw new Error('Os grupos mudaram. Não é seguro desfazer.')
     for (const group of before.groups) {
-      db.prepare(
-        'UPDATE marketplace_groups SET priority=? WHERE id=? AND organization_id=?',
-      ).run(group.priority, group.id, organizationId)
+      db.prepare('UPDATE marketplace_groups SET priority=? WHERE id=? AND organization_id=?').run(
+        group.priority,
+        group.id,
+        organizationId,
+      )
     }
     db.prepare(
       'UPDATE organization_settings SET target_groups=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=?',
@@ -182,19 +191,24 @@ export function runGroupCurationSweep(db: DatabaseSync): { organizationsCurated:
   let organizationsCurated = 0
   for (const org of orgs) {
     try {
-      const confirmed = (db.prepare(
-        "SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND status='completed'",
-      ).get(org.organizationId) as { total: number }).total
-      const last = db.prepare(
-        'SELECT confirmed_count count FROM group_ranking_refresh WHERE organization_id=?',
-      ).get(org.organizationId) as { count: number } | undefined
+      const confirmed = (
+        db
+          .prepare(
+            "SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND status='completed'",
+          )
+          .get(org.organizationId) as { total: number }
+      ).total
+      const last = db
+        .prepare('SELECT confirmed_count count FROM group_ranking_refresh WHERE organization_id=?')
+        .get(org.organizationId) as { count: number } | undefined
       // Reevaluate rankings after every ten newly confirmed publications.
       if (confirmed - (last?.count || 0) < 10) continue
       applyGroupCuration(db, org.organizationId, undefined, 'automatic')
-      db.prepare(`INSERT INTO group_ranking_refresh (organization_id,confirmed_count,refreshed_at)
+      db.prepare(
+        `INSERT INTO group_ranking_refresh (organization_id,confirmed_count,refreshed_at)
         VALUES (?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(organization_id) DO UPDATE SET
-        confirmed_count=excluded.confirmed_count,refreshed_at=CURRENT_TIMESTAMP`
+        confirmed_count=excluded.confirmed_count,refreshed_at=CURRENT_TIMESTAMP`,
       ).run(org.organizationId, confirmed)
       organizationsCurated++
     } catch (err) {

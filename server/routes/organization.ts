@@ -22,7 +22,11 @@ type Dependencies = {
   hashPassword: (password: string) => Promise<string>
   marketplaceGroups: (organizationId: number, activeOnly?: boolean) => Group[]
   validateGroupTarget: (value: unknown) => boolean
-  replaceMarketplaceGroups: (organizationId: number, values: unknown[], deletedGroupIds?: number[]) => Group[]
+  replaceMarketplaceGroups: (
+    organizationId: number,
+    values: unknown[],
+    deletedGroupIds?: number[],
+  ) => Group[]
 }
 
 export async function handleOrganizationRoute(
@@ -193,51 +197,54 @@ export async function handleOrganizationRoute(
     }
     db.exec('BEGIN IMMEDIATE')
     try {
-    db.prepare('UPDATE organizations SET name=? WHERE id=?').run(
-      String(body.organizationName).trim(),
-      auth.organizationId,
-    )
-    db.prepare(
-      `UPDATE organization_settings SET default_location=?,daily_limit=?,stuck_timeout_minutes=?,execution_interval_minutes=?,require_confirmation=?,description_template=?,auto_advance=?,fill_groups=?,target_groups=?,auto_publish=?,auto_retry=?,max_retries=?,alert_telegram_token=?,alert_telegram_chat_id=?,alert_webhook_url=?,auto_curate_groups=?,gemini_api_key=?,openai_api_key=?,ai_provider=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=?`,
-    ).run(
-      String(body.defaultLocation || ''),
-      limit,
-      stuckTimeoutMinutes,
-      executionIntervalMinutes,
-      autoPublish ? 0 : 1,
-      descriptionTemplate,
-      autoAdvance ? 1 : 0,
-      fillGroups ? 1 : 0,
-      JSON.stringify(targetGroups),
-      autoPublish ? 1 : 0,
-      autoRetry ? 1 : 0,
-      maxRetries,
-      alertTelegramToken,
-      alertTelegramChatId,
-      alertWebhookUrl,
-      autoCurateGroups ? 1 : 0,
-      geminiApiKey,
-      openaiApiKey,
-      aiProvider,
-      auth.organizationId,
-    )
-    const groups = replaceMarketplaceGroups(auth.organizationId, groupRecords, deletedGroupIds)
-    db.prepare(
-      'UPDATE organization_settings SET autopilot_enabled=?,autopilot_interval_minutes=? WHERE organization_id=?',
-    ).run(autopilotEnabled ? 1 : 0, autopilotIntervalMinutes, auth.organizationId)
-    if (
-      autopilotEnabled &&
-      (!currentAutopilot.enabled || autopilotIntervalMinutes !== currentAutopilot.intervalMinutes)
-    ) {
+      db.prepare('UPDATE organizations SET name=? WHERE id=?').run(
+        String(body.organizationName).trim(),
+        auth.organizationId,
+      )
       db.prepare(
-        'UPDATE autopilot_state SET next_run_at=CURRENT_TIMESTAMP WHERE organization_id=?',
-      ).run(auth.organizationId)
-    }
-    db.exec('COMMIT')
-    send(res, 200, { ok: true, groups })
+        `UPDATE organization_settings SET default_location=?,daily_limit=?,stuck_timeout_minutes=?,execution_interval_minutes=?,require_confirmation=?,description_template=?,auto_advance=?,fill_groups=?,target_groups=?,auto_publish=?,auto_retry=?,max_retries=?,alert_telegram_token=?,alert_telegram_chat_id=?,alert_webhook_url=?,auto_curate_groups=?,gemini_api_key=?,openai_api_key=?,ai_provider=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=?`,
+      ).run(
+        String(body.defaultLocation || ''),
+        limit,
+        stuckTimeoutMinutes,
+        executionIntervalMinutes,
+        autoPublish ? 0 : 1,
+        descriptionTemplate,
+        autoAdvance ? 1 : 0,
+        fillGroups ? 1 : 0,
+        JSON.stringify(targetGroups),
+        autoPublish ? 1 : 0,
+        autoRetry ? 1 : 0,
+        maxRetries,
+        alertTelegramToken,
+        alertTelegramChatId,
+        alertWebhookUrl,
+        autoCurateGroups ? 1 : 0,
+        geminiApiKey,
+        openaiApiKey,
+        aiProvider,
+        auth.organizationId,
+      )
+      const groups = replaceMarketplaceGroups(auth.organizationId, groupRecords, deletedGroupIds)
+      db.prepare(
+        'UPDATE organization_settings SET autopilot_enabled=?,autopilot_interval_minutes=? WHERE organization_id=?',
+      ).run(autopilotEnabled ? 1 : 0, autopilotIntervalMinutes, auth.organizationId)
+      if (
+        autopilotEnabled &&
+        (!currentAutopilot.enabled || autopilotIntervalMinutes !== currentAutopilot.intervalMinutes)
+      ) {
+        db.prepare(
+          'UPDATE autopilot_state SET next_run_at=CURRENT_TIMESTAMP WHERE organization_id=?',
+        ).run(auth.organizationId)
+      }
+      db.exec('COMMIT')
+      send(res, 200, { ok: true, groups })
     } catch (error) {
       db.exec('ROLLBACK')
-      send(res, 409, { error: error instanceof Error ? error.message : 'Não foi possível salvar grupos com segurança.' })
+      send(res, 409, {
+        error:
+          error instanceof Error ? error.message : 'Não foi possível salvar grupos com segurança.',
+      })
     }
     return true
   }

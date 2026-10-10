@@ -963,15 +963,22 @@ export async function executeAgentCommand(
 
   // Intent 4: Group-ranking commands are read-only suggestions.
   // The administrator must approve the preview in Marketplace settings.
-  if (!isQuestion && hasExplicitCommand && (
-    p.includes('grupo') || p.includes('curador') || p.includes('reordenar')
-  )) {
+  if (
+    !isQuestion &&
+    hasExplicitCommand &&
+    (p.includes('grupo') || p.includes('curador') || p.includes('reordenar'))
+  ) {
     const preview = previewGroupCuration(db, organizationId)
     return {
       ok: true,
       intent: 'curate_groups_preview',
-      reply: 'Prévia calculada: ' + preview.total + ' grupos cadastrados, ' +
-        preview.activeCount + ' ativos e ' + preview.changedOrder +
+      reply:
+        'Prévia calculada: ' +
+        preview.total +
+        ' grupos cadastrados, ' +
+        preview.activeCount +
+        ' ativos e ' +
+        preview.changedOrder +
         ' posições a reorganizar. Nenhum registro foi alterado. Confirme em Configurações > Marketplace > Reordenar grupos.',
       actionTaken: 'preview_group_ranking',
       details: { total: preview.total, changedOrder: preview.changedOrder },
