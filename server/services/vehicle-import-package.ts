@@ -47,14 +47,14 @@ function safePath(raw: string) {
     path.includes('\0') ||
     path.includes('\uFFFD') ||
     path.split('/').some((segment) => !segment || segment === '.' || segment === '..')
-  ) archiveError('caminho de arquivo inválido ou inseguro.')
+  )
+    archiveError('caminho de arquivo inválido ou inseguro.')
   return path
 }
 
 const crcTable = Array.from({ length: 256 }, (_, index) => {
   let value = index
-  for (let bit = 0; bit < 8; bit++)
-    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1
+  for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1
   return value >>> 0
 })
 function crc32(data: Buffer) {
@@ -70,7 +70,10 @@ export function readSafeZip(buffer: Buffer): Map<string, Buffer> {
     archiveError('o arquivo excede 48 MB ou não é um ZIP válido.')
   let end = -1
   for (let i = buffer.length - 22; i >= Math.max(0, buffer.length - 65557); i--) {
-    if (buffer.readUInt32LE(i) === 0x06054b50 && i + 22 + buffer.readUInt16LE(i + 20) === buffer.length) {
+    if (
+      buffer.readUInt32LE(i) === 0x06054b50 &&
+      i + 22 + buffer.readUInt16LE(i + 20) === buffer.length
+    ) {
       end = i
       break
     }
@@ -88,7 +91,8 @@ export function readSafeZip(buffer: Buffer): Map<string, Buffer> {
     directoryOffset === 0xffffffff ||
     directorySize === 0xffffffff ||
     directoryOffset + directorySize > end
-  ) archiveError('ZIP dividido, ZIP64 ou quantidade excessiva de arquivos.')
+  )
+    archiveError('ZIP dividido, ZIP64 ou quantidade excessiva de arquivos.')
   const result = new Map<string, Buffer>()
   let pos = directoryOffset
   let accumulated = 0
@@ -119,14 +123,15 @@ export function readSafeZip(buffer: Buffer): Map<string, Buffer> {
     const unixMode = attributes >>> 16
     if (
       flags & 1 ||
-      (flags & 0x40) ||
+      flags & 0x40 ||
       ![0, 8].includes(method) ||
       disk !== 0 ||
       (unixMode & 0xf000) === 0xa000 ||
       compressed === 0xffffffff ||
       expanded === 0xffffffff ||
       offset === 0xffffffff
-    ) archiveError('compactação, criptografia ou ligação de arquivo não suportada.')
+    )
+      archiveError('compactação, criptografia ou ligação de arquivo não suportada.')
     if (expanded > MAX_PHOTO_BYTES || compressed > MAX_VEHICLE_ZIP_BYTES)
       archiveError('arquivo interno excede o limite de 12 MB.')
     accumulated += expanded
@@ -143,7 +148,8 @@ export function readSafeZip(buffer: Buffer): Map<string, Buffer> {
       localMethod !== method ||
       localName !== rawName ||
       dataOffset + compressed > directoryOffset
-    ) archiveError('entrada compactada inconsistente.')
+    )
+      archiveError('entrada compactada inconsistente.')
     const compressedBytes = buffer.subarray(dataOffset, dataOffset + compressed)
     let bytes: Buffer
     try {
@@ -215,8 +221,7 @@ export async function parseVehiclePackage(buffer: Buffer): Promise<VehiclePackag
             normalizeInventoryIdentifier(parts[1]) === code
           )
         })
-    if (paths.length > 20)
-      archiveError('o veículo ' + code + ' tem mais de 20 fotos.')
+    if (paths.length > 20) archiveError('o veículo ' + code + ' tem mais de 20 fotos.')
     const photos: PackagePhoto[] = []
     for (const path of paths) {
       if (!path.startsWith('fotos/') && !path.startsWith('photos/'))
@@ -225,7 +230,12 @@ export async function parseVehiclePackage(buffer: Buffer): Promise<VehiclePackag
       if (!bytes) archiveError('foto indicada no CSV não existe no ZIP: ' + path)
       if (used.has(path)) archiveError('foto associada a mais de um veículo: ' + path)
       const mime = imageMime(path)
-      if (!mime || !bytes.length || bytes.length > MAX_PHOTO_BYTES || !(await validImageContent(bytes, mime)))
+      if (
+        !mime ||
+        !bytes.length ||
+        bytes.length > MAX_PHOTO_BYTES ||
+        !(await validImageContent(bytes, mime))
+      )
         archiveError('imagem inválida ou incompatível: ' + path)
       used.add(path)
       photos.push({
@@ -241,8 +251,19 @@ export async function parseVehiclePackage(buffer: Buffer): Promise<VehiclePackag
   if (used.size !== photoFiles.length)
     archiveError('há fotos sem veículo correspondente; confira as pastas pelo código de estoque.')
   for (const key of entries.keys()) {
-    if (key !== csvFiles[0] && !photoFiles.includes(key) && !key.startsWith('__macosx/') && !key.endsWith('.ds_store'))
+    if (
+      key !== csvFiles[0] &&
+      !photoFiles.includes(key) &&
+      !key.startsWith('__macosx/') &&
+      !key.endsWith('.ds_store')
+    )
       archiveError('arquivo inesperado no pacote: ' + key)
   }
-  return { csv, rows, rowPhotos, archiveHash: createHash('sha256').update(buffer).digest('hex'), totalPhotos: used.size }
+  return {
+    csv,
+    rows,
+    rowPhotos,
+    archiveHash: createHash('sha256').update(buffer).digest('hex'),
+    totalPhotos: used.size,
+  }
 }
