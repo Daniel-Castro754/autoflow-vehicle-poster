@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { closeSelectorCircuitBreaker } from '../services/selector-health.ts'
+import { recordAiAudit } from '../services/ai-audit-history.ts'
 
 type AuthContext = { userId: number; organizationId: number }
 type Group = {
@@ -66,13 +67,14 @@ export async function handleOrganizationRoute(
       settings.targetGroups = []
     }
     settings.groups = marketplaceGroups(auth.organizationId)
-    if (!settings.geminiApiKey && process.env.GEMINI_API_KEY)
-      settings.geminiApiKey = process.env.GEMINI_API_KEY
-    if (!settings.openaiApiKey && process.env.OPENAI_API_KEY)
-      settings.openaiApiKey = process.env.OPENAI_API_KEY
+    // Never send raw credentials to a browser, including administrator sessions.
+    settings.geminiKeyConfigured = Boolean(settings.geminiApiKey || process.env.GEMINI_API_KEY)
+    settings.openaiKeyConfigured = Boolean(settings.openaiApiKey || process.env.OPENAI_API_KEY)
+    settings.geminiKeySource = settings.geminiApiKey ? 'database' : process.env.GEMINI_API_KEY ? 'environment' : 'none'
+    settings.openaiKeySource = settings.openaiApiKey ? 'database' : process.env.OPENAI_API_KEY ? 'environment' : 'none'
+    delete settings.geminiApiKey
+    delete settings.openaiApiKey
     if (!isAdmin(auth)) {
-      delete settings.geminiApiKey
-      delete settings.openaiApiKey
       delete settings.alertTelegramToken
       delete settings.alertTelegramChatId
       delete settings.alertWebhookUrl
@@ -152,11 +154,33 @@ export async function handleOrganizationRoute(
     const alertTelegramChatId = String(body.alertTelegramChatId || '').trim()
     const alertWebhookUrl = String(body.alertWebhookUrl || '').trim()
     const autoCurateGroups = body.autoCurateGroups === true
-    const geminiApiKey = String(body.geminiApiKey || '').trim()
-    const openaiApiKey = String(body.openaiApiKey || '').trim()
+    // Older forms send empty API key fields. Empty and omitted fields mean KEEP, not erase.
+    const currentAI = db.prepare(
+      'SELECT gemini_api_key geminiApiKey,openai_api_key openaiApiKey,ai_provider aiProvider FROM organization_settings WHERE organization_id=?',
+    ).get(auth.organizationId) as {
+      geminiApiKey: string; openaiApiKey: string; aiProvider: string
+    } | undefined
+    if (!currentAI) {
+      send(res, 404, { error: 'Configurações da empresa não encontradas.' })
+      return true
+    }
+    if ((body.clearGeminiApiKey !== undefined && typeof body.clearGeminiApiKey !== 'boolean') ||
+        (body.clearOpenaiApiKey !== undefined && typeof body.clearOpenaiApiKey !== 'boolean')) {
+      send(res, 400, { error: 'Comando de remoção da chave inválido.' })
+      return true
+    }
+    const incomingGemini = typeof body.geminiApiKey === 'string' ? body.geminiApiKey.trim() : ''
+    const incomingOpenai = typeof body.openaiApiKey === 'string' ? body.openaiApiKey.trim() : ''
+    if (incomingGemini.length > 4096 || incomingOpenai.length > 4096 ||
+        (body.clearGeminiApiKey && incomingGemini) || (body.clearOpenaiApiKey && incomingOpenai)) {
+      send(res, 400, { error: 'Alteração de credencial inválida.' })
+      return true
+    }
+    const geminiApiKey = body.clearGeminiApiKey === true ? '' : incomingGemini || currentAI.geminiApiKey
+    const openaiApiKey = body.clearOpenaiApiKey === true ? '' : incomingOpenai || currentAI.openaiApiKey
     const aiProvider = ['auto', 'gemini', 'openai', 'procedural'].includes(String(body.aiProvider))
       ? String(body.aiProvider)
-      : 'auto'
+      : currentAI.aiProvider || 'auto'
     const targetGroups = Array.isArray(body.targetGroups)
       ? [...new Set(body.targetGroups.map((value) => String(value).trim()).filter(Boolean))].slice(
           0,
@@ -236,6 +260,10 @@ export async function handleOrganizationRoute(
         db.prepare(
           'UPDATE autopilot_state SET next_run_at=CURRENT_TIMESTAMP WHERE organization_id=?',
         ).run(auth.organizationId)
+      }
+      if (geminiApiKey !== currentAI.geminiApiKey || openaiApiKey !== currentAI.openaiApiKey ||
+          aiProvider !== currentAI.aiProvider) {
+        recordAiAudit(db, auth.organizationId, auth.userId, 'ai_configuration_saved', 'configured', aiProvider)
       }
       db.exec('COMMIT')
       send(res, 200, { ok: true, groups })
