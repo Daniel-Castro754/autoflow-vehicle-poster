@@ -31,9 +31,9 @@ if (process.platform !== 'win32') {
     assert.equal(decryptCredential(encrypted, 7, 'gemini_api_key'), 'test-fake-gemini')
 
     db.exec(
-      "CREATE TABLE organization_settings (organization_id INTEGER PRIMARY KEY,gemini_api_key TEXT NOT NULL DEFAULT '',openai_api_key TEXT NOT NULL DEFAULT '')",
+      "CREATE TABLE organization_settings (organization_id INTEGER PRIMARY KEY,gemini_api_key TEXT NOT NULL DEFAULT '',openai_api_key TEXT NOT NULL DEFAULT '',alert_telegram_token TEXT NOT NULL DEFAULT '',alert_telegram_chat_id TEXT NOT NULL DEFAULT '',alert_webhook_url TEXT NOT NULL DEFAULT '')",
     )
-    db.prepare('INSERT INTO organization_settings VALUES(7,?,?)').run(
+    db.prepare('INSERT INTO organization_settings (organization_id,gemini_api_key,openai_api_key) VALUES(7,?,?)').run(
       'legacy-gemini-fake-key',
       'legacy-openai-fake-key',
     )
