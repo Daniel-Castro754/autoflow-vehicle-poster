@@ -1,3 +1,4 @@
+import { getAiCredentials } from '../services/credential-vault.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import {
@@ -63,12 +64,7 @@ export async function handleAIRoute(
       return true
     }
     const tone = String(b.tone || 'vendedor') as CopyTone
-    const aiConf = db
-      .prepare(
-        'SELECT gemini_api_key geminiApiKey, openai_api_key openaiApiKey, ai_provider aiProvider FROM organization_settings WHERE organization_id = ?',
-      )
-      .get(auth.organizationId) as
-      { geminiApiKey?: string; openaiApiKey?: string; aiProvider?: string } | undefined
+    const aiConf = getAiCredentials(db, auth.organizationId)
     const result = await generateVehicleDescription(input, {
       tone,
       ...resolveAIProviderSettings(aiConf),
@@ -234,11 +230,7 @@ export async function handleAIRoute(
   if (req.method === 'POST' && url.pathname === '/api/ai/test-key') {
     const b = (await jsonBody(req)) as Record<string, unknown>
     const provider = String(b.provider || 'gemini').toLowerCase()
-    const settings = db
-      .prepare(
-        'SELECT gemini_api_key geminiApiKey, openai_api_key openaiApiKey FROM organization_settings WHERE organization_id = ?',
-      )
-      .get(auth.organizationId) as { geminiApiKey?: string; openaiApiKey?: string } | undefined
+    const settings = getAiCredentials(db, auth.organizationId)
     const key =
       String(b.apiKey || '').trim() ||
       (provider === 'gemini'
