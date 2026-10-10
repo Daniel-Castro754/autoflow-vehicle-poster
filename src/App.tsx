@@ -30,6 +30,7 @@ import { calculateTeamSummary } from './management-metrics'
 import { DrawerFocusGuard } from './DrawerFocusGuard'
 import VehiclesView, { type VehicleRecord } from './Vehicles'
 import { AiCenterView } from './AiCenterView'
+import { ReadinessDashboard } from './ReadinessDashboard'
 
 type Vehicle = VehicleRecord & { updated?: string }
 type TeamUser = {
@@ -166,6 +167,7 @@ async function request<T>(token: string, path: string, options: RequestInit = {}
 const nav = [
   ['Visão geral', LayoutDashboard],
   ['Central de IA', Bot],
+  ['Saúde e autonomia', ShieldCheck],
   ['Veículos', Car],
   ['Publicações', Send],
   ['Equipe e contas', Users],
@@ -629,23 +631,25 @@ export default function App() {
           <ChevronDown size={16} />
         </button>
         <nav aria-label="Páginas principais">
-          {nav.map(([label, Icon]) => (
-            <button
-              key={label}
-              className={active === label ? 'active' : ''}
-              aria-current={active === label ? 'page' : undefined}
-              onClick={() => {
-                setActive(label)
-                setMobileMenuOpen(false)
-              }}
-            >
-              <Icon size={19} />
-              {label}
-              {label === 'Publicações' && (operationalStats?.vehicles.ready || 0) > 0 && (
-                <span className="count">{operationalStats?.vehicles.ready}</span>
-              )}
-            </button>
-          ))}
+          {nav
+            .filter(([label]) => label !== 'Saúde e autonomia' || currentUser?.role === 'admin')
+            .map(([label, Icon]) => (
+              <button
+                key={label}
+                className={active === label ? 'active' : ''}
+                aria-current={active === label ? 'page' : undefined}
+                onClick={() => {
+                  setActive(label)
+                  setMobileMenuOpen(false)
+                }}
+              >
+                <Icon size={19} />
+                {label}
+                {label === 'Publicações' && (operationalStats?.vehicles.ready || 0) > 0 && (
+                  <span className="count">{operationalStats?.vehicles.ready}</span>
+                )}
+              </button>
+            ))}
         </nav>
         <div className="sidebar-foot">
           <button
@@ -766,6 +770,8 @@ export default function App() {
             reloadVehicles={loadVehicles}
             navigate={setActive}
           />
+        ) : active === 'Saúde e autonomia' && currentUser?.role === 'admin' ? (
+          <ReadinessDashboard api={api} navigate={setActive} />
         ) : active === 'Publicações' ? (
           <PublicationsView api={api} reload={loadVehicles} />
         ) : active === 'Equipe e contas' ? (

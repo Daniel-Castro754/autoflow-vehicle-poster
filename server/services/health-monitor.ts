@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { sendCriticalAlert } from './alerting.ts'
+import { getAlertCredentials } from './credential-vault.ts'
 import { publicationMayExist, ambiguousPublicationReport } from './publication-evidence.ts'
 import { logger } from '../lib/logger.ts'
 import { warnSlowExecutions } from './proactive-alerts.ts'
@@ -31,9 +32,6 @@ export async function runHealthCheck(
         j.publish_attempt_at publishAttemptAt, j.fill_report fillReport, j.lease_token leaseToken, j.attempt_count attemptCount, j.retry_count retryCount,
         COALESCE(j.max_retries, s.max_retries, 3) maxRetries,
         COALESCE(s.stuck_timeout_minutes, 15) timeoutMinutes,
-        COALESCE(s.alert_telegram_token, '') alertTelegramToken,
-        COALESCE(s.alert_telegram_chat_id, '') alertTelegramChatId,
-        COALESCE(s.alert_webhook_url, '') alertWebhookUrl,
         COALESCE(a.label, 'Sistema') accountLabel,
         v.year, v.make, v.model
       FROM publication_jobs j
@@ -54,9 +52,6 @@ export async function runHealthCheck(
     publishAttemptAt: string | null
     leaseToken: string | null
     fillReport: string
-    alertTelegramToken: string
-    alertTelegramChatId: string
-    alertWebhookUrl: string
     attemptCount: number
     retryCount: number
     maxRetries: number
@@ -148,11 +143,7 @@ export async function runHealthCheck(
               message: `Trabalho travado há ${elapsedMinutes} min (${job.year} ${job.make} ${job.model}) pode já ter sido publicado no Facebook antes da falha. Verifique "Seus classificados" antes de liberar uma nova tentativa.`,
               attemptCount: job.attemptCount,
             },
-            {
-              telegramBotToken: job.alertTelegramToken,
-              telegramChatId: job.alertTelegramChatId,
-              webhookUrl: job.alertWebhookUrl,
-            },
+            getAlertCredentials(db, job.organizationId),
           )
           continue
         }
@@ -250,11 +241,7 @@ export async function runHealthCheck(
                 : `Trabalho travado há ${elapsedMinutes} min (${job.year} ${job.make} ${job.model}) foi recuperado automaticamente pelo Health Monitor.`,
               attemptCount: job.attemptCount,
             },
-            {
-              telegramBotToken: job.alertTelegramToken,
-              telegramChatId: job.alertTelegramChatId,
-              webhookUrl: job.alertWebhookUrl,
-            },
+            getAlertCredentials(db, job.organizationId),
           )
         }
       } catch (err) {
