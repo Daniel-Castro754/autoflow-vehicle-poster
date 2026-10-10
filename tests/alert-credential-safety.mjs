@@ -85,7 +85,7 @@ try {
   assert.equal((await api('/settings')).settings.alertWebhookConfigured, false)
   assert.equal(stored().token, row.token)
   await patch({ clearAlertTelegramToken: true, clearAlertTelegramChatId: true })
-  assert.deepEqual(stored(), { token: '', chat: '', webhook: '' })
+  assert.deepEqual({ ...stored() }, { token: '', chat: '', webhook: '' })
 
   const foreign = Number(
     db.prepare("INSERT INTO organizations(name) VALUES('Loja externa')").run().lastInsertRowid,
