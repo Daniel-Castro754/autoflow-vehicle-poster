@@ -130,10 +130,14 @@ export function ReadinessDashboard({
   }
 
   async function verifyBackup(backupId: string) {
-    if (!window.confirm(
-      'Conferir somente a integridade da cópia ' + backupId +
-        '? Nenhum arquivo será restaurado ou alterado. A leitura pode levar alguns minutos.',
-    )) return
+    if (
+      !window.confirm(
+        'Conferir somente a integridade da cópia ' +
+          backupId +
+          '? Nenhum arquivo será restaurado ou alterado. A leitura pode levar alguns minutos.',
+      )
+    )
+      return
     setBackupVerifying(backupId)
     setBackupResult(null)
     setBackupListError('')
@@ -366,27 +370,36 @@ export function ReadinessDashboard({
                           <strong>Limite de segurança:</strong> {guide.safety}
                         </p>
                         {guide.checkId === 'backup' && (
-                          <div style={{
-                            border: '1px solid var(--line, #dce5e4)',
-                            borderRadius: 12,
-                            padding: 14,
-                            marginBottom: 14,
-                          }}>
+                          <div
+                            style={{
+                              border: '1px solid var(--line, #dce5e4)',
+                              borderRadius: 12,
+                              padding: 14,
+                              marginBottom: 14,
+                            }}
+                          >
                             <strong>Conferência de integridade de backups</strong>
                             <p className="health-note">
-                              Procura somente na pasta de backups do servidor. A verificação
-                              confere hashes, SQLite, fotos e cofre. Não restaura arquivos,
-                              não confirma que as chaves DPAPI funcionem em outro Windows e
-                              não substitui um teste real de restauração.
+                              Procura somente na pasta de backups do servidor. A verificação confere
+                              hashes, SQLite, fotos e cofre. Não restaura arquivos, não confirma que
+                              as chaves DPAPI funcionem em outro Windows e não substitui um teste
+                              real de restauração.
                             </p>
-                            <button className="secondary" type="button"
+                            <button
+                              className="secondary"
+                              type="button"
                               disabled={backupLoading || Boolean(backupVerifying)}
-                              onClick={() => void listBackups()}>
-                              <RefreshCcw size={14}/>
-                              {backupLoading ? 'Buscando cópias...' : 'Localizar cópias disponíveis'}
+                              onClick={() => void listBackups()}
+                            >
+                              <RefreshCcw size={14} />
+                              {backupLoading
+                                ? 'Buscando cópias...'
+                                : 'Localizar cópias disponíveis'}
                             </button>
                             {backupListError && (
-                              <p role="status" style={{ marginTop: 10 }}>{backupListError}</p>
+                              <p role="status" style={{ marginTop: 10 }}>
+                                {backupListError}
+                              </p>
                             )}
                             {backupCopies && (
                               <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
@@ -394,24 +407,32 @@ export function ReadinessDashboard({
                                   <p>Nenhum backup reconhecido na pasta configurada.</p>
                                 )}
                                 {backupCopies.map((backup) => (
-                                  <div key={backup.id} style={{
-                                    border: '1px solid var(--line, #dce5e4)',
-                                    borderRadius: 9,
-                                    padding: 10,
-                                    display: 'flex',
-                                    justifyContent: 'space-between',
-                                    flexWrap: 'wrap',
-                                    gap: 10,
-                                    alignItems: 'center',
-                                  }}>
+                                  <div
+                                    key={backup.id}
+                                    style={{
+                                      border: '1px solid var(--line, #dce5e4)',
+                                      borderRadius: 9,
+                                      padding: 10,
+                                      display: 'flex',
+                                      justifyContent: 'space-between',
+                                      flexWrap: 'wrap',
+                                      gap: 10,
+                                      alignItems: 'center',
+                                    }}
+                                  >
                                     <div>
                                       <strong>{displayMoment(backup.createdAt)}</strong>
                                       <small style={{ display: 'block' }}>{backup.id}</small>
                                     </div>
-                                    <button className="secondary" type="button"
+                                    <button
+                                      className="secondary"
+                                      type="button"
                                       disabled={Boolean(backupVerifying)}
-                                      onClick={() => void verifyBackup(backup.id)}>
-                                      {backupVerifying === backup.id ? 'Verificando...' : 'Verificar integridade'}
+                                      onClick={() => void verifyBackup(backup.id)}
+                                    >
+                                      {backupVerifying === backup.id
+                                        ? 'Verificando...'
+                                        : 'Verificar integridade'}
                                     </button>
                                   </div>
                                 ))}
@@ -419,11 +440,11 @@ export function ReadinessDashboard({
                             )}
                             {backupResult && (
                               <p role="status" className="health-note" style={{ marginTop: 12 }}>
-                                Integridade conferida em {displayMoment(backupResult.verifiedAt)}:
-                                {' '}{backupResult.imageCount} imagem(ns), banco de
-                                {' '}{backupResult.databaseBytes.toLocaleString('pt-BR')} bytes,
-                                {' '}cofre {backupResult.vaultIncluded ? 'incluído' : 'não incluído'}.
-                                {' '}A restauração continua não testada.
+                                Integridade conferida em {displayMoment(backupResult.verifiedAt)}:{' '}
+                                {backupResult.imageCount} imagem(ns), banco de{' '}
+                                {backupResult.databaseBytes.toLocaleString('pt-BR')} bytes, cofre{' '}
+                                {backupResult.vaultIncluded ? 'incluído' : 'não incluído'}. A
+                                restauração continua não testada.
                               </p>
                             )}
                           </div>

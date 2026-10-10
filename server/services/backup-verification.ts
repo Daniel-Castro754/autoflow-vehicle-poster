@@ -67,7 +67,8 @@ export function listLocalBackups(): { available: boolean; backups: ListedBackup[
     .filter((name) => Boolean(selectedBackup(name)))
     .map((id) => ({
       id,
-      createdAt: id.slice('autoflow-backup-'.length)
+      createdAt: id
+        .slice('autoflow-backup-'.length)
         .replace(/^(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)/, '$1T$2:$3:$4'),
     }))
   return { available: true, backups }
@@ -85,8 +86,7 @@ export type BackupCheck = {
 }
 
 export type VerificationResult =
-  | { ok: true; result: BackupCheck }
-  | { ok: false; status: number; error: string }
+  { ok: true; result: BackupCheck } | { ok: false; status: number; error: string }
 
 export async function verifyLocalBackup(id: string): Promise<VerificationResult> {
   const selected = selectedBackup(id)
@@ -121,7 +121,11 @@ export async function verifyLocalBackup(id: string): Promise<VerificationResult>
       }
       const timeout = setTimeout(() => {
         child.kill()
-        finish({ ok: false, status: 504, error: 'Verificação excedeu dois minutos. A cópia não foi alterada.' })
+        finish({
+          ok: false,
+          status: 504,
+          error: 'Verificação excedeu dois minutos. A cópia não foi alterada.',
+        })
       }, 120_000)
       child.stdout.on('data', (chunk: Buffer) => {
         output += chunk.toString('utf8')
@@ -131,16 +135,23 @@ export async function verifyLocalBackup(id: string): Promise<VerificationResult>
         }
       })
       child.on('error', () =>
-        finish({ ok: false, status: 502, error: 'Não foi possível iniciar a verificação isolada.' }),
+        finish({
+          ok: false,
+          status: 502,
+          error: 'Não foi possível iniciar a verificação isolada.',
+        }),
       )
       child.on('close', (code) => {
         if (finished) return
         try {
           const payload = JSON.parse(output) as Record<string, unknown>
-          if (code === 0 && payload.ok === true &&
+          if (
+            code === 0 &&
+            payload.ok === true &&
             Number.isSafeInteger(payload.databaseBytes) &&
             Number.isSafeInteger(payload.imageCount) &&
-            typeof payload.createdAt === 'string') {
+            typeof payload.createdAt === 'string'
+          ) {
             finish({
               ok: true,
               result: {
@@ -156,14 +167,20 @@ export async function verifyLocalBackup(id: string): Promise<VerificationResult>
             })
           } else {
             finish({
-              ok: false, status: 422,
-              error: typeof payload.error === 'string'
-                ? payload.error.slice(0, 180)
-                : 'A cópia não passou na verificação de integridade.',
+              ok: false,
+              status: 422,
+              error:
+                typeof payload.error === 'string'
+                  ? payload.error.slice(0, 180)
+                  : 'A cópia não passou na verificação de integridade.',
             })
           }
         } catch {
-          finish({ ok: false, status: 502, error: 'O verificador não retornou uma resposta válida.' })
+          finish({
+            ok: false,
+            status: 502,
+            error: 'O verificador não retornou uma resposta válida.',
+          })
         }
       })
     })

@@ -419,12 +419,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       })
     )
       return
-    if (await handleBackupVerificationRoute(req, res, url, auth, {
-      db,
-      send,
-      jsonBody,
-      isAdmin: isAdmin(auth),
-    })) return
+    if (
+      await handleBackupVerificationRoute(req, res, url, auth, {
+        db,
+        send,
+        jsonBody,
+        isAdmin: isAdmin(auth),
+      })
+    )
+      return
     if (handleOperationsRoute(req, res, url, auth, db, send, isAdmin(auth))) return
     if (
       handleVehicleReadRoute(req, res, url, auth, {

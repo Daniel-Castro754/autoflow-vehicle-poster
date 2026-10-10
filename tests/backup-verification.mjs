@@ -18,19 +18,22 @@ try {
     body: JSON.stringify({ email: server.email, password: server.password }),
   })
   const admin = createApiClient(server.base, login.token)
-  const user = db.prepare('SELECT organization_id org,password_hash hash FROM users WHERE email=?')
+  const user = db
+    .prepare('SELECT organization_id org,password_hash hash FROM users WHERE email=?')
     .get(server.email)
-  db.prepare('INSERT INTO users(organization_id,name,email,password_hash,role) VALUES(?,?,?,?,?)')
-    .run(user.org, 'Test Seller', 'backup-seller@test.local', user.hash, 'seller')
+  db.prepare(
+    'INSERT INTO users(organization_id,name,email,password_hash,role) VALUES(?,?,?,?,?)',
+  ).run(user.org, 'Test Seller', 'backup-seller@test.local', user.hash, 'seller')
   const sellerLogin = await anonymous('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email: 'backup-seller@test.local', password: server.password }),
   })
   const seller = createApiClient(server.base, sellerLogin.token)
-  const verify = async (api, id) => api('/health/backups/verify', {
-    method: 'POST',
-    body: JSON.stringify({ backupId: id }),
-  })
+  const verify = async (api, id) =>
+    api('/health/backups/verify', {
+      method: 'POST',
+      body: JSON.stringify({ backupId: id }),
+    })
 
   await assert.rejects(anonymous('/health/backups'), (error) => error.status === 401)
   await assert.rejects(seller('/health/backups'), (error) => error.status === 403)
@@ -59,8 +62,11 @@ try {
   assert.equal(readdirSync(join(first, 'uploads')).length, 0)
 
   for (const invalid of [
-    '../autoflow.db', 'autoflow-backup-../../etc/passwd',
-    'C:\\Windows\\System32', '/etc/passwd', 'autoflow-backup-2026-01-01T00-00-00.000Z/../',
+    '../autoflow.db',
+    'autoflow-backup-../../etc/passwd',
+    'C:\\Windows\\System32',
+    '/etc/passwd',
+    'autoflow-backup-2026-01-01T00-00-00.000Z/../',
   ]) {
     await assert.rejects(verify(admin, invalid), (error) => error.status === 400)
   }
@@ -78,12 +84,15 @@ try {
 
   // Global server backups contain all tenants: fail closed on multi-tenant instances.
   const foreign = Number(
-    db.prepare("INSERT INTO organizations(name) VALUES('Second Organization')").run().lastInsertRowid,
+    db.prepare("INSERT INTO organizations(name) VALUES('Second Organization')").run()
+      .lastInsertRowid,
   )
   db.prepare('INSERT INTO organization_settings(organization_id) VALUES(?)').run(foreign)
   await assert.rejects(admin('/health/backups'), (error) => error.status === 403)
   await assert.rejects(verify(admin, id), (error) => error.status === 403)
-  console.log('✓ Backup verification: admin-only, no restore/write, symlink and traversal protection, corruption, multi-tenant denial')
+  console.log(
+    '✓ Backup verification: admin-only, no restore/write, symlink and traversal protection, corruption, multi-tenant denial',
+  )
 } finally {
   db.close()
   await server.close()
