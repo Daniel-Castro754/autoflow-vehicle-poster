@@ -83,6 +83,8 @@ export async function handleAIRoute(
       ok: true,
       description: result.description,
       provider: result.provider,
+      fallbackReason: result.fallbackReason || null,
+      attemptedProviders: result.attemptedProviders || [],
       hashtags,
     })
     return true
