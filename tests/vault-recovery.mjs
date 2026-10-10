@@ -47,6 +47,11 @@ try {
       /Versão de recuperação incompatível/,
     )
     assert.equal(decryptCredential(encrypted, 1, 'gemini_api_key'), credential)
+    // Recovery also works for an installation configured only for alert integrations.
+    db.prepare("UPDATE organization_settings SET gemini_api_key='',alert_telegram_token=? WHERE organization_id=1")
+      .run(encryptCredential('123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi', 1, 'alert_telegram_token'))
+    const alertOnlyExport = createPortableRecoveryPackage(db, root, password)
+    assert.equal(verifyPortableRecoveryPackage(alertOnlyExport, password), true)
     if (process.platform !== 'win32') {
       assert.throws(() => restorePortableRecoveryPackage(db, root, exported, password), /Windows/)
     }
