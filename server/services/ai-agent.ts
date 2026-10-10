@@ -408,7 +408,7 @@ export function auditInventory(db: DatabaseSync, organizationId: number): Invent
       severity: 'info',
       title: `${unoptimizedDescriptions} veículo${unoptimizedDescriptions === 1 ? '' : 's'} com descrição padrão ou curta`,
       description:
-        'Descrições enriquecidas com IA aumentam o engajamento no Marketplace em até 3,4x.',
+        'Revise e aprove textos sugeridos para veículos com descrições curtas ou incompletas.',
       actionText: 'Otimizar com IA',
       actionIntent: 'optimize_descriptions',
     })
@@ -898,48 +898,33 @@ export async function executeAgentCommand(
       p,
     )
 
-  // Intent 1: Autopilot / Schedule
+  // Operational commands are suggestions only. Never mutate data from free-form text.
+  // Execution requires a dedicated, reviewed and one-use approval in the UI.
   if (
     !isQuestion &&
     hasExplicitCommand &&
-    (p.includes('agendar') ||
-      p.includes('publicar') ||
-      p.includes('piloto') ||
-      p.includes('autopilot') ||
-      p.includes('fila'))
+    (p.includes('agendar') || p.includes('publicar') || p.includes('piloto') ||
+      p.includes('autopilot') || p.includes('fila'))
   ) {
-    const result = await runAutopilotPipeline(db, organizationId, userId)
     return {
       ok: true,
-      intent: 'autopilot',
-      reply: result.message,
-      actionTaken: 'run_autopilot',
-      details: result,
+      intent: 'autopilot_preview',
+      reply: 'Nenhum trabalho foi agendado. Abra Piloto automático, revise os veículos candidatos e confirme a operação antes de executar.',
+      actionTaken: 'preview_autopilot',
     }
   }
 
-  // Intent 2: Optimize Descriptions
   if (
     !isQuestion &&
     hasExplicitCommand &&
-    (p.includes('otimiz') ||
-      p.includes('descriç') ||
-      p.includes('texto') ||
-      p.includes('copy') ||
-      p.includes('hashtag'))
+    (p.includes('otimiz') || p.includes('descriç') || p.includes('texto') ||
+      p.includes('copy') || p.includes('hashtag'))
   ) {
-    let tone: CopyTone = 'vendedor'
-    if (p.includes('profissional')) tone = 'profissional'
-    if (p.includes('amig') || p.includes('amigável')) tone = 'amigável'
-    if (p.includes('direto')) tone = 'direto'
-
-    const result = await batchOptimizeDescriptions(db, organizationId, tone)
     return {
       ok: true,
-      intent: 'optimize_descriptions',
-      reply: `${result.updated} descrição(ões) de veículos foram geradas e enriquecidas com IA no tom "${tone}".`,
-      actionTaken: 'batch_optimize',
-      details: result,
+      intent: 'optimize_descriptions_preview',
+      reply: 'Nenhuma descrição foi alterada. Use Otimizar descrições para gerar propostas e aprovar individualmente os textos.',
+      actionTaken: 'preview_descriptions',
     }
   }
 
@@ -989,10 +974,10 @@ export async function executeAgentCommand(
     ok: true,
     intent: 'general_assistance',
     reply: isQuestion
-      ? `Posso explicar as operações sem alterar o estoque. Para criar agendamentos, peça explicitamente "Executar piloto automático no estoque pronto". Para otimizar textos, peça "Otimizar descrições dos veículos".`
-      : `Comando compreendido. Você pode me pedir para:
-1. "Executar piloto automático no estoque pronto"
-2. "Otimizar descrições dos veículos com IA"
+      ? `Posso explicar as operações sem alterar o estoque. Ações que alteram o estoque exigem aprovação na Central de IA. Use os botões de prévia do piloto e das descrições.`
+      : `Comando compreendido. Posso orientar operações, mas nenhuma ação será executada sem revisão:
+1. "Revisar piloto automático no estoque pronto"
+2. "Revisar descrições dos veículos"
 3. "Auditar saúde do estoque e identificar pendências"
 4. "Reordenar grupos do Marketplace por conversão"`,
     actionTaken: 'help',
