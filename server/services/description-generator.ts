@@ -201,7 +201,9 @@ REGRAS:
         failures.push('Gemini indisponível (HTTP ' + response.status + ')')
       }
     } catch (err) {
-      logger.warn('AutoFlowAI', 'Falha na chamada ao Gemini API', { name: err instanceof Error ? err.name : 'unknown' })
+      logger.warn('AutoFlowAI', 'Falha na chamada ao Gemini API', {
+        name: err instanceof Error ? err.name : 'unknown',
+      })
       failures.push('Gemini indisponível por falha de rede')
     }
   }
@@ -231,8 +233,12 @@ REGRAS:
         }
         const text = data.choices?.[0]?.message?.content?.trim()
         if (text) {
-          return { description: text, provider: 'openai', attemptedProviders,
-            ...(failures.length ? { fallbackReason: failures.join('; ') } : {}) }
+          return {
+            description: text,
+            provider: 'openai',
+            attemptedProviders,
+            ...(failures.length ? { fallbackReason: failures.join('; ') } : {}),
+          }
         }
         failures.push('OpenAI retornou uma resposta vazia')
       } else {
@@ -240,7 +246,9 @@ REGRAS:
         failures.push('OpenAI indisponível (HTTP ' + response.status + ')')
       }
     } catch (err) {
-      logger.warn('AutoFlowAI', 'Falha na chamada à OpenAI API', { name: err instanceof Error ? err.name : 'unknown' })
+      logger.warn('AutoFlowAI', 'Falha na chamada à OpenAI API', {
+        name: err instanceof Error ? err.name : 'unknown',
+      })
       failures.push('OpenAI indisponível por falha de rede')
     }
   }
@@ -252,6 +260,9 @@ REGRAS:
     attemptedProviders,
     ...(provider === 'procedural'
       ? {}
-      : { fallbackReason: failures.join('; ') || 'Nenhuma chave disponível para o provedor selecionado.' }),
+      : {
+          fallbackReason:
+            failures.join('; ') || 'Nenhuma chave disponível para o provedor selecionado.',
+        }),
   }
 }

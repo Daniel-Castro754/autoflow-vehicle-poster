@@ -60,9 +60,11 @@ function validateDatabase(path, uploadNames) {
       .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_settings'")
       .get()
     if (hasCredentialTable) {
-      const encrypted = database.prepare(
-        "SELECT 1 FROM organization_settings WHERE gemini_api_key LIKE 'enc:v1:%' OR openai_api_key LIKE 'enc:v1:%' LIMIT 1",
-      ).get()
+      const encrypted = database
+        .prepare(
+          "SELECT 1 FROM organization_settings WHERE gemini_api_key LIKE 'enc:v1:%' OR openai_api_key LIKE 'enc:v1:%' LIMIT 1",
+        )
+        .get()
       if (encrypted && !uploadNames.has('__vault_present__')) {
         throw new Error('O banco contém chaves criptografadas, mas o backup não inclui o cofre.')
       }
@@ -159,8 +161,12 @@ export function verifyBackup(backupDirectory) {
   const vault = manifest.formatVersion === FORMAT_VERSION ? manifest.vault : null
   if (vault) {
     const vaultPath = join(source, VAULT_FILE)
-    if (vault.name !== VAULT_FILE || !existsSync(vaultPath) ||
-        statSync(vaultPath).size !== vault.bytes || sha256(vaultPath) !== vault.sha256) {
+    if (
+      vault.name !== VAULT_FILE ||
+      !existsSync(vaultPath) ||
+      statSync(vaultPath).size !== vault.bytes ||
+      sha256(vaultPath) !== vault.sha256
+    ) {
       throw new Error('O cofre do backup está ausente ou não corresponde ao manifesto.')
     }
   }
@@ -194,7 +200,10 @@ export function restoreBackup(backupDirectory, destinationDirectory) {
     if (manifest.vault) copyFileSync(join(source, VAULT_FILE), join(staging, VAULT_FILE))
     validateDatabase(
       join(staging, DATABASE_NAME),
-      new Set([...manifest.uploads.map((file) => file.name), ...(manifest.vault ? ['__vault_present__'] : [])]),
+      new Set([
+        ...manifest.uploads.map((file) => file.name),
+        ...(manifest.vault ? ['__vault_present__'] : []),
+      ]),
     )
     if (existsSync(destination)) rmdirSync(destination)
     renameSync(staging, destination)

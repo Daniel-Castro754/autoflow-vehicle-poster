@@ -752,7 +752,10 @@ export function AiCenterView({
                         }
                       />
                       <strong>{proposal.label}</strong>
-                      <small>Gerado por: {proposal.provider}{proposal.fallbackReason ? ' · Fallback: ' + proposal.fallbackReason : ''}</small>
+                      <small>
+                        Gerado por: {proposal.provider}
+                        {proposal.fallbackReason ? ' · Fallback: ' + proposal.fallbackReason : ''}
+                      </small>
                     </label>
                     <details>
                       <summary>Comparar descrição atual e proposta</summary>

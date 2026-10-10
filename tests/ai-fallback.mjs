@@ -9,10 +9,13 @@ try {
   globalThis.fetch = async (url, options) => {
     calls.push({ url: String(url), headers: options?.headers })
     if (String(url).includes('generativelanguage')) return new Response('{}', { status: 429 })
-    return Response.json({ choices: [{ message: { content: 'Saveiro 2019 com 80 mil km. Entre em contato.' } }] })
+    return Response.json({
+      choices: [{ message: { content: 'Saveiro 2019 com 80 mil km. Entre em contato.' } }],
+    })
   }
   const recovered = await generateVehicleDescription(vehicle, {
-    provider: 'auto', apiKeys: { gemini: SECRET, openai: SECRET },
+    provider: 'auto',
+    apiKeys: { gemini: SECRET, openai: SECRET },
   })
   assert.equal(recovered.provider, 'openai')
   assert.deepEqual(recovered.attemptedProviders, ['gemini', 'openai'])
@@ -27,7 +30,8 @@ try {
     return new Response('{}', { status: 503 })
   }
   const offline = await generateVehicleDescription(vehicle, {
-    provider: 'auto', apiKeys: { gemini: SECRET, openai: SECRET },
+    provider: 'auto',
+    apiKeys: { gemini: SECRET, openai: SECRET },
   })
   assert.equal(offline.provider, 'procedural')
   assert.deepEqual(offline.attemptedProviders, ['gemini', 'openai'])
@@ -37,18 +41,25 @@ try {
   calls.length = 0
 
   const onlyGemini = await generateVehicleDescription(vehicle, {
-    provider: 'gemini', apiKeys: { gemini: SECRET, openai: SECRET },
+    provider: 'gemini',
+    apiKeys: { gemini: SECRET, openai: SECRET },
   })
   assert.equal(onlyGemini.provider, 'procedural')
   assert.deepEqual(onlyGemini.attemptedProviders, ['gemini'])
-  assert.equal(calls.length, 1, 'An explicitly selected provider must not switch to another paid provider')
+  assert.equal(
+    calls.length,
+    1,
+    'An explicitly selected provider must not switch to another paid provider',
+  )
 
   calls.length = 0
   const chosenOffline = await generateVehicleDescription(vehicle, { provider: 'procedural' })
   assert.equal(chosenOffline.provider, 'procedural')
   assert.equal(chosenOffline.fallbackReason, undefined)
   assert.equal(calls.length, 0)
-  console.log('✓ AI fallback: provider order, explicit-provider boundary, real provider, no URL secrets, offline reason')
+  console.log(
+    '✓ AI fallback: provider order, explicit-provider boundary, real provider, no URL secrets, offline reason',
+  )
 } finally {
   globalThis.fetch = originalFetch
 }

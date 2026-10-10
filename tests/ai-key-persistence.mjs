@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
 import { startTestServer, createApiClient } from './helpers/server.mjs'
-import { initializeCredentialVault, decryptCredential } from '../server/services/credential-vault.ts'
+import {
+  initializeCredentialVault,
+  decryptCredential,
+} from '../server/services/credential-vault.ts'
 
 const server = await startTestServer()
 const db = new DatabaseSync(join(server.dataDir, 'autoflow.db'))
@@ -56,7 +59,11 @@ try {
   await patch({ defaultLocation: 'Içara, SC' })
   await patch({ geminiApiKey: '', openaiApiKey: '', aiProvider: 'openai' })
   stored = dbKeys()
-  assert.equal(plaintext(stored.gemini, org, 'gemini_api_key'), gemini, 'empty must not erase stored API key')
+  assert.equal(
+    plaintext(stored.gemini, org, 'gemini_api_key'),
+    gemini,
+    'empty must not erase stored API key',
+  )
   assert.equal(plaintext(stored.openai, org, 'openai_api_key'), openai)
   assert.equal(stored.preference, 'openai')
   // Open a second connection to verify credentials are persisted on disk, not in memory.

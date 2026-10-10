@@ -20,7 +20,9 @@ try {
     CREATE TABLE publication_jobs (id INTEGER PRIMARY KEY, status TEXT NOT NULL);
     CREATE TABLE publication_job_events (id INTEGER PRIMARY KEY, event_type TEXT NOT NULL);`)
   database.prepare('INSERT INTO vehicles VALUES (1, ?)').run('Corolla')
-  database.prepare('INSERT INTO organization_settings VALUES (1,?,?)').run('enc:v1:test-tagged-secret', '')
+  database
+    .prepare('INSERT INTO organization_settings VALUES (1,?,?)')
+    .run('enc:v1:test-tagged-secret', '')
   database.prepare('INSERT INTO vehicle_images VALUES (1, ?)').run(imageName)
   database.prepare('INSERT INTO publication_jobs VALUES (1, ?)').run('completed')
   database.prepare('INSERT INTO publication_job_events VALUES (1, ?)').run('published')
@@ -35,9 +37,9 @@ try {
   assert.equal(manifest.uploads.length, 1)
   assert.equal(manifest.formatVersion, 2)
   assert(manifest.vault)
-  assert.equal(readFileSync(join(backupDirectory,'vault-key.json'),'utf8'), vaultContents)
+  assert.equal(readFileSync(join(backupDirectory, 'vault-key.json'), 'utf8'), vaultContents)
   restoreBackup(backupDirectory, restored)
-  assert.equal(readFileSync(join(restored,'vault-key.json'),'utf8'),vaultContents)
+  assert.equal(readFileSync(join(restored, 'vault-key.json'), 'utf8'), vaultContents)
   const restoredDb = new DatabaseSync(join(restored, 'autoflow.db'), { readOnly: true })
   assert.equal(restoredDb.prepare('SELECT model FROM vehicles WHERE id=1').get().model, 'Corolla')
   assert.equal(

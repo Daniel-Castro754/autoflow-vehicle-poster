@@ -7,7 +7,9 @@ import type { DatabaseSync } from 'node:sqlite'
 const FILE = 'vault-key.json'
 const PREFIX = 'enc:v1:'
 type Field = 'gemini_api_key' | 'openai_api_key'
-type VaultFile = { version: 1; mode: 'dpapi'; wrappedKey: string } | { version: 1; mode: 'passphrase'; salt: string }
+type VaultFile =
+  | { version: 1; mode: 'dpapi'; wrappedKey: string }
+  | { version: 1; mode: 'passphrase'; salt: string }
 let vaultKey: Buffer | null = null
 
 function dpapi(operation: 'Protect' | 'Unprotect', bytes: Buffer): Buffer {
@@ -19,15 +21,21 @@ function dpapi(operation: 'Protect' | 'Unprotect', bytes: Buffer): Buffer {
     operation +
     '($inputBytes,$null,$scope);' +
     '[Console]::Out.Write([Convert]::ToBase64String($result))'
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-    input: bytes.toString('base64'),
-    encoding: 'utf8',
-    timeout: 12000,
-    windowsHide: true,
-    maxBuffer: 4096,
-  })
+  const result = spawnSync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    {
+      input: bytes.toString('base64'),
+      encoding: 'utf8',
+      timeout: 12000,
+      windowsHide: true,
+      maxBuffer: 4096,
+    },
+  )
   if (result.status !== 0 || result.error || !result.stdout.trim())
-    throw new Error('O Windows não conseguiu desbloquear o cofre DPAPI desta conta. Nenhuma chave será apagada.')
+    throw new Error(
+      'O Windows não conseguiu desbloquear o cofre DPAPI desta conta. Nenhuma chave será apagada.',
+    )
   const decoded = Buffer.from(result.stdout.trim(), 'base64')
   if (!decoded.length) throw new Error('O cofre DPAPI retornou uma chave inválida.')
   return decoded
@@ -82,7 +90,9 @@ export function encryptCredential(value: string, org: number, field: Field): str
   const cipher = createCipheriv('aes-256-gcm', key(), nonce)
   cipher.setAAD(Buffer.from(org + ':' + field))
   const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()])
-  return PREFIX + [nonce, cipher.getAuthTag(), encrypted].map(b => b.toString('base64url')).join(':')
+  return (
+    PREFIX + [nonce, cipher.getAuthTag(), encrypted].map((b) => b.toString('base64url')).join(':')
+  )
 }
 
 export function decryptCredential(value: string, org: number, field: Field): string {
@@ -90,21 +100,25 @@ export function decryptCredential(value: string, org: number, field: Field): str
   try {
     const parts = value.slice(PREFIX.length).split(':')
     if (parts.length !== 3) throw new Error('bad format')
-    const [iv, tag, body] = parts.map(part => Buffer.from(part, 'base64url'))
+    const [iv, tag, body] = parts.map((part) => Buffer.from(part, 'base64url'))
     if (!iv || !tag || !body || iv.length !== 12 || tag.length !== 16) throw new Error('bad size')
     const decipher = createDecipheriv('aes-256-gcm', key(), iv)
     decipher.setAAD(Buffer.from(org + ':' + field))
     decipher.setAuthTag(tag)
     return Buffer.concat([decipher.update(body), decipher.final()]).toString('utf8')
   } catch {
-    throw new Error('Não foi possível desbloquear as credenciais. Confira o usuário Windows ou o segredo do cofre; os dados foram preservados.')
+    throw new Error(
+      'Não foi possível desbloquear as credenciais. Confira o usuário Windows ou o segredo do cofre; os dados foram preservados.',
+    )
   }
 }
 
 export function getAiCredentials(db: DatabaseSync, org: number) {
-  const row = db.prepare(
-    'SELECT gemini_api_key gemini,openai_api_key openai,ai_provider provider FROM organization_settings WHERE organization_id=?',
-  ).get(org) as { gemini: string; openai: string; provider: string } | undefined
+  const row = db
+    .prepare(
+      'SELECT gemini_api_key gemini,openai_api_key openai,ai_provider provider FROM organization_settings WHERE organization_id=?',
+    )
+    .get(org) as { gemini: string; openai: string; provider: string } | undefined
   return {
     geminiApiKey: decryptCredential(row?.gemini || '', org, 'gemini_api_key'),
     openaiApiKey: decryptCredential(row?.openai || '', org, 'openai_api_key'),
@@ -114,9 +128,11 @@ export function getAiCredentials(db: DatabaseSync, org: number) {
 
 /** Run after schema migration, before opening the server. Corruption or lost keys fail closed. */
 export function migrateCredentials(db: DatabaseSync) {
-  const rows = db.prepare(
-    "SELECT organization_id id,gemini_api_key gemini,openai_api_key openai FROM organization_settings",
-  ).all() as Array<{ id: number; gemini: string; openai: string }>
+  const rows = db
+    .prepare(
+      'SELECT organization_id id,gemini_api_key gemini,openai_api_key openai FROM organization_settings',
+    )
+    .all() as Array<{ id: number; gemini: string; openai: string }>
   // Validate all existing ciphertext before any writes.
   for (const row of rows) {
     decryptCredential(row.gemini, row.id, 'gemini_api_key')
@@ -125,13 +141,18 @@ export function migrateCredentials(db: DatabaseSync) {
   db.exec('BEGIN IMMEDIATE')
   try {
     for (const row of rows) {
-      const gemini = row.gemini && !isEncryptedCredential(row.gemini)
-        ? encryptCredential(row.gemini, row.id, 'gemini_api_key') : row.gemini
-      const openai = row.openai && !isEncryptedCredential(row.openai)
-        ? encryptCredential(row.openai, row.id, 'openai_api_key') : row.openai
+      const gemini =
+        row.gemini && !isEncryptedCredential(row.gemini)
+          ? encryptCredential(row.gemini, row.id, 'gemini_api_key')
+          : row.gemini
+      const openai =
+        row.openai && !isEncryptedCredential(row.openai)
+          ? encryptCredential(row.openai, row.id, 'openai_api_key')
+          : row.openai
       if (gemini !== row.gemini || openai !== row.openai)
-        db.prepare('UPDATE organization_settings SET gemini_api_key=?,openai_api_key=? WHERE organization_id=?')
-          .run(gemini, openai, row.id)
+        db.prepare(
+          'UPDATE organization_settings SET gemini_api_key=?,openai_api_key=? WHERE organization_id=?',
+        ).run(gemini, openai, row.id)
     }
     db.exec('COMMIT')
   } catch (error) {
