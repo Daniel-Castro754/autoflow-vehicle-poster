@@ -127,11 +127,20 @@ export async function handleAIRoute(
   if (req.method === 'POST' && url.pathname === '/api/ai/batch-optimize/preview') {
     const b = (await jsonBody(req)) as Record<string, unknown>
     try {
-      send(res, 200, await prepareBatchDescriptionPreview(
-        db, auth.organizationId, auth.userId, String(b.tone || 'vendedor') as CopyTone,
-      ))
+      send(
+        res,
+        200,
+        await prepareBatchDescriptionPreview(
+          db,
+          auth.organizationId,
+          auth.userId,
+          String(b.tone || 'vendedor') as CopyTone,
+        ),
+      )
     } catch (err) {
-      send(res, 400, { error: err instanceof Error ? err.message : 'Não foi possível gerar a prévia.' })
+      send(res, 400, {
+        error: err instanceof Error ? err.message : 'Não foi possível gerar a prévia.',
+      })
     }
     return true
   }
@@ -142,9 +151,17 @@ export async function handleAIRoute(
       return true
     }
     try {
-      send(res, 200, applyBatchDescriptionPreview(
-        db, auth.organizationId, auth.userId, b.previewId, b.selectedVehicleIds,
-      ))
+      send(
+        res,
+        200,
+        applyBatchDescriptionPreview(
+          db,
+          auth.organizationId,
+          auth.userId,
+          b.previewId,
+          b.selectedVehicleIds,
+        ),
+      )
     } catch (err) {
       send(res, 409, { error: err instanceof Error ? err.message : 'Prévia inválida.' })
     }

@@ -903,13 +903,17 @@ export async function executeAgentCommand(
   if (
     !isQuestion &&
     hasExplicitCommand &&
-    (p.includes('agendar') || p.includes('publicar') || p.includes('piloto') ||
-      p.includes('autopilot') || p.includes('fila'))
+    (p.includes('agendar') ||
+      p.includes('publicar') ||
+      p.includes('piloto') ||
+      p.includes('autopilot') ||
+      p.includes('fila'))
   ) {
     return {
       ok: true,
       intent: 'autopilot_preview',
-      reply: 'Nenhum trabalho foi agendado. Abra Piloto automático, revise os veículos candidatos e confirme a operação antes de executar.',
+      reply:
+        'Nenhum trabalho foi agendado. Abra Piloto automático, revise os veículos candidatos e confirme a operação antes de executar.',
       actionTaken: 'preview_autopilot',
     }
   }
@@ -917,13 +921,17 @@ export async function executeAgentCommand(
   if (
     !isQuestion &&
     hasExplicitCommand &&
-    (p.includes('otimiz') || p.includes('descriç') || p.includes('texto') ||
-      p.includes('copy') || p.includes('hashtag'))
+    (p.includes('otimiz') ||
+      p.includes('descriç') ||
+      p.includes('texto') ||
+      p.includes('copy') ||
+      p.includes('hashtag'))
   ) {
     return {
       ok: true,
       intent: 'optimize_descriptions_preview',
-      reply: 'Nenhuma descrição foi alterada. Use Otimizar descrições para gerar propostas e aprovar individualmente os textos.',
+      reply:
+        'Nenhuma descrição foi alterada. Use Otimizar descrições para gerar propostas e aprovar individualmente os textos.',
       actionTaken: 'preview_descriptions',
     }
   }

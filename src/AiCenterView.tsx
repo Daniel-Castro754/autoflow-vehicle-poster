@@ -202,17 +202,22 @@ export function AiCenterView({
         setMessage('Nenhum veículo e perfil conectados disponíveis para a prévia de agendamento.')
         return
       }
-      const list = preview.potentialVehicles.slice(0, 8)
-        .map((v) => v.title + ' (#' + v.id + ')')
-      if (!window.confirm([
-        'PRÉVIA DO PILOTO AUTOMÁTICO — ainda não foi agendado nenhum veículo.',
-        'Perfis conectados: ' + preview.connectedProfiles,
-        'Candidatos: ' + preview.potentialVehicles.length,
-        ...list,
-        preview.potentialVehicles.length > 8 ? '(e outros veículos)' : '',
-        preview.note,
-        'Confirmar a criação dos agendamentos?',
-      ].filter(Boolean).join('\n'))) {
+      const list = preview.potentialVehicles.slice(0, 8).map((v) => v.title + ' (#' + v.id + ')')
+      if (
+        !window.confirm(
+          [
+            'PRÉVIA DO PILOTO AUTOMÁTICO — ainda não foi agendado nenhum veículo.',
+            'Perfis conectados: ' + preview.connectedProfiles,
+            'Candidatos: ' + preview.potentialVehicles.length,
+            ...list,
+            preview.potentialVehicles.length > 8 ? '(e outros veículos)' : '',
+            preview.note,
+            'Confirmar a criação dos agendamentos?',
+          ]
+            .filter(Boolean)
+            .join('\n'),
+        )
+      ) {
         setMessage('Piloto cancelado sem alterações.')
         return
       }
@@ -373,9 +378,11 @@ export function AiCenterView({
         body: JSON.stringify({ tone: 'vendedor' }),
       })
       setDescriptionPreview(preview)
-      setMessage(preview.proposals.length
-        ? 'Compare os textos e selecione os veículos que deseja atualizar. Nenhum texto foi salvo.'
-        : 'Não há descrições elegíveis para esta rodada.')
+      setMessage(
+        preview.proposals.length
+          ? 'Compare os textos e selecione os veículos que deseja atualizar. Nenhum texto foi salvo.'
+          : 'Não há descrições elegíveis para esta rodada.',
+      )
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Erro ao gerar propostas de descrição.')
     } finally {
@@ -385,8 +392,14 @@ export function AiCenterView({
 
   async function handleApplyDescriptions() {
     if (!descriptionPreview?.previewId || !approvedDescriptionIds.length) return
-    if (!window.confirm('Aplicar ' + approvedDescriptionIds.length +
-      ' descrição(ões) revisada(s)? Esta ação modifica o cadastro dos veículos selecionados.')) return
+    if (
+      !window.confirm(
+        'Aplicar ' +
+          approvedDescriptionIds.length +
+          ' descrição(ões) revisada(s)? Esta ação modifica o cadastro dos veículos selecionados.',
+      )
+    )
+      return
     setOptimizingBatch(true)
     try {
       const result = await api<{ ok: boolean; updated: number }>('/ai/batch-optimize', {
@@ -605,7 +618,11 @@ export function AiCenterView({
             </div>
 
             {descriptionPreview && descriptionPreview.proposals.length > 0 && (
-              <div className="ai-result-box" role="region" aria-label="Revisão das descrições propostas">
+              <div
+                className="ai-result-box"
+                role="region"
+                aria-label="Revisão das descrições propostas"
+              >
                 <strong>Revisar descrições antes de salvar</strong>
                 <p>
                   {descriptionPreview.proposals.length} proposta(s) nesta rodada de até 10.
@@ -615,24 +632,36 @@ export function AiCenterView({
                   Nenhuma alteração será feita até sua confirmação.
                 </p>
                 {descriptionPreview.proposals.map((proposal) => (
-                  <div key={proposal.vehicleId} style={{ padding: '12px 0', borderBottom: '1px solid var(--border, #ccc)' }}>
+                  <div
+                    key={proposal.vehicleId}
+                    style={{ padding: '12px 0', borderBottom: '1px solid var(--border, #ccc)' }}
+                  >
                     <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <input
                         type="checkbox"
                         checked={approvedDescriptionIds.includes(proposal.vehicleId)}
-                        onChange={(event) => setApprovedDescriptionIds((current) =>
-                          event.target.checked
-                            ? [...current, proposal.vehicleId]
-                            : current.filter((id) => id !== proposal.vehicleId))}
+                        onChange={(event) =>
+                          setApprovedDescriptionIds((current) =>
+                            event.target.checked
+                              ? [...current, proposal.vehicleId]
+                              : current.filter((id) => id !== proposal.vehicleId),
+                          )
+                        }
                       />
                       <strong>{proposal.label}</strong>
                       <small>Gerado por: {proposal.provider}</small>
                     </label>
                     <details>
                       <summary>Comparar descrição atual e proposta</summary>
-                      <p><strong>Original:</strong></p>
-                      <p style={{ whiteSpace: 'pre-wrap' }}>{proposal.original || '(sem descrição)'}</p>
-                      <p><strong>Proposta:</strong></p>
+                      <p>
+                        <strong>Original:</strong>
+                      </p>
+                      <p style={{ whiteSpace: 'pre-wrap' }}>
+                        {proposal.original || '(sem descrição)'}
+                      </p>
+                      <p>
+                        <strong>Proposta:</strong>
+                      </p>
                       <p style={{ whiteSpace: 'pre-wrap' }}>{proposal.proposed}</p>
                     </details>
                   </div>
@@ -650,7 +679,10 @@ export function AiCenterView({
                     type="button"
                     className="secondary"
                     disabled={optimizingBatch}
-                    onClick={() => { setDescriptionPreview(null); setApprovedDescriptionIds([]) }}
+                    onClick={() => {
+                      setDescriptionPreview(null)
+                      setApprovedDescriptionIds([])
+                    }}
                   >
                     Descartar propostas
                   </button>
