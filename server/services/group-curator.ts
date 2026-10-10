@@ -8,6 +8,9 @@ export interface GroupRecord {
   successCount: number
   failureCount: number
   lastFoundAt?: string
+  city?: string
+  state?: string
+  memberCount?: number
 }
 
 export interface CuratedGroupResult {
@@ -41,6 +44,18 @@ export function evaluateGroupScore(group: GroupRecord, locationQuery = ''): Cura
     else if (elapsedDays <= 30) score += 5
   }
 
+  // Membros: escala logarítmica reduz dominância de grupos enormes.
+  score += Math.min(35, Math.log10(1 + Math.max(0, group.memberCount || 0)) * 7)
+
+  // Proximidade: apenas correspondência de cidade/UF conhecida; não inventar distâncias.
+  if (locationQuery) {
+    const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR')
+    const ref = normalize(locationQuery)
+    const city = normalize(group.city || '').trim()
+    const state = normalize(group.state || '').trim()
+    if (city && ref.includes(city)) score += 45
+    else if (state && ref.includes(state)) score += 12
+  }
   // Relevância geográfica
   if (locationQuery) {
     const locLower = locationQuery.toLowerCase()
