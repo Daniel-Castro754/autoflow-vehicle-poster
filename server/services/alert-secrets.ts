@@ -7,7 +7,7 @@ import { isIP } from 'node:net'
 export function validateWebhookAddress(value: string): string {
   const input = value.trim()
   if (!input) return ''
-  if (input.length > 2048 || /[\u0000-\u001f\u007f]/.test(input))
+  if (input.length > 2048 || Array.from(input).some((ch) => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127))
     throw new Error('A URL do webhook é muito longa ou contém caracteres inválidos.')
   let url: URL
   try {
