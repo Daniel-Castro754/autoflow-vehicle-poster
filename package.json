@@ -43,7 +43,7 @@
     "test:login-diagnostics": "node --import=./tests/helpers/offline.mjs tests/login-diagnostics.mjs",
     "doctor": "node --env-file-if-exists=.env scripts/doctor.mjs",
     "test:operational-ui": "node tests/phase-six-operational-ui.mjs",
-    "test": "npm run test:guided-remediation && npm run test:readiness && npm run test:alert-secrets && npm run test:vault-recovery && npm run test:ai-fallback && npm run test:ai-keys && npm run test:ai-approval && npm run test:queue && npm run test:stock && npm run test:autonomous && npm run test:extension-consumer && npm run test:publish-safety && npm run test:extension-session && npm run test:intelligence && npm run test:design && npm run test:observability && npm run test:orchestration && npm run test:phase-one && npm run test:backup && npm run test:audit && npm run test:fipe && npm run test:timezone && npm run test:sessions && npm run test:extension-resilience && npm run test:operations && npm run test:selector-config && npm run test:vehicle-import && npm run test:selector-health && npm run test:google-auth && npm run test:login-diagnostics && npm run test:operational-ui && npm run test:management-ui && npm run test:design-final && npm run test:vehicle-zip && npm run test:group-integrity",
+    "test": "npm run test:backup-verification && npm run test:guided-remediation && npm run test:readiness && npm run test:alert-secrets && npm run test:vault-recovery && npm run test:ai-fallback && npm run test:ai-keys && npm run test:ai-approval && npm run test:queue && npm run test:stock && npm run test:autonomous && npm run test:extension-consumer && npm run test:publish-safety && npm run test:extension-session && npm run test:intelligence && npm run test:design && npm run test:observability && npm run test:orchestration && npm run test:phase-one && npm run test:backup && npm run test:audit && npm run test:fipe && npm run test:timezone && npm run test:sessions && npm run test:extension-resilience && npm run test:operations && npm run test:selector-config && npm run test:vehicle-import && npm run test:selector-health && npm run test:google-auth && npm run test:login-diagnostics && npm run test:operational-ui && npm run test:management-ui && npm run test:design-final && npm run test:vehicle-zip && npm run test:group-integrity",
     "test:management-ui": "node tests/phase-six-management-ui.mjs",
     "test:design-final": "node tests/phase-six-final-polish.mjs",
     "test:vehicle-zip": "node tests/vehicle-zip-import.mjs",
@@ -55,7 +55,8 @@
     "test:vault-recovery": "node tests/vault-recovery.mjs",
     "test:alert-secrets": "node --import=./tests/helpers/offline.mjs tests/alert-credential-safety.mjs",
     "test:readiness": "node --import=./tests/helpers/offline.mjs tests/system-readiness.mjs",
-    "test:guided-remediation": "node tests/guided-remediation.mjs"
+    "test:guided-remediation": "node tests/guided-remediation.mjs",
+    "test:backup-verification": "node --import=./tests/helpers/offline.mjs tests/backup-verification.mjs"
   },
   "dependencies": {
     "google-auth-library": "^11.2.0",

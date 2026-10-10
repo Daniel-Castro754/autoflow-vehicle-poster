@@ -24,3 +24,4 @@ jobs:
       - run: npm ci
       - run: node tests/windows-vault.mjs
       - run: node tests/windows-recovery.mjs
+      - run: node --import=./tests/helpers/offline.mjs tests/backup-verification.mjs
