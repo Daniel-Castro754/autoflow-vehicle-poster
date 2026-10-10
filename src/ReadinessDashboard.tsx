@@ -3,6 +3,18 @@ import { Activity, ArrowRight, RefreshCcw, ShieldCheck } from 'lucide-react'
 
 type Status = 'ok' | 'attention' | 'inactive' | 'unknown'
 type Section = 'security' | 'integrations' | 'automation'
+type BackupEntry = { id: string; createdAt: string }
+type VerifiedBackup = {
+  id: string
+  verifiedAt: string
+  createdAt: string
+  databaseBytes: number
+  imageCount: number
+  vaultIncluded: boolean
+  integrity: 'verified'
+  restoreTested: false
+}
+
 type ReadinessCheck = {
   id: string
   section: Section
@@ -95,6 +107,51 @@ export function ReadinessDashboard({
   const [refreshing, setRefreshing] = useState(false)
   const [expandedGuide, setExpandedGuide] = useState<string | null>(null)
   const [reviewed, setReviewed] = useState<Record<string, boolean>>({})
+  const [backupCopies, setBackupCopies] = useState<BackupEntry[] | null>(null)
+  const [backupListError, setBackupListError] = useState('')
+  const [backupResult, setBackupResult] = useState<VerifiedBackup | null>(null)
+  const [backupVerifying, setBackupVerifying] = useState<string | null>(null)
+  const [backupLoading, setBackupLoading] = useState(false)
+  async function listBackups() {
+    setBackupLoading(true)
+    setBackupListError('')
+    try {
+      const found = await api<{ available: boolean; backups: BackupEntry[] }>('/health/backups')
+      setBackupCopies(found.backups)
+      if (!found.available) setBackupListError('Pasta backups não encontrada neste servidor.')
+    } catch {
+      setBackupCopies(null)
+      setBackupListError(
+        'Não foi possível listar backups. Confira o acesso de administrador; cópias globais não são liberadas para instalações com várias empresas.',
+      )
+    } finally {
+      setBackupLoading(false)
+    }
+  }
+
+  async function verifyBackup(backupId: string) {
+    if (!window.confirm(
+      'Conferir somente a integridade da cópia ' + backupId +
+        '? Nenhum arquivo será restaurado ou alterado. A leitura pode levar alguns minutos.',
+    )) return
+    setBackupVerifying(backupId)
+    setBackupResult(null)
+    setBackupListError('')
+    try {
+      const result = await api<VerifiedBackup>('/health/backups/verify', {
+        method: 'POST',
+        body: JSON.stringify({ backupId }),
+      })
+      setBackupResult(result)
+    } catch {
+      setBackupListError(
+        'A cópia selecionada não foi validada. Verifique o resultado no servidor e preserve o backup original.',
+      )
+    } finally {
+      setBackupVerifying(null)
+    }
+  }
+
   const load = useCallback(async () => {
     setRefreshing(true)
     try {
@@ -308,6 +365,69 @@ export function ReadinessDashboard({
                         <p className="health-note">
                           <strong>Limite de segurança:</strong> {guide.safety}
                         </p>
+                        {guide.checkId === 'backup' && (
+                          <div style={{
+                            border: '1px solid var(--line, #dce5e4)',
+                            borderRadius: 12,
+                            padding: 14,
+                            marginBottom: 14,
+                          }}>
+                            <strong>Conferência de integridade de backups</strong>
+                            <p className="health-note">
+                              Procura somente na pasta de backups do servidor. A verificação
+                              confere hashes, SQLite, fotos e cofre. Não restaura arquivos,
+                              não confirma que as chaves DPAPI funcionem em outro Windows e
+                              não substitui um teste real de restauração.
+                            </p>
+                            <button className="secondary" type="button"
+                              disabled={backupLoading || Boolean(backupVerifying)}
+                              onClick={() => void listBackups()}>
+                              <RefreshCcw size={14}/>
+                              {backupLoading ? 'Buscando cópias...' : 'Localizar cópias disponíveis'}
+                            </button>
+                            {backupListError && (
+                              <p role="status" style={{ marginTop: 10 }}>{backupListError}</p>
+                            )}
+                            {backupCopies && (
+                              <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+                                {!backupCopies.length && (
+                                  <p>Nenhum backup reconhecido na pasta configurada.</p>
+                                )}
+                                {backupCopies.map((backup) => (
+                                  <div key={backup.id} style={{
+                                    border: '1px solid var(--line, #dce5e4)',
+                                    borderRadius: 9,
+                                    padding: 10,
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    flexWrap: 'wrap',
+                                    gap: 10,
+                                    alignItems: 'center',
+                                  }}>
+                                    <div>
+                                      <strong>{displayMoment(backup.createdAt)}</strong>
+                                      <small style={{ display: 'block' }}>{backup.id}</small>
+                                    </div>
+                                    <button className="secondary" type="button"
+                                      disabled={Boolean(backupVerifying)}
+                                      onClick={() => void verifyBackup(backup.id)}>
+                                      {backupVerifying === backup.id ? 'Verificando...' : 'Verificar integridade'}
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {backupResult && (
+                              <p role="status" className="health-note" style={{ marginTop: 12 }}>
+                                Integridade conferida em {displayMoment(backupResult.verifiedAt)}:
+                                {' '}{backupResult.imageCount} imagem(ns), banco de
+                                {' '}{backupResult.databaseBytes.toLocaleString('pt-BR')} bytes,
+                                {' '}cofre {backupResult.vaultIncluded ? 'incluído' : 'não incluído'}.
+                                {' '}A restauração continua não testada.
+                              </p>
+                            )}
+                          </div>
+                        )}
                         <div
                           style={{
                             display: 'flex',
