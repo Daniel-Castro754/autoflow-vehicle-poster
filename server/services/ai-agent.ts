@@ -1,3 +1,4 @@
+import { getAiCredentials } from './credential-vault.ts'
 import type { DatabaseSync } from 'node:sqlite'
 import {
   generateVehicleDescription,
@@ -579,12 +580,7 @@ async function planAutopilotJobs(
   const assignments: AutopilotResult['assignments'] = []
   let descriptionsOptimized = 0
 
-  const aiConf = db
-    .prepare(
-      'SELECT gemini_api_key geminiApiKey, openai_api_key openaiApiKey, ai_provider aiProvider FROM organization_settings WHERE organization_id = ?',
-    )
-    .get(organizationId) as
-    { geminiApiKey?: string; openaiApiKey?: string; aiProvider?: string } | undefined
+  const aiConf = getAiCredentials(db, organizationId)
   const aiProviderSettings = resolveAIProviderSettings(aiConf)
 
   const optimizedDescriptions = new Map<number, string>()
@@ -840,12 +836,7 @@ export async function batchOptimizeDescriptions(
     location: string
   }>
 
-  const aiConf = db
-    .prepare(
-      'SELECT gemini_api_key geminiApiKey, openai_api_key openaiApiKey, ai_provider aiProvider FROM organization_settings WHERE organization_id = ?',
-    )
-    .get(organizationId) as
-    { geminiApiKey?: string; openaiApiKey?: string; aiProvider?: string } | undefined
+  const aiConf = getAiCredentials(db, organizationId)
   const aiProviderSettings = resolveAIProviderSettings(aiConf)
 
   let updated = 0

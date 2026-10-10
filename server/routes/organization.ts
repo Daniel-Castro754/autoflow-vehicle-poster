@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { closeSelectorCircuitBreaker } from '../services/selector-health.ts'
 import { recordAiAudit } from '../services/ai-audit-history.ts'
+import { encryptCredential } from '../services/credential-vault.ts'
 
 type AuthContext = { userId: number; organizationId: number }
 type Group = {
@@ -197,9 +198,17 @@ export async function handleOrganizationRoute(
       return true
     }
     const geminiApiKey =
-      body.clearGeminiApiKey === true ? '' : incomingGemini || currentAI.geminiApiKey
+      body.clearGeminiApiKey === true
+        ? ''
+        : incomingGemini
+          ? encryptCredential(incomingGemini, auth.organizationId, 'gemini_api_key')
+          : currentAI.geminiApiKey
     const openaiApiKey =
-      body.clearOpenaiApiKey === true ? '' : incomingOpenai || currentAI.openaiApiKey
+      body.clearOpenaiApiKey === true
+        ? ''
+        : incomingOpenai
+          ? encryptCredential(incomingOpenai, auth.organizationId, 'openai_api_key')
+          : currentAI.openaiApiKey
     const aiProvider = ['auto', 'gemini', 'openai', 'procedural'].includes(String(body.aiProvider))
       ? String(body.aiProvider)
       : currentAI.aiProvider || 'auto'

@@ -23,6 +23,7 @@ import { createMarketplaceGroupService } from './services/marketplace-groups.ts'
 import { applyMigrations } from './database/migrations.ts'
 import { initializeBaseSchema } from './database/schema.ts'
 import { handleAIRoute } from './routes/ai.ts'
+import { initializeCredentialVault, migrateCredentials } from './services/credential-vault.ts'
 import { handleGroupsRoute } from './routes/groups.ts'
 import { handlePublicationSchedulingRoute } from './routes/publication-scheduling.ts'
 import { handleOrganizationRoute } from './routes/organization.ts'
@@ -70,6 +71,8 @@ const imageBaseUrl = `${publicOrigin}/uploads/`
 
 initializeBaseSchema(db)
 applyMigrations(db)
+initializeCredentialVault(dataDir)
+migrateCredentials(db)
 const automationStatements = createAutomationStatements(db)
 const vehiclePageStatements = createVehiclePageStatements(db)
 const {
