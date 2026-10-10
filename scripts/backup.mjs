@@ -20,7 +20,8 @@ import process from 'node:process'
 
 const DATABASE_NAME = 'autoflow.db'
 const MANIFEST_NAME = 'manifest.json'
-const FORMAT_VERSION = 1
+const FORMAT_VERSION = 2
+const VAULT_FILE = 'vault-key.json'
 
 function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
@@ -53,6 +54,17 @@ function validateDatabase(path, uploadNames) {
       for (const image of missing) {
         if (!uploadNames.has(image.file_name))
           throw new Error(`A imagem referenciada pelo banco não está no backup: ${image.file_name}`)
+      }
+    }
+    const hasCredentialTable = database
+      .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_settings'")
+      .get()
+    if (hasCredentialTable) {
+      const encrypted = database.prepare(
+        "SELECT 1 FROM organization_settings WHERE gemini_api_key LIKE 'enc:v1:%' OR openai_api_key LIKE 'enc:v1:%' LIMIT 1",
+      ).get()
+      if (encrypted && !uploadNames.has('__vault_present__')) {
+        throw new Error('O banco contém chaves criptografadas, mas o backup não inclui o cofre.')
       }
     }
   } finally {
@@ -90,7 +102,15 @@ export async function createBackup(dataDirectory, backupRoot) {
     const copiedUploads = listUploads(join(staging, 'uploads'))
     if (JSON.stringify(uploads) !== JSON.stringify(copiedUploads))
       throw new Error('Os uploads mudaram durante o backup. Pare o servidor e tente novamente.')
-    validateDatabase(join(staging, DATABASE_NAME), new Set(copiedUploads.map((file) => file.name)))
+    const vaultPath = join(source, VAULT_FILE)
+    const vault = existsSync(vaultPath)
+      ? { name: VAULT_FILE, bytes: statSync(vaultPath).size, sha256: sha256(vaultPath) }
+      : null
+    if (vault) copyFileSync(vaultPath, join(staging, VAULT_FILE))
+    validateDatabase(
+      join(staging, DATABASE_NAME),
+      new Set([...copiedUploads.map((file) => file.name), ...(vault ? ['__vault_present__'] : [])]),
+    )
     const manifest = {
       formatVersion: FORMAT_VERSION,
       createdAt: new Date().toISOString(),
@@ -100,6 +120,7 @@ export async function createBackup(dataDirectory, backupRoot) {
         sha256: sha256(join(staging, DATABASE_NAME)),
       },
       uploads: copiedUploads,
+      vault,
     }
     writeFileSync(join(staging, MANIFEST_NAME), `${JSON.stringify(manifest, null, 2)}\n`, {
       flag: 'wx',
@@ -118,7 +139,7 @@ export function verifyBackup(backupDirectory) {
   if (!existsSync(manifestPath)) throw new Error('Manifesto do backup não encontrado.')
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
   if (
-    manifest.formatVersion !== FORMAT_VERSION ||
+    ![1, FORMAT_VERSION].includes(manifest.formatVersion) ||
     manifest.database?.name !== DATABASE_NAME ||
     !Array.isArray(manifest.uploads)
   ) {
@@ -135,7 +156,18 @@ export function verifyBackup(backupDirectory) {
   const uploads = listUploads(join(source, 'uploads'))
   if (JSON.stringify(uploads) !== JSON.stringify(manifest.uploads))
     throw new Error('Os uploads do backup estão ausentes ou não correspondem ao manifesto.')
-  validateDatabase(databasePath, new Set(uploads.map((file) => file.name)))
+  const vault = manifest.formatVersion === FORMAT_VERSION ? manifest.vault : null
+  if (vault) {
+    const vaultPath = join(source, VAULT_FILE)
+    if (vault.name !== VAULT_FILE || !existsSync(vaultPath) ||
+        statSync(vaultPath).size !== vault.bytes || sha256(vaultPath) !== vault.sha256) {
+      throw new Error('O cofre do backup está ausente ou não corresponde ao manifesto.')
+    }
+  }
+  validateDatabase(
+    databasePath,
+    new Set([...uploads.map((file) => file.name), ...(vault ? ['__vault_present__'] : [])]),
+  )
   return manifest
 }
 
@@ -159,9 +191,10 @@ export function restoreBackup(backupDirectory, destinationDirectory) {
     mkdirSync(staging, { recursive: true })
     copyFileSync(join(source, DATABASE_NAME), join(staging, DATABASE_NAME))
     cpSync(join(source, 'uploads'), join(staging, 'uploads'), { recursive: true })
+    if (manifest.vault) copyFileSync(join(source, VAULT_FILE), join(staging, VAULT_FILE))
     validateDatabase(
       join(staging, DATABASE_NAME),
-      new Set(manifest.uploads.map((file) => file.name)),
+      new Set([...manifest.uploads.map((file) => file.name), ...(manifest.vault ? ['__vault_present__'] : [])]),
     )
     if (existsSync(destination)) rmdirSync(destination)
     renameSync(staging, destination)
