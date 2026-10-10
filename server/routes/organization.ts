@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { closeSelectorCircuitBreaker } from '../services/selector-health.ts'
 import { recordAiAudit } from '../services/ai-audit-history.ts'
 import { encryptCredential } from '../services/credential-vault.ts'
+import { validateTelegramDestination, validateWebhookAddress } from '../services/alert-secrets.ts'
 
 type AuthContext = { userId: number; organizationId: number }
 type Group = {
@@ -83,11 +84,34 @@ export async function handleOrganizationRoute(
         : 'none'
     delete settings.geminiApiKey
     delete settings.openaiApiKey
-    if (!isAdmin(auth)) {
-      delete settings.alertTelegramToken
-      delete settings.alertTelegramChatId
-      delete settings.alertWebhookUrl
-    }
+    settings.alertTelegramConfigured = Boolean(
+      settings.alertTelegramToken || process.env.TELEGRAM_BOT_TOKEN,
+    )
+    settings.alertChatConfigured = Boolean(
+      settings.alertTelegramChatId || process.env.TELEGRAM_CHAT_ID,
+    )
+    settings.alertWebhookConfigured = Boolean(
+      settings.alertWebhookUrl || process.env.ALERT_WEBHOOK_URL,
+    )
+    settings.alertTelegramSource = settings.alertTelegramToken
+      ? 'database'
+      : process.env.TELEGRAM_BOT_TOKEN
+        ? 'environment'
+        : 'none'
+    settings.alertChatSource = settings.alertTelegramChatId
+      ? 'database'
+      : process.env.TELEGRAM_CHAT_ID
+        ? 'environment'
+        : 'none'
+    settings.alertWebhookSource = settings.alertWebhookUrl
+      ? 'database'
+      : process.env.ALERT_WEBHOOK_URL
+        ? 'environment'
+        : 'none'
+    // Never expose credential values (including webhook URL paths) to browsers.
+    delete settings.alertTelegramToken
+    delete settings.alertTelegramChatId
+    delete settings.alertWebhookUrl
     send(res, 200, { organization, settings })
     return true
   }
@@ -159,9 +183,66 @@ export async function handleOrganizationRoute(
       send(res, 400, { error: 'O modelo de descrição contém uma variável não suportada.' })
       return true
     }
-    const alertTelegramToken = String(body.alertTelegramToken || '').trim()
-    const alertTelegramChatId = String(body.alertTelegramChatId || '').trim()
-    const alertWebhookUrl = String(body.alertWebhookUrl || '').trim()
+    const storedAlerts = db
+      .prepare(
+        'SELECT alert_telegram_token token, alert_telegram_chat_id chat, alert_webhook_url webhook ' +
+          'FROM organization_settings WHERE organization_id=?',
+      )
+      .get(auth.organizationId) as { token: string; chat: string; webhook: string } | undefined
+    if (!storedAlerts) {
+      send(res, 404, { error: 'Configurações de alertas não encontradas.' })
+      return true
+    }
+    const clears = [
+      'clearAlertTelegramToken',
+      'clearAlertTelegramChatId',
+      'clearAlertWebhookUrl',
+    ] as const
+    if (clears.some((field) => body[field] !== undefined && typeof body[field] !== 'boolean')) {
+      send(res, 400, { error: 'Comando de remoção de alertas inválido.' })
+      return true
+    }
+    const incomingToken =
+      typeof body.alertTelegramToken === 'string' ? body.alertTelegramToken.trim() : ''
+    const incomingChat =
+      typeof body.alertTelegramChatId === 'string' ? body.alertTelegramChatId.trim() : ''
+    const incomingWebhook =
+      typeof body.alertWebhookUrl === 'string' ? body.alertWebhookUrl.trim() : ''
+    if (
+      (body.clearAlertTelegramToken && incomingToken) ||
+      (body.clearAlertTelegramChatId && incomingChat) ||
+      (body.clearAlertWebhookUrl && incomingWebhook)
+    ) {
+      send(res, 400, { error: 'Não é possível substituir e excluir a mesma integração.' })
+      return true
+    }
+    let alertTelegramToken: string
+    let alertTelegramChatId: string
+    let alertWebhookUrl: string
+    try {
+      validateTelegramDestination(incomingToken, incomingChat)
+      const safeUrl = validateWebhookAddress(incomingWebhook)
+      alertTelegramToken = body.clearAlertTelegramToken
+        ? ''
+        : incomingToken
+          ? encryptCredential(incomingToken, auth.organizationId, 'alert_telegram_token')
+          : storedAlerts.token
+      alertTelegramChatId = body.clearAlertTelegramChatId
+        ? ''
+        : incomingChat
+          ? encryptCredential(incomingChat, auth.organizationId, 'alert_telegram_chat_id')
+          : storedAlerts.chat
+      alertWebhookUrl = body.clearAlertWebhookUrl
+        ? ''
+        : safeUrl
+          ? encryptCredential(safeUrl, auth.organizationId, 'alert_webhook_url')
+          : storedAlerts.webhook
+    } catch (error) {
+      send(res, 400, {
+        error: error instanceof Error ? error.message : 'Configuração de alerta inválida.',
+      })
+      return true
+    }
     const autoCurateGroups = body.autoCurateGroups === true
     // Older forms send empty API key fields. Empty and omitted fields mean KEEP, not erase.
     const currentAI = db

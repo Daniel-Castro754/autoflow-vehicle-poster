@@ -427,9 +427,9 @@ try {
       autoPublish: false,
       autoRetry: true,
       maxRetries: 4,
-      alertTelegramToken: 'test_telegram_bot_token_123456',
+      alertTelegramToken: '123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij',
       alertTelegramChatId: '-1009988776655',
-      alertWebhookUrl: 'http://127.0.0.1:3444/api/health', // URL válida local para o teste
+      alertWebhookUrl: 'https://hooks.example.test/alerts', // Endpoint fictício HTTPS
       autoCurateGroups: true,
       groups: [
         {
@@ -452,7 +452,9 @@ try {
   assert.equal(settings.settings.autoRetry, 1)
   assert.equal(settings.settings.maxRetries, 4)
   assert.equal(settings.settings.autoCurateGroups, 1)
-  assert.equal(settings.settings.alertTelegramToken, 'test_telegram_bot_token_123456')
+  assert.equal(settings.settings.alertTelegramConfigured, true)
+  assert.equal(settings.settings.alertWebhookConfigured, true)
+  assert.equal('alertTelegramToken' in settings.settings, false)
   console.log(
     '✓ Persistência de configurações autônomas (autoRetry, maxRetries, Telegram, Webhook) validada.',
   )

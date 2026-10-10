@@ -13,7 +13,13 @@ import type { DatabaseSync } from 'node:sqlite'
 
 const FILE = 'vault-key.json'
 const PREFIX = 'enc:v1:'
-type Field = 'gemini_api_key' | 'openai_api_key'
+export type CredentialField =
+  | 'gemini_api_key'
+  | 'openai_api_key'
+  | 'alert_telegram_token'
+  | 'alert_telegram_chat_id'
+  | 'alert_webhook_url'
+type Field = CredentialField
 type VaultFile =
   | { version: 1; mode: 'dpapi'; wrappedKey: string }
   | { version: 1; mode: 'passphrase'; salt: string }
@@ -176,36 +182,54 @@ export function getAiCredentials(db: DatabaseSync, org: number) {
 
 /** Run after schema migration, before opening the server. Corruption or lost keys fail closed. */
 export function migrateCredentials(db: DatabaseSync) {
+  const fields: CredentialField[] = [
+    'gemini_api_key',
+    'openai_api_key',
+    'alert_telegram_token',
+    'alert_telegram_chat_id',
+    'alert_webhook_url',
+  ]
   const rows = db
-    .prepare(
-      'SELECT organization_id id,gemini_api_key gemini,openai_api_key openai FROM organization_settings',
-    )
-    .all() as Array<{ id: number; gemini: string; openai: string }>
-  // Validate all existing ciphertext before any writes.
-  for (const row of rows) {
-    decryptCredential(row.gemini, row.id, 'gemini_api_key')
-    decryptCredential(row.openai, row.id, 'openai_api_key')
-  }
+    .prepare('SELECT organization_id id,' + fields.join(',') + ' FROM organization_settings')
+    .all() as Array<{ id: number } & Record<CredentialField, string>>
+  // Validate every existing ciphertext BEFORE starting the migration.
+  for (const row of rows)
+    for (const field of fields) decryptCredential(row[field] || '', row.id, field)
   db.exec('BEGIN IMMEDIATE')
   try {
+    const update = db.prepare(
+      'UPDATE organization_settings SET ' +
+        fields.map((field) => field + '=?').join(',') +
+        ' WHERE organization_id=?',
+    )
     for (const row of rows) {
-      const gemini =
-        row.gemini && !isEncryptedCredential(row.gemini)
-          ? encryptCredential(row.gemini, row.id, 'gemini_api_key')
-          : row.gemini
-      const openai =
-        row.openai && !isEncryptedCredential(row.openai)
-          ? encryptCredential(row.openai, row.id, 'openai_api_key')
-          : row.openai
-      if (gemini !== row.gemini || openai !== row.openai)
-        db.prepare(
-          'UPDATE organization_settings SET gemini_api_key=?,openai_api_key=? WHERE organization_id=?',
-        ).run(gemini, openai, row.id)
+      const values = fields.map((field) => {
+        const previous = row[field] || ''
+        return previous && !isEncryptedCredential(previous)
+          ? encryptCredential(previous, row.id, field)
+          : previous
+      })
+      if (values.some((value, i) => value !== row[fields[i]!])) update.run(...values, row.id)
     }
     db.exec('COMMIT')
   } catch (error) {
     db.exec('ROLLBACK')
     throw error
+  }
+}
+
+/** Decipher alert endpoints in the backend, never in an API settings response. */
+export function getAlertCredentials(db: DatabaseSync, org: number) {
+  const row = db
+    .prepare(
+      'SELECT alert_telegram_token token,alert_telegram_chat_id chat,alert_webhook_url webhook ' +
+        'FROM organization_settings WHERE organization_id=?',
+    )
+    .get(org) as { token: string; chat: string; webhook: string } | undefined
+  return {
+    telegramBotToken: decryptCredential(row?.token || '', org, 'alert_telegram_token'),
+    telegramChatId: decryptCredential(row?.chat || '', org, 'alert_telegram_chat_id'),
+    webhookUrl: decryptCredential(row?.webhook || '', org, 'alert_webhook_url'),
   }
 }
 
@@ -303,14 +327,25 @@ function validateMasterAgainstDatabase(db: DatabaseSync, candidate: Buffer) {
   if (!table) throw new Error('Banco de dados AutoFlow não encontrado neste diretório.')
   const rows = db
     .prepare(
-      'SELECT organization_id id, gemini_api_key gemini, openai_api_key openai FROM organization_settings',
+      'SELECT organization_id id, gemini_api_key gemini, openai_api_key openai,' +
+        ' alert_telegram_token telegram,alert_telegram_chat_id chat,alert_webhook_url webhook FROM organization_settings',
     )
-    .all() as Array<{ id: number; gemini: string; openai: string }>
+    .all() as Array<{
+    id: number
+    gemini: string
+    openai: string
+    telegram: string
+    chat: string
+    webhook: string
+  }>
   let encryptedCount = 0
   for (const row of rows) {
     for (const [field, cipher] of [
       ['gemini_api_key', row.gemini],
       ['openai_api_key', row.openai],
+      ['alert_telegram_token', row.telegram],
+      ['alert_telegram_chat_id', row.chat],
+      ['alert_webhook_url', row.webhook],
     ] as const) {
       if (!cipher || !isEncryptedCredential(cipher)) continue
       encryptedCount += 1
@@ -333,7 +368,7 @@ function validateMasterAgainstDatabase(db: DatabaseSync, candidate: Buffer) {
     }
   }
   if (!encryptedCount)
-    throw new Error('Este banco não contém chaves de IA criptografadas para validar a recuperação.')
+    throw new Error('Este banco não contém credenciais criptografadas para validar a recuperação.')
   return encryptedCount
 }
 

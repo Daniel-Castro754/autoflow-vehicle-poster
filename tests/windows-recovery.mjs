@@ -22,11 +22,13 @@ if (process.platform !== 'win32') {
   const db = new DatabaseSync(join(root, 'autoflow.db'))
   try {
     db.exec(
-      "CREATE TABLE organization_settings(organization_id INTEGER PRIMARY KEY,gemini_api_key TEXT NOT NULL DEFAULT '',openai_api_key TEXT NOT NULL DEFAULT '')",
+      "CREATE TABLE organization_settings(organization_id INTEGER PRIMARY KEY,gemini_api_key TEXT NOT NULL DEFAULT '',openai_api_key TEXT NOT NULL DEFAULT '',alert_telegram_token TEXT NOT NULL DEFAULT '',alert_telegram_chat_id TEXT NOT NULL DEFAULT '',alert_webhook_url TEXT NOT NULL DEFAULT '')",
     )
     initializeCredentialVault(source)
     const encrypted = encryptCredential('example-credential-not-real', 7, 'gemini_api_key')
-    db.prepare('INSERT INTO organization_settings VALUES (7,?,?)').run(encrypted, '')
+    db.prepare(
+      'INSERT INTO organization_settings (organization_id,gemini_api_key,openai_api_key) VALUES (7,?,?)',
+    ).run(encrypted, '')
     const password = 'long-portable-recovery-password-2026'
     const bundle = createPortableRecoveryPackage(db, source, password)
 
