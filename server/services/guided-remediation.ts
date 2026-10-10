@@ -161,7 +161,7 @@ export function guidedRemediation(checks: readonly CheckInput[]): GuidedAction[]
   return checks
     .filter((item) => item.status === 'attention' || (item.id === 'backup' && item.status === 'unknown'))
     .flatMap((item) => {
-      const template = templates[item.id]
+      const template = Object.hasOwn(templates, item.id) ? templates[item.id] : undefined
       return template
         ? [{
             ...template,
