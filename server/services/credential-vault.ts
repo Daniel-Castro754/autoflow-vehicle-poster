@@ -6,8 +6,7 @@ import type { DatabaseSync } from 'node:sqlite'
 
 const FILE = 'vault-key.json'
 const PREFIX = 'enc:v1:'
-const FIELDS = ['gemini_api_key', 'openai_api_key'] as const
-type Field = (typeof FIELDS)[number]
+type Field = 'gemini_api_key' | 'openai_api_key'
 type VaultFile = { version: 1; mode: 'dpapi'; wrappedKey: string } | { version: 1; mode: 'passphrase'; salt: string }
 let vaultKey: Buffer | null = null
 
