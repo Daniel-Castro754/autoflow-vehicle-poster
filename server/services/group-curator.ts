@@ -49,9 +49,10 @@ export function evaluateGroupScore(group: GroupRecord, locationQuery = ''): Cura
 
   // Proximidade: apenas correspondência de cidade/UF conhecida; não inventar distâncias.
   if (locationQuery) {
-    const ref = locationQuery.toLocaleLowerCase('pt-BR')
-    const city = (group.city || '').toLocaleLowerCase('pt-BR').trim()
-    const state = (group.state || '').toLocaleLowerCase('pt-BR').trim()
+    const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR')
+    const ref = normalize(locationQuery)
+    const city = normalize(group.city || '').trim()
+    const state = normalize(group.state || '').trim()
     if (city && ref.includes(city)) score += 45
     else if (state && ref.includes(state)) score += 12
   }
