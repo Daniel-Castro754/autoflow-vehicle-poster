@@ -22,7 +22,7 @@ type Dependencies = {
   hashPassword: (password: string) => Promise<string>
   marketplaceGroups: (organizationId: number, activeOnly?: boolean) => Group[]
   validateGroupTarget: (value: unknown) => boolean
-  replaceMarketplaceGroups: (organizationId: number, values: unknown[]) => Group[]
+  replaceMarketplaceGroups: (organizationId: number, values: unknown[], deletedGroupIds?: number[]) => Group[]
 }
 
 export async function handleOrganizationRoute(
@@ -160,6 +160,11 @@ export async function handleOrganizationRoute(
         )
       : []
     const groupRecords = Array.isArray(body.groups) ? body.groups : targetGroups
+    const deletedGroupIds = Array.isArray(body.deletedGroupIds) ? body.deletedGroupIds : []
+    if (deletedGroupIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
+      send(res, 400, { error: 'A lista de exclusões de grupos é inválida.' })
+      return true
+    }
     if (groupRecords.some((value) => !validateGroupTarget(value))) {
       send(res, 400, { error: 'Informe um nome e uma URL valida do Facebook para cada grupo.' })
       return true
@@ -186,6 +191,8 @@ export async function handleOrganizationRoute(
       send(res, 400, { error: 'Ative o avanço automático antes da publicação automática.' })
       return true
     }
+    db.exec('BEGIN IMMEDIATE')
+    try {
     db.prepare('UPDATE organizations SET name=? WHERE id=?').run(
       String(body.organizationName).trim(),
       auth.organizationId,
@@ -214,7 +221,7 @@ export async function handleOrganizationRoute(
       aiProvider,
       auth.organizationId,
     )
-    const groups = replaceMarketplaceGroups(auth.organizationId, groupRecords)
+    const groups = replaceMarketplaceGroups(auth.organizationId, groupRecords, deletedGroupIds)
     db.prepare(
       'UPDATE organization_settings SET autopilot_enabled=?,autopilot_interval_minutes=? WHERE organization_id=?',
     ).run(autopilotEnabled ? 1 : 0, autopilotIntervalMinutes, auth.organizationId)
@@ -226,7 +233,12 @@ export async function handleOrganizationRoute(
         'UPDATE autopilot_state SET next_run_at=CURRENT_TIMESTAMP WHERE organization_id=?',
       ).run(auth.organizationId)
     }
+    db.exec('COMMIT')
     send(res, 200, { ok: true, groups })
+    } catch (error) {
+      db.exec('ROLLBACK')
+      send(res, 409, { error: error instanceof Error ? error.message : 'Não foi possível salvar grupos com segurança.' })
+    }
     return true
   }
 
