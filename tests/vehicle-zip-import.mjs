@@ -90,7 +90,7 @@ assert.equal(parsed.rows[0].description, 'Saveiro impecável; IPVA pago')
 assert.equal(parsed.rows[1].make, 'Fiat')
 assert.equal(readSafeZip(makeZip(entries, 0)).size, 4, 'Stored ZIP files are also supported')
 await assert.rejects(parseVehiclePackage(makeZip([...entries, ['fotos/OTHER/03.png', photo1]])), /sem veículo correspondente/)
-await assert.rejects(parseVehiclePackage(makeZip([...entries, ['fotos\/..\/evil.jpg', photo2]])), /caminho de arquivo inválido/)
+await assert.rejects(parseVehiclePackage(makeZip([...entries, ['fotos/../evil.jpg', photo2]])), /caminho de arquivo inválido/)
 await assert.rejects(parseVehiclePackage(makeZip([...entries, ['fotos/SAVEIRO-19/invalida.jpg', photo1]])), /imagem inválida/)
 await assert.rejects(parseVehiclePackage(makeZip([...entries, ['fotos/SAVEIRO-19/01.png', photo2]])), /repetidos/)
 await assert.rejects(parseVehiclePackage(makeZip([...entries.slice(1)])), /CSV na raiz/)
@@ -166,7 +166,7 @@ try {
   assert.equal(updatePreview.updated, 2)
   assert.equal(updatePreview.photos, 0, 'Duplicate photo content must be skipped')
   // Mutating an image after preview must invalidate confirmation.
-  db.prepare('DELETE FROM vehicle_images WHERE vehicle_id=? LIMIT 1').run(saveiro.id)
+  db.prepare('DELETE FROM vehicle_images WHERE id=(SELECT id FROM vehicle_images WHERE vehicle_id=? LIMIT 1)').run(saveiro.id)
   const stale = await importer({ zipBase64, mode: 'update', previewDigest: updatePreview.previewDigest })
   assert.equal(stale.status, 409)
 } finally {
