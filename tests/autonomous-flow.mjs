@@ -646,10 +646,19 @@ try {
   console.log('✓ Endpoint GET /api/ai/audit com Health Score validado.')
 
   // 3. Otimização em Lote de Descrições
-  const batchOptRes = await call('/ai/batch-optimize', token, {
+  const batchPreview = await call('/ai/batch-optimize/preview', token, {
     method: 'POST',
     body: JSON.stringify({ tone: 'profissional' }),
   })
+  const batchOptRes = batchPreview.previewId
+    ? await call('/ai/batch-optimize', token, {
+        method: 'POST',
+        body: JSON.stringify({
+          previewId: batchPreview.previewId,
+          selectedVehicleIds: batchPreview.proposals.map((item) => item.vehicleId),
+        }),
+      })
+    : { ok: true, updated: 0 }
   assert.equal(batchOptRes.ok, true)
   assert(typeof batchOptRes.updated === 'number')
   console.log('✓ Endpoint POST /api/ai/batch-optimize validado.')
