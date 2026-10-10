@@ -1,3 +1,4 @@
+import { getAiCredentials } from './credential-vault.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import {
@@ -100,11 +101,7 @@ export async function prepareBatchDescriptionPreview(
   if (!['vendedor', 'profissional', 'amigável', 'direto'].includes(tone))
     throw new Error('Tom de descrição inválido.')
   const candidates = weakDescriptions(db, org)
-  const conf = db
-    .prepare(
-      'SELECT gemini_api_key geminiApiKey,openai_api_key openaiApiKey,ai_provider aiProvider FROM organization_settings WHERE organization_id=?',
-    )
-    .get(org) as { geminiApiKey?: string; openaiApiKey?: string; aiProvider?: string } | undefined
+  const conf = getAiCredentials(db, org)
   const settings = resolveAIProviderSettings(conf)
   const proposals: Proposal[] = []
   for (const v of candidates.slice(0, 10)) {
