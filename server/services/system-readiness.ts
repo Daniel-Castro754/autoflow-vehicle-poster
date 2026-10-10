@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { operationalHealth } from './operational-health.ts'
+import { guidedRemediation } from './guided-remediation.ts'
 
 export type ReadinessState = 'ok' | 'attention' | 'inactive' | 'unknown'
 export type ReadinessSection = 'security' | 'integrations' | 'automation'
@@ -265,6 +266,7 @@ export function systemReadiness(db: DatabaseSync, org: number) {
       'Dados locais e preferências. Esta consulta não testa redes, chaves externas nem cria publicações.',
     status,
     checks,
+    guides: guidedRemediation(checks),
     summary: {
       attention: checks.filter((check) => check.status === 'attention').length,
       configured: checks.filter((check) => check.status === 'ok').length,
