@@ -343,6 +343,8 @@ export function createPortableRecoveryPackage(
   password: string,
 ): string {
   ensureRecoveryPassword(password)
+  if (!existsSync(join(dataDir, FILE)))
+    throw new Error('O cofre original não existe. Não crie um novo cofre sobre o banco restaurado.')
   initializeCredentialVault(dataDir)
   validateMasterAgainstDatabase(db, key())
   const salt = randomBytes(16)
