@@ -76,7 +76,20 @@ export function runGroupCurationSweep(db: DatabaseSync): { organizationsCurated:
   let organizationsCurated = 0
   for (const org of orgs) {
     try {
+      const confirmed = (db.prepare(
+        "SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND status='completed'",
+      ).get(org.organizationId) as { total: number }).total
+      const last = db.prepare(
+        'SELECT confirmed_count count FROM group_ranking_refresh WHERE organization_id=?',
+      ).get(org.organizationId) as { count: number } | undefined
+      // Reevaluate rankings after every ten newly confirmed publications.
+      if (confirmed - (last?.count || 0) < 10) continue
       applyGroupCuration(db, org.organizationId)
+      db.prepare(`INSERT INTO group_ranking_refresh (organization_id,confirmed_count,refreshed_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(organization_id) DO UPDATE SET
+        confirmed_count=excluded.confirmed_count,refreshed_at=CURRENT_TIMESTAMP`
+      ).run(org.organizationId, confirmed)
       organizationsCurated++
     } catch (err) {
       logger.warn(
@@ -91,7 +104,7 @@ export function runGroupCurationSweep(db: DatabaseSync): { organizationsCurated:
 
 let workerTimer: NodeJS.Timeout | null = null
 
-export function startGroupCurationWorker(db: DatabaseSync, intervalMs = 21600000): void {
+export function startGroupCurationWorker(db: DatabaseSync, intervalMs = 60000): void {
   if (workerTimer) return
 
   workerTimer = setInterval(() => {
