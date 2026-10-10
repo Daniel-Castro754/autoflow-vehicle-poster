@@ -62,7 +62,7 @@ function validateDatabase(path, uploadNames) {
     if (hasCredentialTable) {
       const encrypted = database
         .prepare(
-          "SELECT 1 FROM organization_settings WHERE gemini_api_key LIKE 'enc:v1:%' OR openai_api_key LIKE 'enc:v1:%' LIMIT 1",
+          "SELECT 1 FROM organization_settings WHERE gemini_api_key LIKE 'enc:v1:%' OR openai_api_key LIKE 'enc:v1:%' OR alert_telegram_token LIKE 'enc:v1:%' OR alert_telegram_chat_id LIKE 'enc:v1:%' OR alert_webhook_url LIKE 'enc:v1:%' LIMIT 1",
         )
         .get()
       if (encrypted && !uploadNames.has('__vault_present__')) {
