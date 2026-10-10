@@ -73,7 +73,7 @@ export function createMarketplaceGroupService(db: DatabaseSync) {
       .slice(0, 2000)
       .map((value, index) => {
         if (typeof value === 'string')
-          return { ...parseGroupTarget(value), id: 0, active: true, priority: index + 1 }
+          return { ...parseGroupTarget(value), id: 0, active: true, priority: index + 1, city: '', state: '', memberCount: 0, privacy: '' }
         const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
         const parsed = parseGroupTarget(
           record.url ? `${record.name || ''} | ${record.url}` : record.name,
@@ -83,6 +83,10 @@ export function createMarketplaceGroupService(db: DatabaseSync) {
           id: Number(record.id) || 0,
           active: record.active !== false,
           priority: Number(record.priority) || index + 1,
+          city: String(record.city || ''),
+          state: String(record.state || ''),
+          memberCount: Math.max(0, Number(record.memberCount || 0)),
+          privacy: String(record.privacy || ''),
         }
       })
       .filter((group) => group.name)
@@ -97,19 +101,23 @@ export function createMarketplaceGroupService(db: DatabaseSync) {
     for (const group of incoming) {
       if (group.id && byId.has(group.id)) {
         db.prepare(
-          `UPDATE marketplace_groups SET name=?,url=?,group_key=?,active=?,priority=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`,
+          `UPDATE marketplace_groups SET name=?,url=?,group_key=?,active=?,priority=?,city=?,state=?,member_count=?,privacy=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`,
         ).run(
           group.name,
           group.url,
           group.groupKey,
           group.active ? 1 : 0,
           group.priority,
+          group.city,
+          group.state,
+          group.memberCount || byId.get(group.id)?.memberCount || 0,
+          group.privacy,
           group.id,
           organizationId,
         )
       } else {
         db.prepare(
-          `INSERT INTO marketplace_groups (organization_id,name,url,group_key,active,priority) VALUES (?,?,?,?,?,?)`,
+          `INSERT INTO marketplace_groups (organization_id,name,url,group_key,active,priority,city,state,member_count,privacy) VALUES (?,?,?,?,?,?,?,?,?,?)`,
         ).run(
           organizationId,
           group.name,
@@ -117,6 +125,10 @@ export function createMarketplaceGroupService(db: DatabaseSync) {
           group.groupKey,
           group.active ? 1 : 0,
           group.priority,
+          group.city,
+          group.state,
+          group.memberCount,
+          group.privacy,
         )
       }
     }
