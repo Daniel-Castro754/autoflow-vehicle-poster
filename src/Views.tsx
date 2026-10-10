@@ -3426,8 +3426,9 @@ export function SettingsView({
       const csv = (await file.text()).replace(/^\uFEFF/, '')
       const lines = csv.split(/\r?\n/).filter((line) => line.trim())
       if (lines.length < 2 || lines.length > 2001) throw new Error('CSV vazio ou com mais de 2.000 grupos.')
-      const delimiter = lines[0].includes(';') ? ';' : ','
-      const cols = lines[0].split(delimiter).map((v) => v.trim().toLowerCase())
+      const header = lines[0] || ''
+      const delimiter = header.includes(';') ? ';' : ','
+      const cols = header.split(delimiter).map((v) => v.trim().toLowerCase())
       const field = (values: string[], key: string) => values[cols.indexOf(key)]?.trim() || ''
       if (!cols.includes('nome')) throw new Error('O CSV precisa ter a coluna nome.')
       const imported: MarketplaceGroup[] = []
