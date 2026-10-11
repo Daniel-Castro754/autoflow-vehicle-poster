@@ -112,6 +112,30 @@ for (const selector of [
 assert(css.includes('@media (max-width: 1180px)'))
 assert(css.includes('@media (max-width: 740px)'))
 assert(css.includes('prefers-reduced-motion'))
+
+// Marketplace group toolbar keeps the same actions and handlers with clear
+// visual hierarchy and responsive, keyboard-accessible controls.
+for (const marker of [
+  'className="group-manager-actions"',
+  'className="group-action group-action-primary"',
+  'className="group-action group-action-secondary group-import-action"',
+  'className="group-action group-action-quiet"',
+  'disabled={curating || !groups.length}',
+  'onClick={runAutoCurate}',
+  'onClick={() => void undoGroupCuration()}',
+  'void importGroupCsv(event.target.files?.[0])',
+  'setGroupEditsPending(true)',
+])
+  assert(view.includes(marker), `Missing Marketplace group control: ${marker}`)
+for (const selector of [
+  '.group-manager-head > .group-manager-actions',
+  '.group-manager-actions .group-action-primary',
+  '.group-manager-actions .group-action-secondary',
+  '.group-manager-actions .group-action-quiet',
+  '.group-manager-actions .group-import-action:focus-visible',
+  '@media (max-width: 680px)',
+])
+  assert(css.includes(selector), `Missing group toolbar rule: ${selector}`)
 assert(
   main.indexOf("import './management-workspaces.css'") >
     main.indexOf("import './operational-workspaces.css'"),
