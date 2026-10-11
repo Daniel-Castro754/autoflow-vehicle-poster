@@ -732,7 +732,11 @@ export async function handlePublicationManagementRoute(
       return send(res, 409, {
         error: `A transição de ${job.status} para ${nextStatus} não é permitida por esta operação.`,
       })
-    if (nextStatus === 'pending' && publicationMayExist(job) && b.confirmNoPublication !== true)
+    if (
+      (nextStatus === 'pending' || nextStatus === 'canceled') &&
+      publicationMayExist(job) &&
+      b.confirmNoPublication !== true
+    )
       return send(res, 409, {
         error:
           'Antes de repetir, verifique em “Seus classificados” se o anúncio foi criado. Confirme no painel que ele NÃO foi publicado para liberar uma nova tentativa.',
