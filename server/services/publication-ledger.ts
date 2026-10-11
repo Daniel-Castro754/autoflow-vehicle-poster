@@ -71,7 +71,12 @@ export function recordConfirmedListing(
   // Confirmation is idempotent: only the first confirmed transition starts a
   // new cooldown. Never reject a confirmed external result because of a timer.
   if (confirmPublishedHash(db, input.organizationId, input.publicationJobId)) {
-    if (input.socialAccountId != null) {
+    // Automated publication gets an extra randomized cooldown. Manual-assisted
+    // workflows continue to obey their regular per-profile capacity policy.
+    const settings = db
+      .prepare('SELECT auto_publish autoPublish FROM organization_settings WHERE organization_id=?')
+      .get(input.organizationId) as { autoPublish?: number } | undefined
+    if (settings?.autoPublish && input.socialAccountId != null) {
       try {
         publishWithRandomDelay(db, input.organizationId, input.socialAccountId)
       } catch {
