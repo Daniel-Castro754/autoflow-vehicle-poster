@@ -22,7 +22,7 @@ import { publicationDuplicateRisk as findPublicationDuplicateRisk } from './serv
 import { createAccessControl } from './services/access-control.ts'
 import { createMarketplaceGroupService } from './services/marketplace-groups.ts'
 import { applyMigrations } from './database/migrations.ts'
-import { initializeBaseSchema } from './database/schema.ts'
+import { initializeBaseSchema, registerSqliteFunctions } from './database/schema.ts'
 import { handleAIRoute } from './routes/ai.ts'
 import { initializeCredentialVault, migrateCredentials } from './services/credential-vault.ts'
 import { handleGroupsRoute } from './routes/groups.ts'
@@ -86,6 +86,7 @@ if (!restoreBootProbe) {
   initializeCredentialVault(dataDir)
   migrateCredentials(db)
 }
+else registerSqliteFunctions(db)
 const automationStatements = createAutomationStatements(db)
 const vehiclePageStatements = createVehiclePageStatements(db)
 const {
