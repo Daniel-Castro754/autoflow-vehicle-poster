@@ -80,6 +80,10 @@
   color: var(--af-muted, #5a6d72);
 }
 @media (max-width: 600px) {
-  .listing-variants-panel { padding: 12px; }
-  .listing-variants-choices > button { width: 100%; }
+  .listing-variants-panel {
+    padding: 12px;
+  }
+  .listing-variants-choices > button {
+    width: 100%;
+  }
 }
