@@ -83,10 +83,12 @@ export async function handleIntegrationCredentialsRoute(
     }
     const token = 'afi_' + randomBytes(32).toString('base64url')
     const hash = createHash('sha256').update(token).digest('hex')
-    const created = db.prepare(
-      `INSERT INTO integration_credentials (organization_id,created_by,name,token_hash,scopes,expires_at)
+    const created = db
+      .prepare(
+        `INSERT INTO integration_credentials (organization_id,created_by,name,token_hash,scopes,expires_at)
        VALUES (?,?,?,?,?,?)`,
-    ).run(auth.organizationId, auth.userId, name, hash, JSON.stringify(scopes), expiresAt)
+      )
+      .run(auth.organizationId, auth.userId, name, hash, JSON.stringify(scopes), expiresAt)
     const id = Number(created.lastInsertRowid)
     db.prepare(
       `INSERT INTO integration_audit_events
@@ -100,10 +102,12 @@ export async function handleIntegrationCredentialsRoute(
   const match = /^\/api\/integrations\/credentials\/(\d+)\/revoke$/.exec(url.pathname)
   if (match && req.method === 'POST') {
     const id = Number(match[1])
-    const updated = db.prepare(
-      `UPDATE integration_credentials SET active=0,revoked_at=CURRENT_TIMESTAMP
+    const updated = db
+      .prepare(
+        `UPDATE integration_credentials SET active=0,revoked_at=CURRENT_TIMESTAMP
        WHERE id=? AND organization_id=? AND active=1 AND revoked_at IS NULL`,
-    ).run(id, auth.organizationId)
+      )
+      .run(id, auth.organizationId)
     if (!updated.changes) {
       send(res, 404, { error: 'Credencial ativa não encontrada.' })
       return true
