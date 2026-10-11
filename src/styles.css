@@ -3548,39 +3548,93 @@ td {
 /* Gerenciador estruturado de grupos */
 .group-manager {
   border: 1px solid #dfe7e4;
-  border-radius: 9px;
-  padding: 12px !important;
+  border-radius: 12px;
+  padding: 16px !important;
 }
 .group-manager-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 15px;
+  gap: 20px;
 }
-.group-manager-head > div {
+.group-manager-info {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-}
-.group-manager-head > div > small {
-  font-size: 8px;
-  color: #84938e;
-}
-.group-manager-head > button {
-  border: 1px solid #cfe0da;
-  background: #eef8f5;
-  color: #26745f;
-  border-radius: 7px;
-  padding: 8px 10px;
-  display: flex;
-  align-items: center;
   gap: 6px;
-  font-size: 8px;
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.group-manager-info > small {
+  font-size: 10px;
+  color: #758a82;
+}
+.group-manager-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  flex: 0 1 410px;
+  width: 100%;
+}
+.group-manager .group-manager-action {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 42px;
+  min-width: 0;
+  padding: 9px 13px;
+  border: 1px solid #cfdfd9;
+  border-radius: 9px;
+  background: #f8fbfa;
+  color: #28594b;
+  font-size: 12px;
   font-weight: 700;
+  line-height: 1.3;
+  text-align: center;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
 }
-.group-manager-head > button svg {
-  width: 13px;
+.group-manager .group-manager-action svg {
+  flex: 0 0 auto;
 }
+.group-manager .group-manager-action--outline:hover:not(:disabled),
+.group-manager .group-manager-action--ghost:hover {
+  background: #edf8f3;
+  border-color: #80b8a5;
+}
+.group-manager .group-manager-action--primary {
+  background: #178361;
+  border-color: #178361;
+  color: #fff;
+}
+.group-manager .group-manager-action--primary:hover:not(:disabled) {
+  background: #0c684b;
+  border-color: #0c684b;
+  box-shadow: 0 3px 12px #0c684b30;
+}
+.group-manager .group-manager-action--ghost {
+  background: transparent;
+}
+.group-manager .group-manager-action:focus-visible,
+.group-manager .group-manager-action:focus-within {
+  outline: 2px solid #3bad85;
+  outline-offset: 3px;
+}
+.group-manager .group-manager-action:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.group-manager .group-manager-csv-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
 .managed-groups {
   display: flex;
   flex-direction: column;
@@ -3655,8 +3709,7 @@ td {
 .group-controls button.danger {
   color: #b34e46;
 }
-.group-controls button:disabled,
-.group-manager-head > button:disabled {
+.group-controls button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
@@ -3709,10 +3762,31 @@ td {
 .theme-dark .group-manager {
   border-color: #30403a;
 }
-.theme-dark .group-manager-head > button {
-  background: #1c382f;
-  border-color: #2d574a;
-  color: #89d0b8;
+.theme-dark .group-manager-info > small {
+  color: #94a9a0;
+}
+.theme-dark .group-manager .group-manager-action--outline,
+.theme-dark .group-manager .group-manager-action--ghost {
+  background: #182922;
+  border-color: #3a5549;
+  color: #d8ede3;
+}
+.theme-dark .group-manager .group-manager-action--ghost {
+  background: transparent;
+}
+.theme-dark .group-manager .group-manager-action--outline:hover:not(:disabled),
+.theme-dark .group-manager .group-manager-action--ghost:hover {
+  background: #203e31;
+  border-color: #67b996;
+}
+.theme-dark .group-manager .group-manager-action--primary {
+  background: #248960;
+  border-color: #248960;
+  color: #fff;
+}
+.theme-dark .group-manager .group-manager-action--primary:hover:not(:disabled) {
+  background: #2ea174;
+  border-color: #2ea174;
 }
 .theme-dark .managed-groups article {
   background: #151f1c;
@@ -3779,8 +3853,21 @@ td {
     grid-column: 2;
   }
   .group-manager-head {
-    align-items: flex-start;
+    align-items: stretch;
     flex-direction: column;
+    gap: 14px;
+  }
+  .group-manager-info {
+    flex-basis: auto;
+  }
+  .group-manager-actions {
+    flex-basis: auto;
+    width: 100%;
+  }
+}
+@media (max-width: 460px) {
+  .group-manager-actions {
+    grid-template-columns: 1fr;
   }
 }
 
