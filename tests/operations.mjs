@@ -8,6 +8,7 @@ import { applyMigrations } from '../server/database/migrations.ts'
 import { coordinateAutopilot, skippedAutopilot } from '../server/services/autopilot-coordinator.ts'
 import { createAutonomousScheduler } from '../server/services/autonomous-scheduler.ts'
 import { runAutopilotPipeline } from '../server/services/ai-agent.ts'
+import { calculateListingHash, listingSnapshotForVehicle } from '../server/services/duplicate-checker.ts'
 import { operationalHealth } from '../server/services/operational-health.ts'
 import { warnSlowExecutions } from '../server/services/proactive-alerts.ts'
 import {
@@ -110,6 +111,30 @@ try {
     db.prepare('SELECT COUNT(*) n FROM publication_jobs WHERE organization_id=2').get().n,
     0,
   )
+  // Automated work must retain the same signed copy from queue creation
+  // through preparation/retries, without changing the existing job policy.
+  const autopilotJobs = db
+    .prepare(
+      `SELECT j.id jobId,j.vehicle_id vehicleId,j.variant_seed variantSeed,
+       ad.listing_hash listingHash
+       FROM publication_jobs j JOIN published_ads ad
+         ON ad.organization_id=j.organization_id AND ad.publication_job_id=j.id
+       WHERE j.organization_id=1 ORDER BY j.id`,
+    )
+    .all()
+  assert.equal(autopilotJobs.length, 4)
+  for (const job of autopilotJobs) {
+    assert(Number.isSafeInteger(job.variantSeed) && job.variantSeed > 0)
+    const text = listingSnapshotForVehicle(db, 1, job.vehicleId, job.variantSeed)
+    assert(text)
+    assert.equal(calculateListingHash(text), job.listingHash)
+    assert.deepEqual(
+      listingSnapshotForVehicle(db, 1, job.vehicleId, job.variantSeed),
+      text,
+      'Autopilot copy must remain stable for retries.',
+    )
+  }
+
   assert.equal(
     db
       .prepare(
