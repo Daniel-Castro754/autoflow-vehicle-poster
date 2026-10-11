@@ -4,6 +4,10 @@ import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
 import { startTestServer, createApiClient } from './helpers/server.mjs'
 import { jpegBase64 } from './helpers/images.mjs'
+import {
+  calculateListingHash,
+  listingSnapshotForVehicle,
+} from '../server/services/duplicate-checker.ts'
 
 const server = await startTestServer()
 const db = new DatabaseSync(join(server.dataDir, 'autoflow.db'))
@@ -84,10 +88,19 @@ try {
   const first = await makeJob(firstVehicle.id)
   const second = await makeJob(secondVehicle.id)
   const fingerprints = db
-    .prepare('SELECT listing_hash FROM published_ads WHERE publication_job_id IN (?,?)')
+    .prepare(
+      'SELECT listing_hash FROM published_ads WHERE publication_job_id IN (?,?) ORDER BY publication_job_id',
+    )
     .all(first.id, second.id)
   assert.equal(fingerprints.length, 2)
   assert.notEqual(fingerprints[0].listing_hash, fingerprints[1].listing_hash)
+  const firstJob = db
+    .prepare('SELECT variant_seed variantSeed FROM publication_jobs WHERE id=?')
+    .get(first.id)
+  assert(Number.isSafeInteger(firstJob.variantSeed) && firstJob.variantSeed > 0)
+  const expectedCopy = listingSnapshotForVehicle(db, 1, firstVehicle.id, firstJob.variantSeed)
+  assert(expectedCopy)
+  assert.equal(calculateListingHash(expectedCopy), fingerprints[0].listing_hash)
   await assert.rejects(
     () => makeJob(firstVehicle.id),
     (error) => error.status === 409,
@@ -103,6 +116,8 @@ try {
       document: '/marketplace/create/vehicle',
     }),
   })
+  assert.equal(prepared.vehicle.title, expectedCopy.title)
+  assert.equal(prepared.vehicle.description, expectedCopy.description)
   assert(prepared.vehicle.description.includes(`AF-${String(firstVehicle.id).padStart(6, '0')}`))
   assert(prepared.vehicle.description.includes('Veículo disponível para consulta.'))
   assert.equal(prepared.vehicle.images.length, 1)

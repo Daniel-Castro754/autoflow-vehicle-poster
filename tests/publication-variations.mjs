@@ -100,6 +100,18 @@ try {
   `)
   const first = listingSnapshotForVehicle(db, 1, 1)
   const second = listingSnapshotForVehicle(db, 1, 2)
+  // Existing jobs have no stored seed after the additive migration. They
+  // must continue using the exact pre-seed editorial rendering.
+  assert.equal(
+    db.prepare('SELECT variant_seed FROM publication_jobs WHERE id=1').get().variant_seed,
+    null,
+  )
+  const legacySnapshot = listingSnapshotForVehicle(db, 1, 1)
+  assert.deepEqual(legacySnapshot, first)
+  const seededCopy = listingSnapshotForVehicle(db, 1, 1, 123456)
+  assert.deepEqual(listingSnapshotForVehicle(db, 1, 1, 123456), seededCopy)
+  assert(seededCopy.title && seededCopy.description.includes('AF-000001'))
+  assert.equal(seededCopy.price, first.price)
   const hash = calculateListingHash(first)
   const secondHash = calculateListingHash(second)
   assert(first.description.includes('AF-000001'))
