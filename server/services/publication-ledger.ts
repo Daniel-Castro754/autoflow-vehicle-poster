@@ -10,7 +10,7 @@ export function canonicalMarketplaceListing(value: unknown) {
     const host = url.hostname.toLowerCase().replace(/^www\./, '')
     if (host !== 'facebook.com' && host !== 'm.facebook.com')
       return { externalListingId: '', canonicalUrl: '' }
-    const match = url.pathname.match(/\/marketplace\/item\/(\d+)/)
+    const match = url.pathname.match(/\/marketplace\/item\/([A-Za-z0-9_-]+)/)
     if (!match) return { externalListingId: '', canonicalUrl: '' }
     return {
       externalListingId: match[1],
