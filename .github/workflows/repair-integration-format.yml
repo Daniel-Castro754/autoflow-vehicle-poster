@@ -21,13 +21,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Apply repository Prettier
-        run: |
-          npx prettier --write \
-            docs/INTEGRATION_API.md \
-            server/routes/integration.ts \
-            server/routes/integration-photos.ts \
-            server/routes/integration-reports.ts \
-            tests/integration-credentials.mjs
+        run: npm run format
       - name: Verify formatting
         run: npm run format:check
       - name: Open formatting PR
@@ -42,7 +36,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add docs/INTEGRATION_API.md server/routes/integration.ts server/routes/integration-photos.ts server/routes/integration-reports.ts tests/integration-credentials.mjs
+          git add -u
           git commit -m "style: apply Prettier to integration API files"
           git push origin "$BRANCH"
           gh pr create --base main --head "$BRANCH" \
