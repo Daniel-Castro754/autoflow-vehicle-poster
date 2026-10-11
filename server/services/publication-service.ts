@@ -6,7 +6,11 @@ import {
   listingSnapshotForVehicle,
   DuplicateListingHashError,
 } from './duplicate-checker.ts'
-import { pickRandomOrderedSubset, publicationPhotoRandom } from './image-manager.ts'
+import {
+  pickRandomOrderedSubset,
+  publicationPhotoRandom,
+  signedPublicationPhotoToken,
+} from './image-manager.ts'
 import { profileLimits } from './profile-capacity.ts'
 
 export type PublicationPhoto = { url: string; name: string; mimeType: string }
@@ -18,6 +22,7 @@ export function prepareListingForPublication(
   vehicleId: number,
   imageBaseUrl: string,
   approvedImages: PublicationPhoto[],
+  imageVariantSecret: string,
 ) {
   const listing = listingSnapshotForVehicle(db, organizationId, vehicleId)
   if (!listing) throw new Error('Veículo não encontrado para preparar a publicação.')
@@ -33,16 +38,17 @@ export function prepareListingForPublication(
   if (duplicate) throw new DuplicateListingHashError(duplicate.jobId)
   const rows = db
     .prepare(
-      'SELECT file_name fileName,photo_category category FROM vehicle_images WHERE organization_id=? AND vehicle_id=?',
+      'SELECT id,file_name fileName,photo_category category FROM vehicle_images WHERE organization_id=? AND vehicle_id=?',
     )
-    .all(organizationId, vehicleId) as Array<{ fileName: string; category: string }>
-  const categoriesByUrl = new Map(
-    rows.map((photo) => [imageBaseUrl + photo.fileName, photo.category]),
+    .all(organizationId, vehicleId) as Array<{ id: number; fileName: string; category: string }>
+  const photosByUrl = new Map(
+    rows.map((photo) => [imageBaseUrl + photo.fileName, photo]),
   )
-  const categorized = approvedImages.map((photo) => ({
-    ...photo,
-    category: categoriesByUrl.get(photo.url) || 'other',
-  }))
+  const categorized = approvedImages.map((photo) => {
+    const source = photosByUrl.get(photo.url)
+    if (!source) throw new Error('A seleção contém uma fotografia não pertencente ao veículo.')
+    return { ...photo, imageId: source.id, category: source.category }
+  })
   const reordered = pickRandomOrderedSubset(
     categorized,
     20,
@@ -50,7 +56,21 @@ export function prepareListingForPublication(
   )
   return {
     listingHash,
-    images: reordered.map(({ url, name, mimeType }) => ({ url, name, mimeType })),
+    content: listing,
+    images: reordered.map(({ imageId, name }) => ({
+      url:
+        imageBaseUrl +
+        `variants/${publicationJobId}/${imageId}/` +
+        signedPublicationPhotoToken(
+          imageVariantSecret,
+          organizationId,
+          publicationJobId,
+          imageId,
+        ) +
+        '.jpg',
+      name: name.replace(/\.[^.]+$/, '') + '-apresentacao.jpg',
+      mimeType: 'image/jpeg',
+    })),
   }
 }
 
