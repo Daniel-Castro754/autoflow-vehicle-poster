@@ -25,7 +25,9 @@ export function ProfileCapacityEditor({ api, accountId }: { api: Api; accountId:
   function apply(result: Capacity) {
     setCapacity(result)
     setDaily(result.dailyLimitOverride === null ? '' : String(result.dailyLimitOverride))
-    setMinutes(result.intervalMinutesOverride === null ? '' : String(result.intervalMinutesOverride))
+    setMinutes(
+      result.intervalMinutesOverride === null ? '' : String(result.intervalMinutesOverride),
+    )
   }
 
   useEffect(() => {
@@ -41,7 +43,8 @@ export function ProfileCapacityEditor({ api, accountId }: { api: Api; accountId:
         }
       })
       .catch((cause) => {
-        if (active) setError(cause instanceof Error ? cause.message : 'Falha ao consultar capacidade.')
+        if (active)
+          setError(cause instanceof Error ? cause.message : 'Falha ao consultar capacidade.')
       })
     return () => {
       active = false
@@ -76,30 +79,54 @@ export function ProfileCapacityEditor({ api, accountId }: { api: Api; accountId:
     <form className="profile-capacity" onSubmit={(event) => void save(event)}>
       <div className="profile-capacity-stats">
         <strong>Capacidade do perfil</strong>
-        <small>{capacity.used}/{capacity.dailyLimit} execuções hoje · {capacity.queuedToday} trabalhos criados hoje</small>
+        <small>
+          {capacity.used}/{capacity.dailyLimit} execuções hoje · {capacity.queuedToday} trabalhos
+          criados hoje
+        </small>
       </div>
       <div className="profile-capacity-fields">
         <label>
           Limite diário
-          <input type="number" min="1" max={capacity.organizationDailyLimit} value={daily}
+          <input
+            type="number"
+            min="1"
+            max={capacity.organizationDailyLimit}
+            value={daily}
             placeholder={String(capacity.organizationDailyLimit)}
-            onChange={(event) => setDaily(event.target.value)} disabled={loading} />
+            onChange={(event) => setDaily(event.target.value)}
+            disabled={loading}
+          />
         </label>
         <label>
           Intervalo (min)
-          <input type="number" min="0" max="1440" value={minutes}
+          <input
+            type="number"
+            min="0"
+            max="1440"
+            value={minutes}
             placeholder={String(capacity.organizationIntervalMinutes)}
-            onChange={(event) => setMinutes(event.target.value)} disabled={loading} />
+            onChange={(event) => setMinutes(event.target.value)}
+            disabled={loading}
+          />
         </label>
         <button type="submit" className="secondary" disabled={loading}>
           {loading ? 'Salvando...' : 'Salvar limites'}
         </button>
       </div>
-      <small>Campos vazios herdam os padrões da empresa. Esses limites são internos, não regras oficiais da plataforma.</small>
+      <small>
+        Campos vazios herdam os padrões da empresa. Esses limites são internos, não regras oficiais
+        da plataforma.
+      </small>
       {capacity.nextAllowedAt && (
-        <small>Próxima execução possível após {new Date(capacity.nextAllowedAt).toLocaleString('pt-BR')}.</small>
+        <small>
+          Próxima execução possível após {new Date(capacity.nextAllowedAt).toLocaleString('pt-BR')}.
+        </small>
       )}
-      {error && <small role="alert" className="profile-capacity-error">{error}</small>}
+      {error && (
+        <small role="alert" className="profile-capacity-error">
+          {error}
+        </small>
+      )}
       {message && <small role="status">{message}</small>}
     </form>
   )
