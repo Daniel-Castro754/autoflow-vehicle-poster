@@ -1459,6 +1459,7 @@ try {
       dataBase64: jpegBase64('late-confirmation'),
     }),
   })
+  await approveCurrentPhotos(lateVehicle.id, adminToken)
   const lateJob = await call('/publications', adminToken, {
     method: 'POST',
     body: JSON.stringify({ vehicleId: lateVehicle.id, accountId: second.id }),
