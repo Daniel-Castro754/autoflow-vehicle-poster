@@ -1,6 +1,6 @@
 import { servePanel } from './services/static-panel.ts'
 import { hashPassword, verifyPassword } from './lib/passwords.ts'
-import { open } from 'node:fs/promises'
+import { open, readFile } from 'node:fs/promises'
 import { pipeline } from 'node:stream/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
@@ -9,6 +9,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomBytes, timingSafeEqual, createHmac, createHash } from 'node:crypto'
 import { logger } from './lib/logger.ts'
+import { renderMildPhotoVariant, signedPublicationPhotoToken } from './services/image-manager.ts'
 import { startGroupCurationWorker } from './services/group-curation-worker.ts'
 import { startHealthMonitor, stopHealthMonitor } from './services/health-monitor.ts'
 import { createAutonomousScheduler } from './services/autonomous-scheduler.ts'
@@ -440,6 +441,57 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         return send(res, 503, { status: 'not_ready', timestamp: new Date().toISOString() })
       }
     }
+    // Signed, read-only image variants are derived from real approved photos.
+    const imageVariant = url.pathname.match(
+      /^\/uploads\/variants\/([1-9]\d*)\/([1-9]\d*)\/([a-f0-9]{64})\.jpg$/,
+    )
+    if (req.method === 'GET' && imageVariant) {
+      const jobId = Number(imageVariant[1])
+      const photoId = Number(imageVariant[2])
+      if (!Number.isSafeInteger(jobId) || !Number.isSafeInteger(photoId))
+        return send(res, 404, { error: 'Fotografia inválida.' })
+      const source = db
+        .prepare(
+          `SELECT i.organization_id organizationId,i.file_name fileName,
+            selection.photo_ids photoIds
+          FROM publication_jobs job
+          JOIN vehicle_images i ON i.organization_id=job.organization_id
+            AND i.vehicle_id=job.vehicle_id
+          JOIN vehicle_photo_selections selection ON
+            selection.organization_id=job.organization_id
+            AND selection.vehicle_id=job.vehicle_id
+          WHERE job.id=? AND i.id=? AND job.status!='canceled'`,
+        )
+        .get(jobId, photoId) as
+        | { organizationId: number; fileName: string; photoIds: string }
+        | undefined
+      if (!source) return send(res, 404, { error: 'Fotografia não encontrada.' })
+      const expected = signedPublicationPhotoToken(secret, source.organizationId, jobId, photoId)
+      if (!timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(imageVariant[3], 'hex')))
+        return send(res, 403, { error: 'Imagem não autorizada.' })
+      let approved: unknown
+      try {
+        approved = JSON.parse(source.photoIds)
+      } catch {
+        return send(res, 404, { error: 'Seleção aprovada inválida.' })
+      }
+      if (!Array.isArray(approved) || !approved.includes(photoId))
+        return send(res, 404, { error: 'Fotografia fora da seleção aprovada.' })
+      const original = await readFile(join(uploadsDir, source.fileName)).catch((error) => {
+        if (error.code === 'ENOENT') return null
+        throw error
+      })
+      if (!original) return send(res, 404, { error: 'Arquivo da fotografia não encontrado.' })
+      const rendered = await renderMildPhotoVariant(original, jobId, photoId)
+      res.writeHead(200, {
+        'Content-Type': 'image/jpeg',
+        'Content-Length': rendered.length,
+        'Cache-Control': 'private, max-age=86400, immutable',
+        'X-Content-Type-Options': 'nosniff',
+      })
+      res.end(rendered)
+      return
+    }
     const uploadFile = url.pathname.match(/^\/uploads\/([a-f0-9]{24}\.(?:jpg|jpeg|png|webp))$/)
     if (req.method === 'GET' && uploadFile) {
       const path = join(uploadsDir, uploadFile[1])
@@ -537,6 +589,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         refreshVehiclePublicationStatus,
         parseGroupTarget,
         imageBaseUrl,
+        imageVariantSecret: secret,
       })
       return
     }

@@ -33,7 +33,7 @@ for (const legacy of [true, false]) {
   }
   applyMigrations(migrationDb)
   applyMigrations(migrationDb)
-  assert.equal(migrationDb.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 23)
+  assert.equal(migrationDb.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 24)
   if (legacy)
     assert.equal(
       migrationDb.prepare('SELECT publish_attempt_at FROM publication_jobs WHERE id=1').get()
@@ -107,7 +107,9 @@ async function expectStatus(status, operation) {
   }
 }
 
+let fixtureVehicleNumber = 0
 async function createReadyVehicle(token, overrides = {}) {
+  fixtureVehicleNumber++
   const vehicle = await call('/vehicles', token, {
     method: 'POST',
     body: JSON.stringify({
@@ -125,7 +127,7 @@ async function createReadyVehicle(token, overrides = {}) {
       condition: 'Excelente',
       exteriorColor: 'Prateado',
       interiorColor: 'Preto',
-      description: 'Veículo para teste de segurança de publicação.',
+      description: `Veículo para teste de segurança de publicação ${fixtureVehicleNumber}.`,
       status: 'Pronto',
       ...overrides,
     }),

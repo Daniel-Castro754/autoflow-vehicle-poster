@@ -423,6 +423,28 @@ const migrations: Migration[] = [
     CREATE INDEX IF NOT EXISTS idx_integration_audit_credential_time
       ON integration_audit_events (credential_id,id DESC);`,
   },
+  {
+    version: 24,
+    columns: [['social_accounts', 'next_publication_allowed_at', 'TEXT']],
+    sql: `CREATE TABLE IF NOT EXISTS published_ads (
+      id INTEGER PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+      publication_job_id INTEGER NOT NULL REFERENCES publication_jobs(id) ON DELETE CASCADE,
+      listing_hash TEXT NOT NULL CHECK(length(listing_hash)=64),
+      status TEXT NOT NULL DEFAULT 'queued'
+        CHECK(status IN ('queued','published','removed')),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      published_at TEXT,
+      removed_at TEXT,
+      UNIQUE(organization_id,publication_job_id)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_published_ads_active_hash
+      ON published_ads(organization_id,listing_hash)
+      WHERE status IN ('queued','published');
+    CREATE INDEX IF NOT EXISTS idx_published_ads_vehicle
+      ON published_ads(organization_id,vehicle_id,status);`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

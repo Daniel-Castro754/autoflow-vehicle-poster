@@ -53,6 +53,10 @@ db.exec(`
     last_confirmed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,removed_at TEXT,
     UNIQUE(organization_id,publication_job_id),UNIQUE(organization_id,platform,external_listing_id)
   );
+  CREATE TABLE published_ads(
+    id INTEGER PRIMARY KEY,organization_id INTEGER,publication_job_id INTEGER,
+    listing_hash TEXT,status TEXT,published_at TEXT,removed_at TEXT
+  );
   INSERT INTO organizations VALUES (1),(2);
   INSERT INTO vehicles VALUES (10,1,2022,'Toyota','Corolla'),(20,2,2022,'Toyota','Corolla');
   INSERT INTO social_accounts VALUES (5,1,'Principal'),(6,2,'Outra empresa');
