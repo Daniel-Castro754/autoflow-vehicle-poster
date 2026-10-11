@@ -1,3 +1,4 @@
+import { handleIntegrationPhotoUpload } from './integration-photos.ts'
 import { applyVehicleDefaults, validateVehicleBody } from '../services/vehicle-input.ts'
 import { findVehicleIdentifierConflict, normalizeInventoryIdentifier, validateInventoryIdentifiers } from '../services/vehicle-import.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -13,7 +14,8 @@ type Dependencies = {
   db: DatabaseSync
   send: (res: ServerResponse, status: number, data: unknown) => void
   requestIdFor?: (value: string | string[] | undefined) => string
-  jsonBody: (req: IncomingMessage) => Promise<unknown>
+  jsonBody: (req: IncomingMessage, maxBytes?: number) => Promise<unknown>
+  uploadsDir: string
 }
 
 function audit(
@@ -71,6 +73,7 @@ export async function handleIntegrationRoute(
     send(res, 401, { error: 'Credencial de integração inválida, expirada ou revogada.' })
     return true
   }
+  if (await handleIntegrationPhotoUpload(req, res, url, auth, dependencies)) return true
   if (url.pathname === '/api/integration/v1/vehicles' && req.method === 'POST') {
     if (!requireScope(db, req, res, send, auth, 'vehicles:create')) return true
     const input = await dependencies.jsonBody(req)
