@@ -85,8 +85,7 @@ if (!restoreBootProbe) {
   applyMigrations(db)
   initializeCredentialVault(dataDir)
   migrateCredentials(db)
-}
-else registerSqliteFunctions(db)
+} else registerSqliteFunctions(db)
 const automationStatements = createAutomationStatements(db)
 const vehiclePageStatements = createVehiclePageStatements(db)
 const {
