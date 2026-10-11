@@ -1,3 +1,4 @@
+import { jpegBase64 } from './helpers/images.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
@@ -132,6 +133,50 @@ try {
         "SELECT COUNT(*) count FROM integration_audit_events WHERE organization_id=? AND action='vehicles:create' AND resource_id=?",
       )
       .get(org, draft.id).count > 0,
+  )
+  const photo = { mimeType: 'image/jpeg', dataBase64: jpegBase64('integration-photo-1') }
+  await assert.rejects(
+    writeApi(`/integration/v1/vehicles/${draft.id}/photos`, {
+      method: 'POST',
+      body: JSON.stringify(photo),
+    }),
+    (error) => error.status === 403,
+  )
+  const photoCredential = await create({
+    name: 'Upload de fotos',
+    scopes: ['photos:write'],
+  })
+  const photoApi = createApiClient(server.base, photoCredential.token)
+  const uploaded = await photoApi(`/integration/v1/vehicles/${draft.id}/photos`, {
+    method: 'POST',
+    body: JSON.stringify(photo),
+  })
+  assert.equal(uploaded.vehicleId, draft.id)
+  assert.equal(uploaded.requiresReview, true)
+  const duplicatePhoto = await photoApi(`/integration/v1/vehicles/${draft.id}/photos`, {
+    method: 'POST',
+    body: JSON.stringify(photo),
+  })
+  assert.equal(duplicatePhoto.duplicate, true)
+  assert.equal(duplicatePhoto.id, uploaded.id)
+  await assert.rejects(
+    photoApi(`/integration/v1/vehicles/${draft.id}/photos`, {
+      method: 'POST',
+      body: JSON.stringify({ ...photo, dataBase64: 'invalid' }),
+    }),
+    (error) => error.status === 400,
+  )
+  await assert.rejects(
+    photoApi('/integration/v1/vehicles/999999999/photos', {
+      method: 'POST',
+      body: JSON.stringify(photo),
+    }),
+    (error) => error.status === 404,
+  )
+  assert.equal(
+    db.prepare('SELECT COUNT(*) count FROM vehicle_images WHERE vehicle_id=?').get(draft.id)
+      .count,
+    1,
   )
   const foreignOrg = Number(
     db.prepare("INSERT INTO organizations(name) VALUES('Outro tenant')").run().lastInsertRowid,
