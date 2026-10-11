@@ -87,6 +87,14 @@ try {
         dataBase64: jpegBase64(`phase1-${n}`),
       }),
     })
+    const photos = await api(`/vehicles/${vehicle.id}/photos/curation`)
+    await api(`/vehicles/${vehicle.id}/photos/selection`, {
+      method: 'POST',
+      body: JSON.stringify({
+        photoIds: photos.recommendation,
+        fingerprint: photos.fingerprint,
+      }),
+    })
     return vehicle.id
   }
 
