@@ -332,6 +332,22 @@ const migrations: Migration[] = [
     CREATE INDEX IF NOT EXISTS idx_listing_text_previews_scope
       ON listing_text_previews (organization_id,user_id,vehicle_id,expires_at);`,
   },
+  {
+    version: 20,
+    columns: [
+      ['vehicle_images', 'photo_category', "TEXT NOT NULL DEFAULT 'other'"],
+    ],
+    sql: `CREATE TABLE IF NOT EXISTS vehicle_photo_selections (
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+      photo_ids TEXT NOT NULL,
+      inventory_fingerprint TEXT NOT NULL,
+      approved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (organization_id,vehicle_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_vehicle_photo_selections_org
+      ON vehicle_photo_selections (organization_id,vehicle_id);`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {
