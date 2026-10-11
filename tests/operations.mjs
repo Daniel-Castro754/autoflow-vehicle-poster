@@ -8,7 +8,10 @@ import { applyMigrations } from '../server/database/migrations.ts'
 import { coordinateAutopilot, skippedAutopilot } from '../server/services/autopilot-coordinator.ts'
 import { createAutonomousScheduler } from '../server/services/autonomous-scheduler.ts'
 import { runAutopilotPipeline } from '../server/services/ai-agent.ts'
-import { calculateListingHash, listingSnapshotForVehicle } from '../server/services/duplicate-checker.ts'
+import {
+  calculateListingHash,
+  listingSnapshotForVehicle,
+} from '../server/services/duplicate-checker.ts'
 import { operationalHealth } from '../server/services/operational-health.ts'
 import { warnSlowExecutions } from '../server/services/proactive-alerts.ts'
 import {
