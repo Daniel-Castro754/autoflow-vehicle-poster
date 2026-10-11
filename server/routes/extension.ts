@@ -330,8 +330,8 @@ export async function handleExtensionRoute(
     if (!vehicle) return send(res, 404, { error: 'Veículo não encontrado.' })
     let images: ReturnType<typeof publicationPhotoPayload>
     let preparedListingHash: string
-    let preparedTitle = ''
-    let preparedDescription = ''
+    let preparedTitle: string
+    let preparedDescription: string
     try {
       images = publicationPhotoPayload(db, auth.organizationId, job.vehicleId, imageBaseUrl)
       const prepared = prepareListingForPublication(
