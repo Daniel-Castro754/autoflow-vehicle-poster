@@ -454,9 +454,9 @@ export async function handlePublicationReadRoute(
       })
     const job = db
       .prepare(
-        `SELECT id,status,started_at startedAt,lease_expires_at leaseExpiresAt,publish_attempt_at publishAttemptAt,fill_report fillReport FROM publication_jobs WHERE id=? AND organization_id=?`,
+        `SELECT id,status,started_at startedAt,lease_expires_at leaseExpiresAt,publish_attempt_at publishAttemptAt,fill_report fillReport,retry_count retryCount,COALESCE(max_retries,(SELECT max_retries FROM organization_settings WHERE organization_id=?),3) maxRetries FROM publication_jobs WHERE id=? AND organization_id=?`,
       )
-      .get(Number(recoverPublication[1]), auth.organizationId) as
+      .get(auth.organizationId, Number(recoverPublication[1]), auth.organizationId) as
       | {
           id: number
           status: string
@@ -464,6 +464,8 @@ export async function handlePublicationReadRoute(
           leaseExpiresAt?: string
           publishAttemptAt?: string
           fillReport?: string
+          retryCount: number
+          maxRetries: number
         }
       | undefined
     if (!job) return send(res, 404, { error: 'Trabalho não encontrado.' })
@@ -516,17 +518,33 @@ export async function handlePublicationReadRoute(
       }
       return send(res, 200, { ok: true, status: 'awaiting_confirmation', ambiguous: true })
     }
+    const exhausted = job.retryCount >= job.maxRetries
     db.exec('BEGIN')
     try {
-      db.prepare(
-        "UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',last_lease_token=NULL,publish_attempt_at=NULL,started_at=NULL,filled_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
-      ).run(job.id, auth.organizationId)
-      recordJobEvent(auth.organizationId, job.id, 'stalled_recovered', auth.userId, {
-        fromStatus: 'filling',
-        toStatus: 'pending',
-        elapsedMinutes,
-        leaseExpired: true,
-      })
+      if (exhausted) {
+        db.prepare(
+          "UPDATE publication_jobs SET status='error',paused=0,extension_visible=1,error_code='Limite de recuperação automática esgotado.',last_lease_token=NULL,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+        ).run(job.id, auth.organizationId)
+        recordJobEvent(auth.organizationId, job.id, 'stalled_exhausted', auth.userId, {
+          elapsedMinutes,
+          retryCount: job.retryCount,
+          maxRetries: job.maxRetries,
+          recoveredBy: 'manual',
+        })
+      } else {
+        db.prepare(
+          "UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',last_lease_token=NULL,publish_attempt_at=NULL,started_at=NULL,filled_at=NULL,retry_count=retry_count+1,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+        ).run(job.id, auth.organizationId)
+        recordJobEvent(auth.organizationId, job.id, 'stalled_recovered', auth.userId, {
+          fromStatus: 'filling',
+          toStatus: 'pending',
+          elapsedMinutes,
+          leaseExpired: true,
+          retryCount: job.retryCount + 1,
+          maxRetries: job.maxRetries,
+          recoveredBy: 'manual',
+        })
+      }
       db.exec('COMMIT')
     } catch (error) {
       db.exec('ROLLBACK')
@@ -534,13 +552,16 @@ export async function handlePublicationReadRoute(
     }
     return send(res, 200, {
       ok: true,
-      status: 'pending',
+      status: exhausted ? 'error' : 'pending',
       recovery: {
         jobId: job.id,
         fromStatus: 'filling',
-        toStatus: 'pending',
+        toStatus: exhausted ? 'error' : 'pending',
         elapsedMinutes,
         leaseExpired: true,
+        exhausted,
+        retryCount: exhausted ? job.retryCount : job.retryCount + 1,
+        maxRetries: job.maxRetries,
       },
     })
   }
