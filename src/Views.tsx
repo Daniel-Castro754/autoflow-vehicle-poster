@@ -141,6 +141,9 @@ type JobEventDetails = {
   imageCount?: number
   selectedGroups?: number
   elapsedMinutes?: number
+  retryCount?: number
+  maxRetries?: number
+  recoveredBy?: string
   status?: string
 }
 type FillReport = {
