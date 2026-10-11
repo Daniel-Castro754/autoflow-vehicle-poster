@@ -22,6 +22,7 @@ import {
 import { FieldLabel, HelpTip } from './HelpTip'
 import { DrawerFocusGuard } from './DrawerFocusGuard'
 import { ListingVariantsPanel } from './ListingVariantsPanel'
+import { PhotoCurationPanel } from './PhotoCurationPanel'
 import {
   BODY_TYPES,
   FUEL_TYPES,
@@ -1667,6 +1668,13 @@ function VehicleDrawer({
                   }
                 />
               </label>
+            )}
+            {vehicle && (
+              <PhotoCurationPanel
+                api={api}
+                vehicleId={vehicle.id}
+                photoVersion={images.map((image) => image.id).join(',')}
+              />
             )}
             {files.length > 0 && (
               <div className="pending-files">
