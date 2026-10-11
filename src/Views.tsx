@@ -3861,7 +3861,9 @@ export function SettingsView({
                       onKeyDown={(event) => {
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault()
-                          event.currentTarget.querySelector<HTMLInputElement>('input[type="file"]')?.click()
+                          event.currentTarget
+                            .querySelector<HTMLInputElement>('input[type="file"]')
+                            ?.click()
                         }
                       }}
                     >
