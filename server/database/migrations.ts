@@ -354,6 +354,38 @@ const migrations: Migration[] = [
     ],
     sql: '',
   },
+  {
+    version: 22,
+    columns: [],
+    sql: `CREATE TABLE IF NOT EXISTS publication_listing_ledger (
+      id INTEGER PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+      publication_job_id INTEGER NOT NULL REFERENCES publication_jobs(id) ON DELETE CASCADE,
+      social_account_id INTEGER REFERENCES social_accounts(id),
+      platform TEXT NOT NULL DEFAULT 'facebook_marketplace',
+      external_listing_id TEXT NOT NULL DEFAULT '',
+      canonical_url TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','removed')),
+      first_confirmed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_confirmed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      removed_at TEXT,
+      UNIQUE (organization_id,publication_job_id),
+      UNIQUE (organization_id,platform,external_listing_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_listing_ledger_vehicle_status
+      ON publication_listing_ledger (organization_id,vehicle_id,status,last_confirmed_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_listing_ledger_account_status
+      ON publication_listing_ledger (organization_id,social_account_id,status,last_confirmed_at DESC);
+    INSERT OR IGNORE INTO publication_listing_ledger
+      (organization_id,vehicle_id,publication_job_id,social_account_id,external_listing_id,canonical_url,status,first_confirmed_at,last_confirmed_at,removed_at)
+    SELECT organization_id,vehicle_id,id,social_account_id,'',result_url,
+      CASE WHEN status='removed' THEN 'removed' ELSE 'active' END,
+      COALESCE(filled_at,updated_at,created_at),COALESCE(updated_at,filled_at,created_at),
+      CASE WHEN status='removed' THEN COALESCE(removed_at,updated_at) ELSE NULL END
+    FROM publication_jobs
+    WHERE status IN ('completed','removed') AND COALESCE(result_url,'')!='';`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {
