@@ -30,7 +30,10 @@ for (const rule of [
   '.theme-dark .group-manager .group-manager-action--primary',
   '.group-manager .group-manager-action:focus-within',
   '@media (max-width: 460px)',
-]) assert(css.includes(rule), 'Missing style: ' + rule)
+])
+  assert(css.includes(rule), 'Missing style: ' + rule)
 assert(ui.includes('setGroupEditsPending(true)'), 'Unsaved group edits must remain tracked')
-assert(ui.includes("previewDigest"), 'Reordering must still require a preview')
-console.log('✓ Group toolbar: all actions, preview, limits, CSV accessibility and responsive styling retained')
+assert(ui.includes('previewDigest'), 'Reordering must still require a preview')
+console.log(
+  '✓ Group toolbar: all actions, preview, limits, CSV accessibility and responsive styling retained',
+)

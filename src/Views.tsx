@@ -3822,7 +3822,11 @@ export function SettingsView({
                       de cima para baixo
                     </small>
                   </div>
-                  <div className="group-manager-actions" role="group" aria-label="Ações do gerenciador de grupos">
+                  <div
+                    className="group-manager-actions"
+                    role="group"
+                    aria-label="Ações do gerenciador de grupos"
+                  >
                     <button
                       type="button"
                       className="group-manager-action group-manager-action--outline"
