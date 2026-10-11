@@ -445,6 +445,11 @@ const migrations: Migration[] = [
     CREATE INDEX IF NOT EXISTS idx_published_ads_vehicle
       ON published_ads(organization_id,vehicle_id,status);`,
   },
+  {
+    version: 25,
+    columns: [['publication_jobs', 'variant_seed', 'INTEGER']],
+    sql: '',
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

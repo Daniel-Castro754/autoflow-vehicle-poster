@@ -20,6 +20,7 @@ export function listingSnapshotForVehicle(
   db: DatabaseSync,
   organizationId: number,
   vehicleId: number,
+  variantSeed?: number | string,
 ): ListingContent | undefined {
   const facts = db
     .prepare(
@@ -30,9 +31,17 @@ export function listingSnapshotForVehicle(
        FROM vehicles v WHERE v.id=? AND v.organization_id=?`,
     )
     .get(vehicleId, organizationId) as
-    | { id: number; year: number; make: string; model: string; trim: string; price: number; description: string }
+    | {
+        id: number
+        year: number
+        make: string
+        model: string
+        trim: string
+        price: number
+        description: string
+      }
     | undefined
-  return facts ? renderVehicleListingCopy(facts) : undefined
+  return facts ? renderVehicleListingCopy(facts, variantSeed) : undefined
 }
 
 export function calculateListingHash(content: ListingContent): string {
@@ -47,7 +56,9 @@ export function calculateListingHash(content: ListingContent): string {
   const title = normalized(content.title)
   const description = normalized(content.description)
   if (!title || !description) throw new Error('O anúncio precisa de título e descrição.')
-  return createHash('sha256').update(JSON.stringify([title, description, price])).digest('hex')
+  return createHash('sha256')
+    .update(JSON.stringify([title, description, price]))
+    .digest('hex')
 }
 
 export function findDuplicateListingHash(
@@ -62,9 +73,7 @@ export function findDuplicateListingHash(
        WHERE organization_id=? AND listing_hash=? AND publication_job_id!=?
          AND status IN ('queued','published') LIMIT 1`,
     )
-    .get(organizationId, hash, excludeJobId) as
-    | { jobId: number; status: string }
-    | undefined
+    .get(organizationId, hash, excludeJobId) as { jobId: number; status: string } | undefined
 }
 
 // Must be called inside the same BEGIN IMMEDIATE transaction as job creation.
@@ -82,7 +91,8 @@ export function reserveListingHash(
     )
     .get(organizationId, publicationJobId) as { listingHash: string } | undefined
   if (existing) {
-    if (existing.listingHash !== hash) throw new Error('Os dados do anúncio mudaram após entrar na fila.')
+    if (existing.listingHash !== hash)
+      throw new Error('Os dados do anúncio mudaram após entrar na fila.')
     return
   }
   const conflict = findDuplicateListingHash(db, organizationId, hash, publicationJobId)
