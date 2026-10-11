@@ -2276,6 +2276,19 @@ function jobEventPresentation(event: JobEvent) {
       tone: 'warning',
       icon: '↻',
     },
+    stalled_exhausted: {
+      title: 'Recuperação esgotada',
+      detail: `O limite de recuperação foi atingido (${d.retryCount ?? '—'}/${d.maxRetries ?? '—'}). Revisão manual necessária.`,
+      tone: 'error',
+      icon: '!',
+    },
+    stalled_publish_ambiguous: {
+      title: 'Publicação possivelmente concluída',
+      detail:
+        'A execução foi interrompida após possível publicação. Confira o Facebook antes de liberar uma nova tentativa.',
+      tone: 'warning',
+      icon: '!',
+    },
   }
   return (
     values[event.eventType] || {
