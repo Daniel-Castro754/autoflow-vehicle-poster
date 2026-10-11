@@ -101,9 +101,27 @@ recordConfirmedListing(db, {
 })
 assert.equal(activeListingEvidence(db, 1, 20), undefined, 'Ledger evidence must be tenant-scoped.')
 
-const noUrlJob = Number(db.prepare("INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status) VALUES (1,10,5,'completed')").run().lastInsertRowid)
-recordConfirmedListing(db, { organizationId: 1, vehicleId: 10, publicationJobId: noUrlJob, socialAccountId: 5 })
-assert.equal(db.prepare('SELECT external_listing_id externalId FROM publication_listing_ledger WHERE publication_job_id=?').get(noUrlJob).externalId, null)
+const noUrlJob = Number(
+  db
+    .prepare(
+      "INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status) VALUES (1,10,5,'completed')",
+    )
+    .run().lastInsertRowid,
+)
+recordConfirmedListing(db, {
+  organizationId: 1,
+  vehicleId: 10,
+  publicationJobId: noUrlJob,
+  socialAccountId: 5,
+})
+assert.equal(
+  db
+    .prepare(
+      'SELECT external_listing_id externalId FROM publication_listing_ledger WHERE publication_job_id=?',
+    )
+    .get(noUrlJob).externalId,
+  null,
+)
 
 console.log(
   '✓ Listing ledger: canonical URL, durable duplicate evidence, removal and tenant isolation.',
