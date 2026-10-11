@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Activity, ArrowRight, RefreshCcw, ShieldCheck } from 'lucide-react'
+import { Activity, ArrowRight, ChevronDown, ClipboardCheck, DatabaseBackup, FolderSearch, RefreshCcw, RotateCcw, ShieldCheck } from 'lucide-react'
 
 type Status = 'ok' | 'attention' | 'inactive' | 'unknown'
 type Section = 'security' | 'integrations' | 'automation'
@@ -247,7 +247,7 @@ export function ReadinessDashboard({
   }, [api])
 
   return (
-    <section className="content" aria-label="Saúde e autonomia">
+    <section className="content readiness-dashboard" aria-label="Saúde e autonomia">
       <div className="title-row">
         <div>
           <span className="page-kicker">DIAGNÓSTICO DE CONFIGURAÇÃO</span>
@@ -255,12 +255,12 @@ export function ReadinessDashboard({
           <p>Verifique integrações, segurança e prontidão básica antes de executar automações.</p>
         </div>
         <button
-          className="secondary"
+          className="readiness-button readiness-button--outline"
           type="button"
           disabled={refreshing}
           onClick={() => void load()}
         >
-          <RefreshCcw size={16} /> {refreshing ? 'Atualizando...' : 'Atualizar diagnóstico'}
+          <RefreshCcw size={16} aria-hidden="true" /> {refreshing ? 'Atualizando...' : 'Atualizar diagnóstico'}
         </button>
       </div>
       {error && (
@@ -334,8 +334,8 @@ export function ReadinessDashboard({
                 </span>
               </div>
               {Object.values(reviewed).some(Boolean) && (
-                <button className="secondary" type="button" onClick={() => setReviewed({})}>
-                  Limpar marcações
+                <button className="readiness-button readiness-button--quiet" type="button" onClick={() => setReviewed({})}>
+                  <RotateCcw size={15} aria-hidden="true" /> Limpar marcações
                 </button>
               )}
             </div>
@@ -353,38 +353,31 @@ export function ReadinessDashboard({
                 return (
                   <div
                     key={guide.id}
-                    style={{
-                      border: '1px solid var(--line, #dce5e4)',
-                      borderRadius: 12,
-                      padding: 16,
-                    }}
+                    className={'readiness-guide' + (opened ? ' readiness-guide--open' : '')}
                   >
                     <button
                       type="button"
-                      className="secondary"
+                      className="readiness-guide-trigger"
                       aria-expanded={opened}
                       aria-controls={'remediation-detail-' + guide.id}
-                      style={{
-                        width: '100%',
-                        textAlign: 'left',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        gap: 12,
-                      }}
                       onClick={() => setExpandedGuide(opened ? null : guide.id)}
                     >
-                      <span>
-                        <strong>
-                          {index + 1}. {guide.title}
-                        </strong>
-                        <small style={{ display: 'block', marginTop: 5 }}>
-                          {guidancePriority[guide.priority]} · {guide.summary}
-                        </small>
+                      <span className="readiness-guide-index" aria-hidden="true">
+                        {String(index + 1).padStart(2, '0')}
                       </span>
-                      <span aria-hidden="true">{opened ? '−' : '+'}</span>
+                      <span className="readiness-guide-copy">
+                        <strong>{guide.title}</strong>
+                        <small>{guide.summary}</small>
+                      </span>
+                      <span
+                        className={'readiness-guide-priority readiness-guide-priority--' + guide.priority}
+                      >
+                        {guidancePriority[guide.priority]}
+                      </span>
+                      <ChevronDown className="readiness-guide-chevron" size={19} aria-hidden="true" />
                     </button>
                     {opened && (
-                      <div id={'remediation-detail-' + guide.id} style={{ marginTop: 15 }}>
+                      <div id={'remediation-detail-' + guide.id} className="readiness-guide-detail">
                         <p>
                           <strong>Por que revisar:</strong> {guide.reason}
                         </p>
@@ -423,15 +416,11 @@ export function ReadinessDashboard({
                           <strong>Limite de segurança:</strong> {guide.safety}
                         </p>
                         {guide.checkId === 'backup' && (
-                          <div
-                            style={{
-                              border: '1px solid var(--line, #dce5e4)',
-                              borderRadius: 12,
-                              padding: 14,
-                              marginBottom: 14,
-                            }}
-                          >
-                            <strong>Verificação e ensaio de restauração de backups</strong>
+                          <div className="readiness-backup-panel">
+                            <h3 className="readiness-backup-heading">
+                              <DatabaseBackup size={18} aria-hidden="true" />
+                              Verificação e ensaio de restauração de backups
+                            </h3>
                             <p className="health-note">
                               Procura somente na pasta de backups do servidor. A verificação confere
                               hashes, SQLite, fotos e cofre. O ensaio separado copia o backup para
@@ -440,14 +429,14 @@ export function ReadinessDashboard({
                               que o DPAPI pode ser aberto em outro usuário Windows.
                             </p>
                             <button
-                              className="secondary"
+                              className="readiness-button readiness-button--outline"
                               type="button"
                               disabled={
                                 backupLoading || Boolean(backupVerifying) || Boolean(restoring)
                               }
                               onClick={() => void listBackups()}
                             >
-                              <RefreshCcw size={14} />
+                              <FolderSearch size={16} aria-hidden="true" />
                               {backupLoading
                                 ? 'Buscando cópias...'
                                 : 'Localizar cópias disponíveis'}
@@ -458,48 +447,40 @@ export function ReadinessDashboard({
                               </p>
                             )}
                             {backupCopies && (
-                              <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+                              <div className="readiness-backup-list">
                                 {!backupCopies.length && (
                                   <p>Nenhum backup reconhecido na pasta configurada.</p>
                                 )}
                                 {backupCopies.map((backup) => (
-                                  <div
-                                    key={backup.id}
-                                    style={{
-                                      border: '1px solid var(--line, #dce5e4)',
-                                      borderRadius: 9,
-                                      padding: 10,
-                                      display: 'flex',
-                                      justifyContent: 'space-between',
-                                      flexWrap: 'wrap',
-                                      gap: 10,
-                                      alignItems: 'center',
-                                    }}
-                                  >
-                                    <div>
+                                  <div key={backup.id} className="readiness-backup-row">
+                                    <div className="readiness-backup-info">
                                       <strong>{displayMoment(backup.createdAt)}</strong>
-                                      <small style={{ display: 'block' }}>{backup.id}</small>
+                                      <small>{backup.id}</small>
                                     </div>
+                                    <div className="readiness-backup-actions">
                                     <button
-                                      className="secondary"
+                                      className="readiness-button readiness-button--outline"
                                       type="button"
                                       disabled={Boolean(backupVerifying) || Boolean(restoring)}
                                       onClick={() => void verifyBackup(backup.id)}
                                     >
+                                      <ClipboardCheck size={16} aria-hidden="true" />
                                       {backupVerifying === backup.id
                                         ? 'Verificando...'
                                         : 'Verificar integridade'}
                                     </button>
                                     <button
                                       type="button"
-                                      className="secondary"
+                                      className="readiness-button readiness-button--primary"
                                       disabled={Boolean(backupVerifying) || Boolean(restoring)}
                                       onClick={() => void restoreTest(backup.id)}
                                     >
+                                      <DatabaseBackup size={16} aria-hidden="true" />
                                       {restoring === backup.id
                                         ? 'Testando restauração...'
                                         : 'Ensaiar restauração isolada'}
                                     </button>
+                                    </div>
                                   </div>
                                 ))}
                               </div>
@@ -528,28 +509,21 @@ export function ReadinessDashboard({
                             )}
                           </div>
                         )}
-                        <div
-                          style={{
-                            display: 'flex',
-                            flexWrap: 'wrap',
-                            alignItems: 'center',
-                            gap: 10,
-                          }}
-                        >
+                        <div className="readiness-guide-actions">
                           <button
                             type="button"
-                            className="secondary"
+                            className="readiness-button readiness-button--primary"
                             onClick={() => navigate(guide.destination)}
                           >
-                            {guide.destinationLabel} <ArrowRight size={15} />
+                            {guide.destinationLabel} <ArrowRight size={16} aria-hidden="true" />
                           </button>
                           <button
                             type="button"
-                            className="secondary"
+                            className="readiness-button readiness-button--outline"
                             disabled={refreshing}
                             onClick={() => void load()}
                           >
-                            <RefreshCcw size={14} /> Reavaliar diagnóstico
+                            <RefreshCcw size={15} aria-hidden="true" /> Reavaliar diagnóstico
                           </button>
                         </div>
                       </div>
@@ -613,10 +587,10 @@ export function ReadinessDashboard({
                       <p style={{ marginTop: 10, marginBottom: 14, fontSize: 14 }}>{item.detail}</p>
                       <button
                         type="button"
-                        className="secondary"
+                        className="readiness-button readiness-button--quiet"
                         onClick={() => navigate(item.page)}
                       >
-                        Ver {item.page.toLowerCase()} <ArrowRight size={14} />
+                        Ver {item.page.toLowerCase()} <ArrowRight size={16} aria-hidden="true" />
                       </button>
                     </div>
                   ))}
