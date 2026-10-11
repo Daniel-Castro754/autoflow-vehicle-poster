@@ -731,7 +731,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       imageUrl = new URL(String(message.url || ''))
       if (
         imageUrl.origin !== API_ORIGIN ||
-        !/^\/uploads\/[a-f0-9]{24}\.(?:jpg|jpeg|png|webp)$/.test(imageUrl.pathname)
+        !(
+          /^\/uploads\/[a-f0-9]{24}\.(?:jpg|jpeg|png|webp)$/.test(imageUrl.pathname) ||
+          /^\/uploads\/variants\/[1-9]\d*\/[1-9]\d*\/[a-f0-9]{64}\.jpg$/.test(imageUrl.pathname)
+        )
       )
         throw new Error('Endereço de imagem inválido.')
     } catch (error) {
