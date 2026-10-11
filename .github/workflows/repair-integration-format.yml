@@ -23,6 +23,7 @@ jobs:
       - name: Apply repository Prettier
         run: |
           npx prettier --write \
+            docs/INTEGRATION_API.md \
             server/routes/integration.ts \
             server/routes/integration-photos.ts \
             server/routes/integration-reports.ts \
@@ -41,7 +42,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add server/routes/integration.ts server/routes/integration-photos.ts server/routes/integration-reports.ts tests/integration-credentials.mjs
+          git add docs/INTEGRATION_API.md server/routes/integration.ts server/routes/integration-photos.ts server/routes/integration-reports.ts tests/integration-credentials.mjs
           git commit -m "style: apply Prettier to integration API files"
           git push origin "$BRANCH"
           gh pr create --base main --head "$BRANCH" \
