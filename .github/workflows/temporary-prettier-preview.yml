@@ -1,0 +1,38 @@
+name: Temporary Prettier Preview
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  formatting:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Show formatted contents without modifying repository
+        run: |
+          npx prettier --write server/routes/ai.ts server/services/listing-generator.ts server/services/listing-text-previews.ts src/final-polish.css src/listing-variants.css src/ListingVariantsPanel.tsx tests/listing-generator.mjs
+          node <<'NODE'
+          const fs = require('node:fs')
+          const paths = [
+            'server/routes/ai.ts',
+            'server/services/listing-generator.ts',
+            'server/services/listing-text-previews.ts',
+            'src/final-polish.css',
+            'src/listing-variants.css',
+            'src/ListingVariantsPanel.tsx',
+            'tests/listing-generator.mjs',
+          ]
+          for (const path of paths) {
+            console.log('<<<PRETTIER_BEGIN:' + path + '>>>')
+            const content = fs.readFileSync(path).toString('base64')
+            for (const line of content.match(/.{1,120}/g) || []) console.log(line)
+            console.log('<<<PRETTIER_END:' + path + '>>>')
+          }
+          NODE
