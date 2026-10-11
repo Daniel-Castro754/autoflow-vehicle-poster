@@ -1,0 +1,27 @@
+name: Temporary Stage4 Formatter
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  formatting:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: |
+          npx prettier --write server/routes/publication-management.ts server/routes/publication-reads.ts server/services/publication-ledger.ts tests/publication-ledger.mjs
+          node <<'NODE'
+          const fs=require('node:fs')
+          for(const path of ["server/routes/publication-management.ts","server/routes/publication-reads.ts","server/services/publication-ledger.ts","tests/publication-ledger.mjs"]){
+            console.log('<<<BEGIN:'+path+'>>>')
+            const x=fs.readFileSync(path).toString('base64')
+            for(const c of x.match(/.{1,120}/g)||[]) console.log(c)
+            console.log('<<<END:'+path+'>>>')
+          }
+          NODE
