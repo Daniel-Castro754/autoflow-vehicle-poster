@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { vehicleOptions } from './vehicle-input.ts'
+import { activeListingEvidence } from './publication-ledger.ts'
 
 type FailureDisposition = 'retry' | 'intervention' | 'terminal'
 type FailureCategory = 'transient' | 'authentication' | 'safety' | 'validation' | 'unknown'
@@ -80,6 +81,14 @@ export function publicationDuplicateRisk(
   vehicleId: number,
   excludeJobId = 0,
 ) {
+  const listing = activeListingEvidence(db, organizationId, vehicleId, excludeJobId)
+  if (listing)
+    return {
+      type: 'active_external_listing',
+      ...listing,
+      message: `Este veículo possui um anúncio externo ainda registrado como ativo no perfil ${listing.accountLabel}. Confirme a remoção do anúncio anterior antes de publicar novamente.`,
+    }
+
   const sameVehicle = db
     .prepare(
       `SELECT j.id jobId,j.status,COALESCE(a.label,'Perfil não definido') accountLabel
