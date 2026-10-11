@@ -22,6 +22,7 @@ assert(toolbar.includes('disabled={groups.length >= 2000}'))
 assert(toolbar.includes('role="group"'))
 assert(toolbar.includes('aria-label="Importar arquivo CSV de grupos"'))
 assert(toolbar.includes('group-manager-csv-input'))
+assert(toolbar.includes("event.target.value = ''"), 'CSV picker must reset after selection')
 for (const rule of [
   '.group-manager-actions',
   '.group-manager .group-manager-action--primary',
