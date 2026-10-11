@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto'
 import { getAiCredentials } from './credential-vault.ts'
 import type { DatabaseSync } from 'node:sqlite'
 import {
@@ -660,7 +661,15 @@ async function planAutopilotJobs(
       if (vehicle.description !== candidate.description) continue
       if (publicationReadinessIssues(vehicle, vehicle.imageCount).length) continue
       if (publicationDuplicateRisk(db, organizationId, vehicle.id)) continue
-      const listingContent = listingSnapshotForVehicle(db, organizationId, vehicle.id)
+      // Keep automated jobs consistent with manually created publications:
+      // their editorial snapshot and reserved hash use the same persisted seed.
+      const variantSeed = randomInt(1, 2_147_483_646)
+      const listingContent = listingSnapshotForVehicle(
+        db,
+        organizationId,
+        vehicle.id,
+        variantSeed,
+      )
       if (!listingContent) continue
       const listingHash = calculateListingHash(listingContent)
       if (findDuplicateListingHash(db, organizationId, listingHash)) continue
@@ -708,8 +717,8 @@ async function planAutopilotJobs(
       const insert = db
         .prepare(
           `INSERT INTO publication_jobs (
-        organization_id, vehicle_id, social_account_id, status, scheduled_at, queue_priority, retry_count, max_retries
-      ) VALUES (?, ?, ?, 'pending', ?, ?, 0, MAX(1,MIN(10,COALESCE((SELECT max_retries FROM organization_settings WHERE organization_id=?),3))))`,
+        organization_id, vehicle_id, social_account_id, status, scheduled_at, queue_priority, retry_count, max_retries, variant_seed
+      ) VALUES (?, ?, ?, 'pending', ?, ?, 0, MAX(1,MIN(10,COALESCE((SELECT max_retries FROM organization_settings WHERE organization_id=?),3))), ?)`,
         )
         .run(
           organizationId,
@@ -718,6 +727,7 @@ async function planAutopilotJobs(
           optimal.isoString,
           priorityRow.val,
           organizationId,
+          variantSeed,
         )
 
       const jobId = Number(insert.lastInsertRowid)
