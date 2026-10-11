@@ -107,7 +107,9 @@ async function expectStatus(status, operation) {
   }
 }
 
+let fixtureVehicleNumber = 0
 async function createReadyVehicle(token, overrides = {}) {
+  fixtureVehicleNumber++
   const vehicle = await call('/vehicles', token, {
     method: 'POST',
     body: JSON.stringify({
@@ -125,7 +127,7 @@ async function createReadyVehicle(token, overrides = {}) {
       condition: 'Excelente',
       exteriorColor: 'Prateado',
       interiorColor: 'Preto',
-      description: 'Veículo para teste de segurança de publicação.',
+      description: `Veículo para teste de segurança de publicação ${fixtureVehicleNumber}.`,
       status: 'Pronto',
       ...overrides,
     }),
