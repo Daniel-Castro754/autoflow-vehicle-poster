@@ -92,6 +92,13 @@ try {
     name: 'Cadastro de rascunhos',
     scopes: ['vehicles:create', 'vehicles:read'],
   })
+  const writerStatusCredential = await create({
+    name: 'Status com escrita',
+    scopes: ['status:read', 'vehicles:create'],
+  })
+  const writerStatusApi = createApiClient(server.base, writerStatusCredential.token)
+  const writerStatus = await writerStatusApi('/integration/v1/status')
+  assert.equal(writerStatus.readOnly, false)
   const writeApi = createApiClient(server.base, writer.token)
   const draft = await writeApi('/integration/v1/vehicles', {
     method: 'POST',

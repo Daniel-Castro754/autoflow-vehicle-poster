@@ -131,7 +131,7 @@ export async function handleIntegrationRoute(
       status: 'ready',
       apiVersion: 'v1',
       integration: auth.name,
-      readOnly: true,
+      readOnly: !integrationHasScope(auth, 'vehicles:create') && !integrationHasScope(auth, 'photos:write'),
       scopes: [...auth.scopes].sort(),
     })
     return true
