@@ -1,7 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite'
 
 export function canonicalMarketplaceListing(value: unknown) {
-  const raw = String(value || '').trim().slice(0, 1000)
+  const raw = String(value || '')
+    .trim()
+    .slice(0, 1000)
   if (!raw) return { externalListingId: '', canonicalUrl: '' }
   try {
     const url = new URL(raw)
@@ -68,8 +70,9 @@ export function activeListingEvidence(
   vehicleId: number,
   excludeJobId = 0,
 ) {
-  return db.prepare(
-    `SELECT ledger.publication_job_id jobId,ledger.external_listing_id externalListingId,
+  return db
+    .prepare(
+      `SELECT ledger.publication_job_id jobId,ledger.external_listing_id externalListingId,
       ledger.canonical_url canonicalUrl,ledger.last_confirmed_at lastConfirmedAt,
       COALESCE(account.label,'Perfil não definido') accountLabel
     FROM publication_listing_ledger ledger
@@ -77,5 +80,6 @@ export function activeListingEvidence(
     WHERE ledger.organization_id=? AND ledger.vehicle_id=? AND ledger.publication_job_id!=?
       AND ledger.status='active'
     ORDER BY datetime(ledger.last_confirmed_at) DESC,ledger.id DESC LIMIT 1`,
-  ).get(organizationId, vehicleId, excludeJobId) as Record<string, unknown> | undefined
+    )
+    .get(organizationId, vehicleId, excludeJobId) as Record<string, unknown> | undefined
 }
