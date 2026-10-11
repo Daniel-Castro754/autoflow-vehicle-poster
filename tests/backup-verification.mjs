@@ -34,10 +34,19 @@ try {
       method: 'POST',
       body: JSON.stringify({ backupId: id }),
     })
+  const drill = async (api, id, confirmation = 'TESTAR_RESTAURACAO_ISOLADA') =>
+    api('/health/backups/restore-drill', {
+      method: 'POST',
+      body: JSON.stringify({ backupId: id, confirmation }),
+    })
+  const sandboxFolders = () => readdirSync(tmpdir())
+    .filter((name) => name.startsWith('autoflow-restore-check-')).sort()
 
   await assert.rejects(anonymous('/health/backups'), (error) => error.status === 401)
   await assert.rejects(seller('/health/backups'), (error) => error.status === 403)
   await assert.rejects(verify(seller, 'no-backup'), (error) => error.status === 403)
+  await assert.rejects(drill(seller, 'no-backup'), (error) => error.status === 403)
+  await assert.rejects(drill(anonymous, 'no-backup'), (error) => error.status === 401)
   assert.deepEqual((await admin('/health/backups')).backups, [])
 
   const first = await createBackup(server.dataDir, backupRoot)
@@ -60,6 +69,21 @@ try {
   assert.equal(digest(liveDb), before)
   assert.equal(digest(join(first, 'autoflow.db')), savedDb)
   assert.equal(readdirSync(join(first, 'uploads')).length, 0)
+  await assert.rejects(drill(admin, id, 'NOT_CONFIRMED'), (error) => error.status === 400)
+  const sandboxesBefore = sandboxFolders()
+  const exercise = await drill(admin, id)
+  assert.equal(exercise.id, id)
+  assert.equal(exercise.restoredFiles, true)
+  assert.equal(exercise.databaseOpened, true)
+  assert.equal(exercise.applicationStarted, false)
+  assert.equal(exercise.dpapiValidated, false)
+  assert.equal(exercise.temporaryRemoved, true)
+  assert.equal(exercise.organizationCount, 1)
+  assert(exercise.accountCount >= 2)
+  assert.equal(exercise.imageCount, 0)
+  assert.deepEqual(sandboxFolders(), sandboxesBefore, 'restoration sandboxes must be removed')
+  assert.equal(digest(liveDb), before, 'live database must never change during a drill')
+  assert.equal(digest(join(first, 'autoflow.db')), savedDb, 'source backup must remain unchanged')
 
   for (const invalid of [
     '../autoflow.db',
@@ -69,6 +93,7 @@ try {
     'autoflow-backup-2026-01-01T00-00-00.000Z/../',
   ]) {
     await assert.rejects(verify(admin, invalid), (error) => error.status === 400)
+    await assert.rejects(drill(admin, invalid), (error) => error.status === 400)
   }
   // Link-created backup must not be served, even with a valid-looking name.
   if (process.platform !== 'win32') {
@@ -80,6 +105,8 @@ try {
 
   writeFileSync(join(first, 'autoflow.db'), Buffer.from('tampered-backup-file'))
   await assert.rejects(verify(admin, id), (error) => error.status === 422)
+  await assert.rejects(drill(admin, id), (error) => error.status === 422)
+  assert.deepEqual(sandboxFolders(), sandboxesBefore)
   assert.equal(digest(liveDb), before)
 
   // Global server backups contain all tenants: fail closed on multi-tenant instances.
@@ -90,6 +117,7 @@ try {
   db.prepare('INSERT INTO organization_settings(organization_id) VALUES(?)').run(foreign)
   await assert.rejects(admin('/health/backups'), (error) => error.status === 403)
   await assert.rejects(verify(admin, id), (error) => error.status === 403)
+  await assert.rejects(drill(admin, id), (error) => error.status === 403)
   console.log(
     '✓ Backup verification: admin-only, no restore/write, symlink and traversal protection, corruption, multi-tenant denial',
   )
