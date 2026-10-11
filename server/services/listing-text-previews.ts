@@ -34,15 +34,19 @@ function fingerprint(vehicle: SavedVehicle) {
 
 function assertEditable(db: DatabaseSync, org: number, vehicle: SavedVehicle | undefined) {
   if (!vehicle || vehicle.soldAt || !['Rascunho', 'Pronto'].includes(vehicle.status))
-    throw new Error('Somente veículos disponíveis e ainda não publicados podem receber novas descrições.')
+    throw new Error(
+      'Somente veículos disponíveis e ainda não publicados podem receber novas descrições.',
+    )
   const existing = db
     .prepare(
-      "SELECT 1 FROM publication_jobs WHERE organization_id=? AND vehicle_id=? " +
-      "AND status IN ('pending','filling','error','awaiting_confirmation','completed') LIMIT 1",
+      'SELECT 1 FROM publication_jobs WHERE organization_id=? AND vehicle_id=? ' +
+        "AND status IN ('pending','filling','error','awaiting_confirmation','completed') LIMIT 1",
     )
     .get(org, vehicle.id)
   if (existing)
-    throw new Error('Este veículo já possui publicação ativa ou concluída. Resolva a publicação anterior.')
+    throw new Error(
+      'Este veículo já possui publicação ativa ou concluída. Resolva a publicação anterior.',
+    )
 }
 
 export function prepareListingTextPreview(
@@ -59,7 +63,7 @@ export function prepareListingTextPreview(
   const id = randomUUID()
   const preview: StoredPreview = { vehicleId, fingerprint: fingerprint(vehicle!), variants }
   db.prepare(
-    "INSERT INTO listing_text_previews (id,organization_id,user_id,vehicle_id,payload,expires_at) " +
+    'INSERT INTO listing_text_previews (id,organization_id,user_id,vehicle_id,payload,expires_at) ' +
       "VALUES (?,?,?,?,?,datetime('now','+15 minutes'))",
   ).run(id, organizationId, userId, vehicleId, JSON.stringify(preview))
   return {
@@ -79,8 +83,7 @@ export function approveListingTextPreview(
   previewId: string,
   variantId: number,
 ) {
-  if (!/^[0-9a-f-]{36}$/i.test(previewId))
-    throw new Error('Identificador da prévia inválido.')
+  if (!/^[0-9a-f-]{36}$/i.test(previewId)) throw new Error('Identificador da prévia inválido.')
   if (!Number.isInteger(variantId) || variantId < 1 || variantId > 3)
     throw new Error('Escolha uma das versões apresentadas.')
   db.exec('BEGIN IMMEDIATE')
@@ -105,10 +108,12 @@ export function approveListingTextPreview(
     db.prepare(
       'UPDATE vehicles SET description=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?',
     ).run(chosen.description, preview.vehicleId, organizationId)
-    const used = db.prepare(
-      'UPDATE listing_text_previews SET consumed_at=CURRENT_TIMESTAMP ' +
-        'WHERE id=? AND organization_id=? AND user_id=? AND consumed_at IS NULL',
-    ).run(previewId, organizationId, userId)
+    const used = db
+      .prepare(
+        'UPDATE listing_text_previews SET consumed_at=CURRENT_TIMESTAMP ' +
+          'WHERE id=? AND organization_id=? AND user_id=? AND consumed_at IS NULL',
+      )
+      .run(previewId, organizationId, userId)
     if (used.changes !== 1) throw new Error('Prévia já utilizada.')
     db.exec('COMMIT')
     return { ok: true, vehicleId: preview.vehicleId, approvedVariantId: variantId }
