@@ -537,7 +537,7 @@ export async function handleOrganizationRoute(
     db.prepare(
       'UPDATE social_accounts SET daily_limit_override=?,execution_interval_minutes_override=? ' +
         'WHERE id=? AND organization_id=?',
-    ).run(body.dailyLimitOverride, body.intervalMinutesOverride, accountId, auth.organizationId)
+    ).run(body.dailyLimitOverride as number | null, body.intervalMinutesOverride as number | null, accountId, auth.organizationId)
     res.setHeader('Cache-Control', 'no-store')
     send(res, 200, profileCapacity(db, auth.organizationId, accountId))
     return true
