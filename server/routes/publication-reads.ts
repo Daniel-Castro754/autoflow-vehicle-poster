@@ -435,7 +435,15 @@ export async function handlePublicationReadRoute(
         Date.parse(String(b.createdAt)) - Date.parse(String(a.createdAt)) ||
         Number(b.id) - Number(a.id),
     )
-    return send(res, 200, { job, events })
+    const listing =
+      db
+        .prepare(
+          `SELECT external_listing_id externalListingId,canonical_url canonicalUrl,status,
+        first_confirmed_at firstConfirmedAt,last_confirmed_at lastConfirmedAt,removed_at removedAt
+      FROM publication_listing_ledger WHERE organization_id=? AND publication_job_id=?`,
+        )
+        .get(auth.organizationId, job.id) || null
+    return send(res, 200, { job, events, listing })
   }
   const recoverPublication = url.pathname.match(/^\/api\/publications\/(\d+)\/recover$/)
   if (req.method === 'POST' && recoverPublication) {
