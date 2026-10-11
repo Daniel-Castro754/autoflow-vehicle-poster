@@ -43,11 +43,11 @@ export function operationalHealth(db: DatabaseSync, organizationId: number) {
     FROM publication_job_events WHERE organization_id=? AND created_at>=datetime('now','-1 day')`,
     )
     .get(organizationId) as {
-      recoveredCount: number
-      exhaustedRecoveryCount: number
-      ambiguousRecoveryCount: number
-      warningCount: number
-    }
+    recoveredCount: number
+    exhaustedRecoveryCount: number
+    ambiguousRecoveryCount: number
+    warningCount: number
+  }
   const performance = db
     .prepare(
       `SELECT
