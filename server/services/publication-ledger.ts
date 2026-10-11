@@ -1,4 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
+import { confirmPublishedHash, markPublishedHashRemoved } from './duplicate-checker.ts'
+import { publishWithRandomDelay } from './publication-service.ts'
 
 export function canonicalMarketplaceListing(value: unknown) {
   const raw = String(value || '')
@@ -66,6 +68,17 @@ export function recordConfirmedListing(
     storedExternalId,
     listing.canonicalUrl,
   )
+  // Confirmation is idempotent: only the first confirmed transition starts a
+  // new cooldown. Never reject a confirmed external result because of a timer.
+  if (confirmPublishedHash(db, input.organizationId, input.publicationJobId)) {
+    if (input.socialAccountId != null) {
+      try {
+        publishWithRandomDelay(db, input.organizationId, input.socialAccountId)
+      } catch {
+        // Preserve the confirmed listing even if the account was deleted.
+      }
+    }
+  }
   return listing
 }
 
@@ -79,6 +92,7 @@ export function markListingRemoved(
       SET status='removed',removed_at=CURRENT_TIMESTAMP,last_confirmed_at=CURRENT_TIMESTAMP
       WHERE organization_id=? AND publication_job_id=?`,
   ).run(organizationId, publicationJobId)
+  markPublishedHashRemoved(db, organizationId, publicationJobId)
 }
 
 export function activeListingEvidence(
