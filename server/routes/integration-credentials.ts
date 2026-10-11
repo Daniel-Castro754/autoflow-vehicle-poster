@@ -45,7 +45,12 @@ export async function handleIntegrationCredentialsRoute(
     return true
   }
   if (url.pathname === base && req.method === 'POST') {
-    const body = (await jsonBody(req)) as Record<string, unknown>
+    const input = await jsonBody(req)
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      send(res, 400, { error: 'Envie um objeto JSON com nome e escopos.' })
+      return true
+    }
+    const body = input as Record<string, unknown>
     const name = typeof body.name === 'string' ? body.name.trim() : ''
     const scopes = body.scopes
     if (
