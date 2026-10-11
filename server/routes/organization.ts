@@ -501,9 +501,9 @@ export async function handleOrganizationRoute(
   const capacityRoute = url.pathname.match(/^\/api\/social-accounts\/(\d+)\/capacity$/)
   if (capacityRoute && (req.method === 'GET' || req.method === 'PATCH')) {
     const accountId = Number(capacityRoute[1])
-    const account = db.prepare(
-      'SELECT id,user_id userId FROM social_accounts WHERE id=? AND organization_id=?',
-    ).get(accountId, auth.organizationId) as { id: number; userId: number } | undefined
+    const account = db
+      .prepare('SELECT id,user_id userId FROM social_accounts WHERE id=? AND organization_id=?')
+      .get(accountId, auth.organizationId) as { id: number; userId: number } | undefined
     if (!account) {
       send(res, 404, { error: 'Perfil de publicação não encontrado.' })
       return true
@@ -523,10 +523,11 @@ export async function handleOrganizationRoute(
     }
     const body = (await jsonBody(req)) as Record<string, unknown> | null
     const validOverride = (value: unknown, min: number, max: number) =>
-      value === null || (typeof value === 'number' && Number.isInteger(value) &&
-        value >= min && value <= max)
+      value === null ||
+      (typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max)
     if (
-      !body || !Object.hasOwn(body, 'dailyLimitOverride') ||
+      !body ||
+      !Object.hasOwn(body, 'dailyLimitOverride') ||
       !Object.hasOwn(body, 'intervalMinutesOverride') ||
       !validOverride(body.dailyLimitOverride, 1, 50) ||
       !validOverride(body.intervalMinutesOverride, 0, 1440)
@@ -537,7 +538,12 @@ export async function handleOrganizationRoute(
     db.prepare(
       'UPDATE social_accounts SET daily_limit_override=?,execution_interval_minutes_override=? ' +
         'WHERE id=? AND organization_id=?',
-    ).run(body.dailyLimitOverride as number | null, body.intervalMinutesOverride as number | null, accountId, auth.organizationId)
+    ).run(
+      body.dailyLimitOverride as number | null,
+      body.intervalMinutesOverride as number | null,
+      accountId,
+      auth.organizationId,
+    )
     res.setHeader('Cache-Control', 'no-store')
     send(res, 200, profileCapacity(db, auth.organizationId, accountId))
     return true
