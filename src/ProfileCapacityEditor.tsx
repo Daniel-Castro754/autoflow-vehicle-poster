@@ -24,8 +24,8 @@ export function ProfileCapacityEditor({ api, accountId }: { api: Api; accountId:
 
   function apply(result: Capacity) {
     setCapacity(result)
-    setDaily(result.dailyLimitOverride == null ? '' : String(result.dailyLimitOverride))
-    setMinutes(result.intervalMinutesOverride == null ? '' : String(result.intervalMinutesOverride))
+    setDaily(result.dailyLimitOverride === null ? '' : String(result.dailyLimitOverride))
+    setMinutes(result.intervalMinutesOverride === null ? '' : String(result.intervalMinutesOverride))
   }
 
   useEffect(() => {
@@ -34,9 +34,9 @@ export function ProfileCapacityEditor({ api, accountId }: { api: Api; accountId:
       .then((result) => {
         if (active) {
           setCapacity(result)
-          setDaily(result.dailyLimitOverride == null ? '' : String(result.dailyLimitOverride))
+          setDaily(result.dailyLimitOverride === null ? '' : String(result.dailyLimitOverride))
           setMinutes(
-            result.intervalMinutesOverride == null ? '' : String(result.intervalMinutesOverride),
+            result.intervalMinutesOverride === null ? '' : String(result.intervalMinutesOverride),
           )
         }
       })
