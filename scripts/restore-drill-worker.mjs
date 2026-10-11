@@ -6,10 +6,11 @@ import { DatabaseSync } from 'node:sqlite'
 import { restoreBackup, verifyBackup } from './backup.mjs'
 
 const directory = process.argv[2]
+const sandboxParent = process.argv[3]
 let temporary = null
 let response
 try {
-  if (!directory || process.argv.length !== 3) throw new Error('INVALID_BACKUP')
+  if (!directory || !sandboxParent || process.argv.length !== 4) throw new Error('INVALID_BACKUP')
   // Validate the input first, before allocating staging space or copying a file.
   const manifest = verifyBackup(directory)
   const totalBytes = manifest.database.bytes +
@@ -23,7 +24,7 @@ try {
 
   // The destination is ALWAYS an OS-generated temporary directory and cannot
   // be chosen by the browser or the caller. Never start an AutoFlow server on it.
-  temporary = mkdtempSync(join(tmpdir(), 'autoflow-restore-drill-'))
+  temporary = mkdtempSync(join(sandboxParent, 'restoration-'))
   const destination = join(temporary, 'isolated-restoration')
   restoreBackup(directory, destination)
   const databaseFile = join(destination, 'autoflow.db')
