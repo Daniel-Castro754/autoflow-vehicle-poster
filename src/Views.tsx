@@ -36,6 +36,7 @@ import {
   Sparkles,
   Sun,
   TrendingUp,
+  Upload,
   Users,
   WalletCards,
   Wifi,
@@ -3827,7 +3828,7 @@ export function SettingsView({
               </label>
               <div className="group-list-field group-manager">
                 <div className="group-manager-head">
-                  <div>
+                  <div className="group-manager-copy">
                     <FieldLabel help="Cadastre nome e URL do Facebook. O ID extraído da URL é mais estável que o nome e reduz falhas quando o grupo for renomeado.">
                       Gerenciador de grupos
                     </FieldLabel>
@@ -3837,27 +3838,10 @@ export function SettingsView({
                       de cima para baixo
                     </small>
                   </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
+                  <div className="group-manager-actions" role="group" aria-label="Ações dos grupos">
                     <button
                       type="button"
-                      disabled={curating || !groups.length}
-                      onClick={runAutoCurate}
-                      title="Exibe uma prévia e altera apenas a ordem dos grupos"
-                    >
-                      <Sparkles size={14} />
-                      {curating ? 'Reorganizando...' : 'Reordenar grupos'}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={curating}
-                      onClick={() => void undoGroupCuration()}
-                      title="Desfazer a última reorganização, se nenhum grupo foi modificado depois"
-                    >
-                      <RotateCcw size={14} />
-                      Desfazer ordem
-                    </button>
-                    <button
-                      type="button"
+                      className="group-action group-action-primary"
                       disabled={groups.length >= 2000}
                       onClick={() => {
                         setGroupEditsPending(true)
@@ -3867,10 +3851,21 @@ export function SettingsView({
                         ])
                       }}
                     >
-                      <Plus />
+                      <Plus size={16} />
                       Adicionar grupo
                     </button>
-                    <label className="secondary" style={{ cursor: 'pointer', padding: 8 }}>
+                    <label
+                      className="group-action group-action-secondary group-import-action"
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          event.currentTarget.querySelector('input[type="file"]')?.click()
+                        }
+                      }}
+                    >
+                      <Upload size={16} />
                       Importar CSV
                       <input
                         type="file"
@@ -3882,6 +3877,27 @@ export function SettingsView({
                         }}
                       />
                     </label>
+                    <span className="group-actions-divider" aria-hidden="true" />
+                    <button
+                      type="button"
+                      className="group-action group-action-quiet"
+                      disabled={curating}
+                      onClick={() => void undoGroupCuration()}
+                      title="Desfazer a última reorganização, se nenhum grupo foi modificado depois"
+                    >
+                      <RotateCcw size={16} />
+                      Desfazer ordem
+                    </button>
+                    <button
+                      type="button"
+                      className="group-action group-action-secondary"
+                      disabled={curating || !groups.length}
+                      onClick={runAutoCurate}
+                      title="Exibe uma prévia e altera apenas a ordem dos grupos"
+                    >
+                      <Sparkles size={16} />
+                      {curating ? 'Reorganizando...' : 'Reordenar grupos'}
+                    </button>
                   </div>
                 </div>
                 <div className="managed-groups">
