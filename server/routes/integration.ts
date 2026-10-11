@@ -1,3 +1,5 @@
+import { applyVehicleDefaults, validateVehicleBody } from '../services/vehicle-input.ts'
+import { findVehicleIdentifierConflict, normalizeInventoryIdentifier, validateInventoryIdentifiers } from '../services/vehicle-import.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import {
@@ -11,6 +13,7 @@ type Dependencies = {
   db: DatabaseSync
   send: (res: ServerResponse, status: number, data: unknown) => void
   requestIdFor?: (value: string | string[] | undefined) => string
+  jsonBody: (req: IncomingMessage) => Promise<unknown>
 }
 
 function audit(
@@ -55,7 +58,7 @@ export function isIntegrationRoute(url: URL) {
   return url.pathname === '/api/integration/v1' || url.pathname.startsWith('/api/integration/v1/')
 }
 
-export function handleIntegrationRoute(
+export async function handleIntegrationRoute(
   req: IncomingMessage,
   res: ServerResponse,
   url: URL,
@@ -63,13 +66,57 @@ export function handleIntegrationRoute(
 ) {
   const { db, send } = dependencies
   if (!isIntegrationRoute(url)) return false
-  if (req.method !== 'GET') {
-    send(res, 405, { error: 'A primeira versão da Integration API é somente leitura.' })
-    return true
-  }
   const auth = readIntegrationAuth(db, req)
   if (!auth) {
     send(res, 401, { error: 'Credencial de integração inválida, expirada ou revogada.' })
+    return true
+  }
+  if (url.pathname === '/api/integration/v1/vehicles' && req.method === 'POST') {
+    if (!requireScope(db, req, res, send, auth, 'vehicles:create')) return true
+    const input = await dependencies.jsonBody(req)
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      send(res, 400, { error: 'Informe os dados do veículo.' })
+      return true
+    }
+    const body = input as Record<string, unknown>
+    const vehicle = applyVehicleDefaults(db, { ...body, status: 'Rascunho' }, auth.organizationId)
+    const stockCode = normalizeInventoryIdentifier(vehicle.stockCode)
+    const vin = normalizeInventoryIdentifier(vehicle.vin)
+    const error = validateInventoryIdentifiers(stockCode, vin) || validateVehicleBody(vehicle)
+    if (error) {
+      send(res, 400, { error })
+      return true
+    }
+    const conflict = findVehicleIdentifierConflict(db, auth.organizationId, stockCode, vin)
+    if (conflict) {
+      send(res, 409, { error: 'Identificador de estoque ou chassi já cadastrado.', duplicateVehicleId: conflict.id })
+      return true
+    }
+    const created = db.prepare(
+      `INSERT INTO vehicles
+       (organization_id,year,make,model,trim,price,km,stock_code,vin,status,assigned_user_id,
+        vehicle_type,location,transmission,fuel_type,body_type,exterior_color,interior_color,
+        vehicle_condition,description)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(
+      auth.organizationId, Number(vehicle.year), String(vehicle.make), String(vehicle.model).trim(),
+      String(vehicle.trim || ''), Number(vehicle.price), Number(vehicle.km), stockCode, vin,
+      'Rascunho', auth.createdBy, String(vehicle.vehicleType), String(vehicle.location).trim(),
+      String(vehicle.transmission), String(vehicle.fuelType), String(vehicle.bodyType),
+      String(vehicle.exteriorColor), String(vehicle.interiorColor), String(vehicle.condition),
+      String(vehicle.description).trim(),
+    )
+    const id = Number(created.lastInsertRowid)
+    db.prepare(
+      `INSERT INTO integration_audit_events
+       (organization_id,credential_id,actor_user_id,action,resource_type,resource_id,outcome)
+       VALUES (?,?,?,'vehicles:create','vehicle',?,'allowed')`,
+    ).run(auth.organizationId, auth.credentialId, auth.createdBy, id)
+    send(res, 201, { id, status: 'Rascunho', requiresReview: true })
+    return true
+  }
+  if (req.method !== 'GET') {
+    send(res, 405, { error: 'Método não permitido nesta rota.' })
     return true
   }
   if (url.pathname === '/api/integration/v1' || url.pathname === '/api/integration/v1/status') {
