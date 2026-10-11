@@ -26,6 +26,7 @@ export function findBestAccountForVehicle(
     .prepare(
       `
       SELECT a.id, a.label, a.browser_profile browserProfile, a.status, a.last_seen_at lastSeenAt,
+        MIN(COALESCE(a.daily_limit_override,?),?) profileDailyLimit,
         COALESCE((
           SELECT COUNT(*) FROM publication_jobs j
           WHERE j.organization_id = a.organization_id AND j.social_account_id = a.id
@@ -40,13 +41,14 @@ export function findBestAccountForVehicle(
       ORDER BY a.label
     `,
     )
-    .all(vehicleId, organizationId) as Array<{
+    .all(dailyLimit, dailyLimit, vehicleId, organizationId) as Array<{
     id: number
     label: string
     browserProfile?: string
     status: string
     lastSeenAt?: string
     todayCount: number
+    profileDailyLimit: number
     busy: number
   }>
 
@@ -56,12 +58,13 @@ export function findBestAccountForVehicle(
   const eligible: AvailableAccount[] = []
 
   for (const acc of accounts) {
-    if (acc.todayCount >= dailyLimit) continue
+    const limit = Math.max(1, Number(acc.profileDailyLimit) || dailyLimit)
+    if (acc.todayCount >= limit) continue
 
     if (acc.busy) continue
 
     // Calcula score: menor volume hoje e maior recência ganham prioridade
-    const capacityRemaining = dailyLimit - acc.todayCount
+    const capacityRemaining = limit - acc.todayCount
     let recencyScore = 0
     if (acc.lastSeenAt) {
       const elapsed =
@@ -78,7 +81,7 @@ export function findBestAccountForVehicle(
     const score = capacityRemaining * 10 + recencyScore
     eligible.push({
       ...acc,
-      dailyLimit,
+      dailyLimit: limit,
       score,
     })
   }
