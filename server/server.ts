@@ -497,9 +497,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       })
     )
       return
-    if (await handlePhotoCurationRoute(req, res, url, auth, {
-      db, send, jsonBody, imageBaseUrl, canWriteVehicle,
-    })) return
+    if (
+      await handlePhotoCurationRoute(req, res, url, auth, {
+        db,
+        send,
+        jsonBody,
+        imageBaseUrl,
+        canWriteVehicle,
+      })
+    )
+      return
     if (isExtensionRoute(req, url)) {
       await handleExtensionRoute(req, res, url, auth, {
         db,
