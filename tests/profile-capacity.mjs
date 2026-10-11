@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
+import { registerSqliteFunctions } from '../server/database/schema.ts'
 import { join } from 'node:path'
 import { startTestServer, createApiClient } from './helpers/server.mjs'
 import { profileCapacity, profileLimits } from '../server/services/profile-capacity.ts'
@@ -8,6 +9,7 @@ import { findBestAccountForVehicle } from '../server/services/session-manager.ts
 
 const testServer = await startTestServer()
 const db = new DatabaseSync(join(testServer.dataDir, 'autoflow.db'))
+registerSqliteFunctions(db)
 try {
   const anonymous = createApiClient(testServer.base, '')
   const login = await anonymous('/auth/login', {
