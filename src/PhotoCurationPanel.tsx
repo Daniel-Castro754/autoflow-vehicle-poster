@@ -62,21 +62,28 @@ export function PhotoCurationPanel({
       .catch((cause) => {
         if (live) setError(cause instanceof Error ? cause.message : 'Erro ao carregar fotos.')
       })
-    return () => { live = false }
+    return () => {
+      live = false
+    }
   }, [api, vehicleId, photoVersion])
 
   async function run(work: () => Promise<void>) {
     setBusy(true)
     setError('')
     setMessage('')
-    try { await work() } catch (cause) {
+    try {
+      await work()
+    } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Não foi possível salvar as fotos.')
-    } finally { setBusy(false) }
+    } finally {
+      setBusy(false)
+    }
   }
 
   function togglePhoto(id: number, checked: boolean) {
     setSelectedIds((current) =>
-      checked ? [...current, id].slice(0, 20) : current.filter((item) => item !== id))
+      checked ? [...current, id].slice(0, 20) : current.filter((item) => item !== id),
+    )
   }
   function setCover(id: number) {
     setSelectedIds((current) => [id, ...current.filter((item) => item !== id)])
@@ -100,7 +107,8 @@ export function PhotoCurationPanel({
         Selecione a capa e confirme antes de alterar as fotos enviadas.
       </p>
       {data.approved && !data.needsReview && (
-        <p className="photo-curation-status"><ShieldCheck size={15} />
+        <p className="photo-curation-status">
+          <ShieldCheck size={15} />
           Seleção aprovada para a publicação.
         </p>
       )}
@@ -110,12 +118,20 @@ export function PhotoCurationPanel({
         </p>
       )}
       <div className="photo-curation-actions">
-        <button type="button" className="secondary" disabled={busy}
-          onClick={() => setSelectedIds(data.recommendation)}>
+        <button
+          type="button"
+          className="secondary"
+          disabled={busy}
+          onClick={() => setSelectedIds(data.recommendation)}
+        >
           <RefreshCw size={14} /> Sugerir {data.preferredCount}
         </button>
-        <button type="button" className="secondary" disabled={busy}
-          onClick={() => setSelectedIds(data.images.map((image) => image.id))}>
+        <button
+          type="button"
+          className="secondary"
+          disabled={busy}
+          onClick={() => setSelectedIds(data.images.map((image) => image.id))}
+        >
           Selecionar todas
         </button>
       </div>
@@ -125,28 +141,43 @@ export function PhotoCurationPanel({
             <img src={image.url} alt={image.originalName} />
             <div>
               <label>
-                <input type="checkbox" checked={selectedIds.includes(image.id)} disabled={busy}
-                  onChange={(event) => togglePhoto(image.id, event.target.checked)} />
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(image.id)}
+                  disabled={busy}
+                  onChange={(event) => togglePhoto(image.id, event.target.checked)}
+                />
                 <span>{image.originalName}</span>
               </label>
               <label className="photo-curation-cover">
-                <input type="radio" name="photo-cover" checked={selectedIds[0] === image.id}
+                <input
+                  type="radio"
+                  name="photo-cover"
+                  checked={selectedIds[0] === image.id}
                   disabled={busy || !selectedIds.includes(image.id)}
-                  onChange={() => setCover(image.id)} />
+                  onChange={() => setCover(image.id)}
+                />
                 Capa
               </label>
-              <select aria-label={'Categoria de ' + image.originalName} value={image.category}
+              <select
+                aria-label={'Categoria de ' + image.originalName}
+                value={image.category}
                 disabled={busy}
-                onChange={(event) => void run(async () => {
-                  await api('/vehicles/' + vehicleId + '/photos/' + image.id + '/category', {
-                    method: 'PATCH',
-                    body: JSON.stringify({ category: event.target.value }),
+                onChange={(event) =>
+                  void run(async () => {
+                    await api('/vehicles/' + vehicleId + '/photos/' + image.id + '/category', {
+                      method: 'PATCH',
+                      body: JSON.stringify({ category: event.target.value }),
+                    })
+                    await refresh()
+                    setMessage('Categoria atualizada. Revise a seleção antes de aprovar.')
                   })
-                  await refresh()
-                  setMessage('Categoria atualizada. Revise a seleção antes de aprovar.')
-                })}>
+                }
+              >
                 {CATEGORIES.map(([value, label]) => (
-                  <option value={value} key={value}>{label}</option>
+                  <option value={value} key={value}>
+                    {label}
+                  </option>
                 ))}
               </select>
             </div>
@@ -155,29 +186,54 @@ export function PhotoCurationPanel({
       </div>
       <div className="photo-curation-preview">
         <strong>Ordem da publicação</strong>
-        <p>{selected.map((photo, index) => (index === 0 ? 'Capa: ' : '') + photo.originalName).join(' → ') || 'Nenhuma foto selecionada.'}</p>
+        <p>
+          {selected
+            .map((photo, index) => (index === 0 ? 'Capa: ' : '') + photo.originalName)
+            .join(' → ') || 'Nenhuma foto selecionada.'}
+        </p>
       </div>
-      {error && <p className="photo-curation-error" role="alert">{error}</p>}
-      {message && <p className="photo-curation-status" role="status"><Check size={15} />{message}</p>}
+      {error && (
+        <p className="photo-curation-error" role="alert">
+          {error}
+        </p>
+      )}
+      {message && (
+        <p className="photo-curation-status" role="status">
+          <Check size={15} />
+          {message}
+        </p>
+      )}
       <div className="photo-curation-actions">
-        <button type="button" className="primary" disabled={busy || !selectedIds.length}
-          onClick={() => void run(async () => {
-            await api('/vehicles/' + vehicleId + '/photos/selection', {
-              method: 'POST',
-              body: JSON.stringify({ photoIds: selectedIds, fingerprint: data.fingerprint }),
+        <button
+          type="button"
+          className="primary"
+          disabled={busy || !selectedIds.length}
+          onClick={() =>
+            void run(async () => {
+              await api('/vehicles/' + vehicleId + '/photos/selection', {
+                method: 'POST',
+                body: JSON.stringify({ photoIds: selectedIds, fingerprint: data.fingerprint }),
+              })
+              await refresh()
+              setMessage('Seleção de fotos aprovada.')
             })
-            await refresh()
-            setMessage('Seleção de fotos aprovada.')
-          })}>
+          }
+        >
           <Check size={15} /> Aprovar seleção
         </button>
         {data.enabled && (
-          <button type="button" className="secondary" disabled={busy}
-            onClick={() => void run(async () => {
-              await api('/vehicles/' + vehicleId + '/photos/selection', { method: 'DELETE' })
-              await refresh()
-              setMessage('Curadoria desativada. O fluxo anterior envia as fotos cadastradas.')
-            })}>
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={() =>
+              void run(async () => {
+                await api('/vehicles/' + vehicleId + '/photos/selection', { method: 'DELETE' })
+                await refresh()
+                setMessage('Curadoria desativada. O fluxo anterior envia as fotos cadastradas.')
+              })
+            }
+          >
             Usar todas (modo anterior)
           </button>
         )}
