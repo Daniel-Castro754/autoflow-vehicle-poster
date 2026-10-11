@@ -100,12 +100,20 @@ async function verifySafeBoot(directory) {
   } finally {
     if (!exited) child.kill()
     // Wait until the server process is stopped before deleting the restored DB.
-    await Promise.race([
-      exit,
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('PROBE_SHUTDOWN_TIMEOUT')), 5000),
-      ),
-    ])
+    let shutdownTimer
+    try {
+      await Promise.race([
+        exit,
+        new Promise((_, reject) => {
+          shutdownTimer = setTimeout(
+            () => reject(new Error('PROBE_SHUTDOWN_TIMEOUT')),
+            5000,
+          )
+        }),
+      ])
+    } finally {
+      clearTimeout(shutdownTimer)
+    }
   }
 }
 
