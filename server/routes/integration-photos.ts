@@ -4,10 +4,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { validImageContent } from '../services/vehicle-input.ts'
-import {
-  integrationHasScope,
-  type IntegrationAuth,
-} from '../services/integration-auth.ts'
+import { integrationHasScope, type IntegrationAuth } from '../services/integration-auth.ts'
 
 type Dependencies = {
   db: DatabaseSync
@@ -112,8 +109,7 @@ export async function handleIntegrationPhotoUpload(
     const position = db
       .prepare('SELECT COALESCE(MAX(position),-1)+1 next FROM vehicle_images WHERE vehicle_id=?')
       .get(vehicleId) as { next: number }
-    const originalName =
-      typeof body.name === 'string' ? body.name.slice(0, 200) : fileName
+    const originalName = typeof body.name === 'string' ? body.name.slice(0, 200) : fileName
     const created = db
       .prepare(
         'INSERT INTO vehicle_images (organization_id,vehicle_id,file_name,original_name,mime_type,position,content_hash) VALUES (?,?,?,?,?,?,?)',

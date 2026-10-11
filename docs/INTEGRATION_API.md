@@ -12,11 +12,11 @@ Todas as rotas em `/api/integration/v1` exigem `Authorization: Bearer afi_...`. 
 
 A criação e revogação de tokens exige sessão humana ativa com privilégio de administrador.
 
-| Método | Endpoint | Acesso |
-| --- | --- | --- |
-| GET | `/api/integrations/credentials` | Administrador; lista metadados, sem token/hash |
-| POST | `/api/integrations/credentials` | Administrador; cria token e retorna segredo uma vez |
-| POST | `/api/integrations/credentials/:id/revoke` | Administrador; revoga token |
+| Método | Endpoint                                   | Acesso                                              |
+| ------ | ------------------------------------------ | --------------------------------------------------- |
+| GET    | `/api/integrations/credentials`            | Administrador; lista metadados, sem token/hash      |
+| POST   | `/api/integrations/credentials`            | Administrador; cria token e retorna segredo uma vez |
+| POST   | `/api/integrations/credentials/:id/revoke` | Administrador; revoga token                         |
 
 Corpo para criação: `{"name":"ChatGPT","scopes":["vehicles:read","reports:read"],"expiresAt":"2027-01-01T00:00:00Z"}`. `expiresAt` é opcional, mas é recomendado definir uma validade. O máximo aceito é 366 dias.
 
@@ -24,27 +24,27 @@ Corpo para criação: `{"name":"ChatGPT","scopes":["vehicles:read","reports:read
 
 ## Escopos
 
-| Escopo | Operação |
-| --- | --- |
-| `status:read` | Consultar estado da API |
-| `vehicles:read` | Listar veículos |
-| `publications:read` | Consultar jobs de publicação |
-| `accounts:read` | Consultar contas sociais |
-| `vehicles:create` | Criar veículo em rascunho |
-| `photos:write` | Enviar foto a veículo em rascunho |
-| `reports:read` | Consultar relatório mensal |
+| Escopo              | Operação                          |
+| ------------------- | --------------------------------- |
+| `status:read`       | Consultar estado da API           |
+| `vehicles:read`     | Listar veículos                   |
+| `publications:read` | Consultar jobs de publicação      |
+| `accounts:read`     | Consultar contas sociais          |
+| `vehicles:create`   | Criar veículo em rascunho         |
+| `photos:write`      | Enviar foto a veículo em rascunho |
+| `reports:read`      | Consultar relatório mensal        |
 
 Os escopos são independentes. Um token com leitura não ganha permissão de escrita. A API isola os dados pelo `organization_id` do token.
 
 ## Rotas de leitura
 
-| Método | Endpoint | Escopo |
-| --- | --- | --- |
-| GET | `/api/integration/v1/status` | `status:read` |
-| GET | `/api/integration/v1/vehicles` | `vehicles:read` |
-| GET | `/api/integration/v1/publications` | `publications:read` |
-| GET | `/api/integration/v1/accounts` | `accounts:read` |
-| GET | `/api/integration/v1/reports/monthly?month=2026-10` | `reports:read` |
+| Método | Endpoint                                            | Escopo              |
+| ------ | --------------------------------------------------- | ------------------- |
+| GET    | `/api/integration/v1/status`                        | `status:read`       |
+| GET    | `/api/integration/v1/vehicles`                      | `vehicles:read`     |
+| GET    | `/api/integration/v1/publications`                  | `publications:read` |
+| GET    | `/api/integration/v1/accounts`                      | `accounts:read`     |
+| GET    | `/api/integration/v1/reports/monthly?month=2026-10` | `reports:read`      |
 
 As listagens de veículos e publicações retornam no máximo 250 registros por consulta; não há paginação implementada nesta versão.
 

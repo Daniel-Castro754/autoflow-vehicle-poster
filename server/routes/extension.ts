@@ -255,7 +255,7 @@ export async function handleExtensionRoute(
       })
     const job = db
       .prepare(
-        `SELECT j.id,j.vehicle_id vehicleId,j.status,j.paused,j.scheduled_at scheduledAt,j.lease_expires_at leaseExpiresAt,j.fill_report fillReport,j.publish_attempt_at publishAttemptAt FROM publication_jobs j
+        `SELECT j.id,j.vehicle_id vehicleId,j.status,j.paused,j.scheduled_at scheduledAt,j.lease_expires_at leaseExpiresAt,j.fill_report fillReport,j.publish_attempt_at publishAttemptAt,j.variant_seed variantSeed FROM publication_jobs j
         WHERE j.id=? AND j.organization_id=? AND j.social_account_id=?`,
       )
       .get(Number(extensionPrepare[1]), auth.organizationId, accountId) as
@@ -268,6 +268,7 @@ export async function handleExtensionRoute(
           leaseExpiresAt?: string
           fillReport?: string
           publishAttemptAt?: string
+          variantSeed?: number | null
         }
       | undefined
     if (!job) return send(res, 404, { error: 'Trabalho não encontrado para este perfil.' })
@@ -389,16 +390,15 @@ export async function handleExtensionRoute(
           capacity: currentCapacity,
         })
       }
-      const latestListing = listingSnapshotForVehicle(db, auth.organizationId, job.vehicleId)
-      if (!latestListing || calculateListingHash(latestListing) !== preparedListingHash)
-        throw new Error('Os dados do anúncio mudaram enquanto a fila era preparada.')
-      reserveListingHash(
+      const latestListing = listingSnapshotForVehicle(
         db,
         auth.organizationId,
         job.vehicleId,
-        job.id,
-        preparedListingHash,
+        job.variantSeed ?? undefined,
       )
+      if (!latestListing || calculateListingHash(latestListing) !== preparedListingHash)
+        throw new Error('Os dados do anúncio mudaram enquanto a fila era preparada.')
+      reserveListingHash(db, auth.organizationId, job.vehicleId, job.id, preparedListingHash)
       const result = db
         .prepare(
           `UPDATE publication_jobs SET status='filling',attempt_count=attempt_count+1,error_code=NULL,started_at=CURRENT_TIMESTAMP,

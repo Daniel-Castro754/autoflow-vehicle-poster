@@ -1,9 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
-import {
-  integrationHasScope,
-  type IntegrationAuth,
-} from '../services/integration-auth.ts'
+import { integrationHasScope, type IntegrationAuth } from '../services/integration-auth.ts'
 
 type Dependencies = {
   db: DatabaseSync

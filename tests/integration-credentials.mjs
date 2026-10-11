@@ -24,9 +24,7 @@ try {
     scopes: ['status:read', 'vehicles:read'],
   })
   assert.match(issued.token, /^afi_[A-Za-z0-9_-]{43}$/)
-  const org = db
-    .prepare('SELECT organization_id id FROM users WHERE email=?')
-    .get(server.email).id
+  const org = db.prepare('SELECT organization_id id FROM users WHERE email=?').get(server.email).id
   const stored = db
     .prepare(
       'SELECT token_hash hash,organization_id org,active FROM integration_credentials WHERE id=?',
@@ -44,14 +42,8 @@ try {
   assert.equal(status.readOnly, true)
   const vehicles = await integrated('/integration/v1/vehicles')
   assert(Array.isArray(vehicles.vehicles))
-  await assert.rejects(
-    integrated('/integration/v1/accounts'),
-    (error) => error.status === 403,
-  )
-  await assert.rejects(
-    integrated('/integrations/credentials'),
-    (error) => error.status === 401,
-  )
+  await assert.rejects(integrated('/integration/v1/accounts'), (error) => error.status === 403)
+  await assert.rejects(integrated('/integrations/credentials'), (error) => error.status === 401)
   await assert.rejects(
     create({ name: 'Invalid', scopes: ['vehicles:write'] }),
     (error) => error.status === 400,
@@ -181,11 +173,13 @@ try {
     (error) => error.status === 404,
   )
   assert.equal(
-    db.prepare('SELECT COUNT(*) count FROM vehicle_images WHERE vehicle_id=?').get(draft.id)
-      .count,
+    db.prepare('SELECT COUNT(*) count FROM vehicle_images WHERE vehicle_id=?').get(draft.id).count,
     1,
   )
-  await assert.rejects(integrated('/integration/v1/reports/monthly?month=2026-10'), (error) => error.status === 403)
+  await assert.rejects(
+    integrated('/integration/v1/reports/monthly?month=2026-10'),
+    (error) => error.status === 403,
+  )
   const reporter = await create({
     name: 'Relatório mensal',
     scopes: ['reports:read'],
@@ -227,9 +221,7 @@ try {
   assert(audit.some((event) => event.action === 'credential:create'))
   assert(audit.some((event) => event.action === 'credential:revoke'))
   assert(audit.some((event) => event.action === 'accounts:read' && event.outcome === 'denied'))
-  console.log(
-    '✓ Integration credentials: scope, hashing, tenant isolation, audit and revocation',
-  )
+  console.log('✓ Integration credentials: scope, hashing, tenant isolation, audit and revocation')
 } finally {
   db.close()
   await server.close()
