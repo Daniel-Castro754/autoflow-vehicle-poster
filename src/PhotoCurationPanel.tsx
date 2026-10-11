@@ -53,7 +53,6 @@ export function PhotoCurationPanel({
 
   useEffect(() => {
     let live = true
-    setData(null)
     void api<Curation>('/vehicles/' + vehicleId + '/photos/curation')
       .then((state) => {
         if (!live) return
