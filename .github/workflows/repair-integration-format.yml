@@ -1,0 +1,49 @@
+name: Repair integration formatting
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  format-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - run: npm ci
+      - name: Apply repository Prettier
+        run: |
+          npx prettier --write \
+            server/routes/integration.ts \
+            server/routes/integration-photos.ts \
+            server/routes/integration-reports.ts \
+            tests/integration-credentials.mjs
+      - name: Verify formatting
+        run: npm run format:check
+      - name: Open formatting PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet; then
+            echo "No formatting changes needed."
+            exit 0
+          fi
+          BRANCH="chore/format-integration-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add server/routes/integration.ts server/routes/integration-photos.ts server/routes/integration-reports.ts tests/integration-credentials.mjs
+          git commit -m "style: apply Prettier to integration API files"
+          git push origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" \
+            --title "style: corrigir Prettier da Integration API" \
+            --body "Formatação automática com a versão de Prettier fixada no repositório. Sem alterações funcionais. Revisar CI antes de merge."
