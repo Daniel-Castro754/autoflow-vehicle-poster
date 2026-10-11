@@ -46,10 +46,12 @@ async function verifySafeBoot(directory) {
     },
   })
   let exited = false
-  const exit = new Promise((resolve) => child.once('exit', (code) => {
-    exited = true
-    resolve(code)
-  }))
+  const exit = new Promise((resolve) =>
+    child.once('exit', (code) => {
+      exited = true
+      resolve(code)
+    }),
+  )
   try {
     const deadline = Date.now() + 20000
     let lastError = null
@@ -63,11 +65,13 @@ async function verifySafeBoot(directory) {
         })
         if (response.status === 503) throw new Error('PROBE_NOT_READY')
         const result = await response.json()
-        if (!response.ok ||
+        if (
+          !response.ok ||
           result.mode !== 'restored_readonly_boot_probe' ||
           result.databaseReadOnly !== true ||
           result.workersStarted !== false ||
-          result.externalIntegrationsTested !== false) {
+          result.externalIntegrationsTested !== false
+        ) {
           throw new Error('PROBE_UNSAFE_RESULT')
         }
         // Auth/write routes must remain unreachable, even with the challenge.
@@ -84,7 +88,10 @@ async function verifySafeBoot(directory) {
         return true
       } catch (error) {
         lastError = error
-        if (error instanceof Error && /PROBE_(?:UNSAFE_RESULT|WRITE_ROUTE_ACCESSIBLE|PUBLICLY_ACCESSIBLE)/.test(error.message))
+        if (
+          error instanceof Error &&
+          /PROBE_(?:UNSAFE_RESULT|WRITE_ROUTE_ACCESSIBLE|PUBLICLY_ACCESSIBLE)/.test(error.message)
+        )
           throw error
         await new Promise((resolve) => setTimeout(resolve, 180))
       }
@@ -95,7 +102,9 @@ async function verifySafeBoot(directory) {
     // Wait until the server process is stopped before deleting the restored DB.
     await Promise.race([
       exit,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('PROBE_SHUTDOWN_TIMEOUT')), 5000)),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('PROBE_SHUTDOWN_TIMEOUT')), 5000),
+      ),
     ])
   }
 }

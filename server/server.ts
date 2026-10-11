@@ -60,11 +60,14 @@ const port = Number(process.env.PORT || 3333)
 if (!Number.isInteger(port) || port < 1 || port > 65535)
   throw new Error('PORT deve ser um número inteiro entre 1 e 65535.')
 const host = String(process.env.HOST || '127.0.0.1').trim() || '127.0.0.1'
-if (restoreBootProbe && (
-  host !== '127.0.0.1' || !process.env.DATA_DIR ||
-  !process.env.AUTOFLOW_RESTORE_BOOT_NONCE ||
-  process.env.AUTOFLOW_RESTORE_BOOT_NONCE.length < 32
-)) throw new Error('Modo de restauração exige loopback, diretório isolado e desafio temporário.')
+if (
+  restoreBootProbe &&
+  (host !== '127.0.0.1' ||
+    !process.env.DATA_DIR ||
+    !process.env.AUTOFLOW_RESTORE_BOOT_NONCE ||
+    process.env.AUTOFLOW_RESTORE_BOOT_NONCE.length < 32)
+)
+  throw new Error('Modo de restauração exige loopback, diretório isolado e desafio temporário.')
 const urlHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
 const publicOrigin = String(process.env.PUBLIC_ORIGIN || `http://${urlHost}:${port}`)
   .trim()
@@ -93,11 +96,13 @@ const {
   replaceMarketplaceGroups,
 } = createMarketplaceGroupService(db)
 
-for (const image of (restoreBootProbe ? [] : db
-  .prepare(
-    "SELECT id,file_name fileName FROM vehicle_images WHERE content_hash='' OR content_hash IS NULL",
-  )
-  .all() as Array<{ id: number; fileName: string }>)) {
+for (const image of restoreBootProbe
+  ? []
+  : (db
+      .prepare(
+        "SELECT id,file_name fileName FROM vehicle_images WHERE content_hash='' OR content_hash IS NULL",
+      )
+      .all() as Array<{ id: number; fileName: string }>)) {
   const path = join(uploadsDir, image.fileName)
   if (existsSync(path))
     db.prepare('UPDATE vehicle_images SET content_hash=? WHERE id=?').run(
@@ -347,9 +352,12 @@ if (!restoreBootProbe && !db.prepare('SELECT id FROM users LIMIT 1').get()) {
   )
   for (const row of rows) insert.run(orgId, ...row)
 }
-if (!restoreBootProbe) db.exec(`INSERT OR IGNORE INTO organization_settings (organization_id,default_location,daily_limit,require_confirmation,description_template)
+if (!restoreBootProbe)
+  db.exec(`INSERT OR IGNORE INTO organization_settings (organization_id,default_location,daily_limit,require_confirmation,description_template)
   SELECT id,'São Paulo, SP',10,1,'{ano} {marca} {modelo} {versao} com {km} km. Entre em contato para mais informações.' FROM organizations`)
-for (const organization of (restoreBootProbe ? [] : db.prepare('SELECT id FROM organizations').all()) as Array<{
+for (const organization of (restoreBootProbe
+  ? []
+  : db.prepare('SELECT id FROM organizations').all()) as Array<{
   id: number
 }>) {
   if (!marketplaceGroups(organization.id).length) {
@@ -379,17 +387,21 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     const header = req.headers['x-autoflow-restore-probe']
     const expected = process.env.AUTOFLOW_RESTORE_BOOT_NONCE || ''
     const received = typeof header === 'string' ? header : ''
-    if (received.length !== expected.length ||
-        !timingSafeEqual(Buffer.from(received), Buffer.from(expected))) {
+    if (
+      received.length !== expected.length ||
+      !timingSafeEqual(Buffer.from(received), Buffer.from(expected))
+    ) {
       return send(res, 403, { error: 'Modo diagnóstico restrito.' })
     }
     if (req.method !== 'GET' || req.url !== '/health/ready') {
       return send(res, 404, { error: 'Rota desabilitada no modo diagnóstico.' })
     }
     try {
-      const schema = db.prepare(
-        "SELECT COUNT(*) n FROM sqlite_master WHERE type='table' AND name IN ('users','organizations','vehicles','publication_jobs','organization_settings')",
-      ).get() as { n: number }
+      const schema = db
+        .prepare(
+          "SELECT COUNT(*) n FROM sqlite_master WHERE type='table' AND name IN ('users','organizations','vehicles','publication_jobs','organization_settings')",
+        )
+        .get() as { n: number }
       if (schema.n !== 5) throw new Error('schema')
       const users = db.prepare('SELECT COUNT(*) n FROM users').get() as { n: number }
       if (users.n < 1) throw new Error('missing users')

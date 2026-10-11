@@ -20,6 +20,7 @@ O modo diagnóstico não inicia Health Monitor, curadoria automática nem piloto
 **Não são testados:** login, migração do esquema, abertura das chaves criptografadas DPAPI, integração Gemini/OpenAI, webhooks, extensão Brave, sessão Facebook ou publicação real. Um teste bem-sucedido significa **inicialização restrita aprovada**, não recuperação operacional integral.
 
 O resultado inclui:
+
 - `bootProbePassed: true`: inicialização e resposta do diagnóstico aprovadas;
 - `probeDatabaseReadOnly: true`: a cópia do SQLite foi aberta somente para leitura;
 - `backgroundWorkersStarted: false`: nenhum dos trabalhadores periódicos foi ativado;

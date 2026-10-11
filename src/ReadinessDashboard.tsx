@@ -511,11 +511,10 @@ export function ReadinessDashboard({
                                 {restoredResult.vehicleCount} veículo(s),{' '}
                                 {restoredResult.accountCount} usuário(s),{' '}
                                 {restoredResult.imageCount} imagem(ns). Arquivos temporários
-                                removidos. A inicialização de diagnóstico do AutoFlow
-                                foi aprovada em modo somente leitura, na interface local
-                                restrita, sem iniciar trabalhadores de fundo.
-                                A aplicação completa, suas migrações e o DPAPI não foram
-                                testados neste ensaio.
+                                removidos. A inicialização de diagnóstico do AutoFlow foi aprovada
+                                em modo somente leitura, na interface local restrita, sem iniciar
+                                trabalhadores de fundo. A aplicação completa, suas migrações e o
+                                DPAPI não foram testados neste ensaio.
                               </p>
                             )}
                             {backupResult && (
