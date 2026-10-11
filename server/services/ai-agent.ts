@@ -647,10 +647,11 @@ async function planAutopilotJobs(
     for (const account of accounts) {
       const lastActivity = lastProfileActivityAt(db, organizationId, account.id)
       if (lastActivity == null) continue
-      const nextAllowed = lastActivity +
-        profileLimits(db, organizationId, account.id).intervalMinutes * 60000
+      const nextAllowed =
+        lastActivity + profileLimits(db, organizationId, account.id).intervalMinutes * 60000
       accountNextAllowedAt.set(
-        account.id, Math.max(accountNextAllowedAt.get(account.id) || 0, nextAllowed),
+        account.id,
+        Math.max(accountNextAllowedAt.get(account.id) || 0, nextAllowed),
       )
     }
 
@@ -709,7 +710,11 @@ async function planAutopilotJobs(
 
       const targetAccountId = best.id
       const targetAccountLabel = best.label
-      const profileIntervalMinutes = profileLimits(db, organizationId, targetAccountId).intervalMinutes
+      const profileIntervalMinutes = profileLimits(
+        db,
+        organizationId,
+        targetAccountId,
+      ).intervalMinutes
 
       // Step C: Calculate optimal schedule
       const existingTimestamps = accountSchedules.get(targetAccountId) || []
