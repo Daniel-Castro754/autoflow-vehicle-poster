@@ -225,7 +225,7 @@ export async function handlePublicationManagementRoute(
     )
     // Serialize duplicate validation and hash reservation with job creation.
     // A failed insert must never leave an orphaned pending job.
-    let publicationJobId: number
+    let publicationJobId = 0
     db.exec('BEGIN IMMEDIATE')
     try {
       const concurrentRisk = publicationDuplicateRisk(auth.organizationId, vehicle.id)
