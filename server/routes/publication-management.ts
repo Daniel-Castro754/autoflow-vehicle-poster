@@ -637,7 +637,14 @@ export async function handlePublicationManagementRoute(
         'SELECT vehicle_id vehicleId,social_account_id accountId,result_url resultUrl,status,fill_report fillReport,publish_attempt_at publishAttemptAt FROM publication_jobs WHERE id=? AND organization_id=?',
       )
       .get(Number(publication[1]), auth.organizationId) as
-      | { vehicleId: number; accountId: number | null; resultUrl?: string; status: string; fillReport?: string; publishAttemptAt?: string }
+      | {
+          vehicleId: number
+          accountId: number | null
+          resultUrl?: string
+          status: string
+          fillReport?: string
+          publishAttemptAt?: string
+        }
       | undefined
     if (!job) return send(res, 404, { error: 'Publicação não encontrada.' })
     if (!canManageJobs([Number(publication[1])], auth))
