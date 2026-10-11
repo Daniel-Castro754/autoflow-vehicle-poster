@@ -63,6 +63,76 @@ try {
     create({ name: 'Expired', scopes: ['status:read'], expiresAt: '2020-01-01T00:00:00.000Z' }),
     (error) => error.status === 400,
   )
+  const draftPayload = {
+    year: 2020,
+    make: 'Volkswagen',
+    model: 'Saveiro',
+    price: 68000,
+    km: 80000,
+    vehicleType: 'Carro/picape',
+    transmission: 'Manual',
+    fuelType: 'Flex',
+    bodyType: 'Picape',
+    condition: 'Bom',
+    exteriorColor: 'Branco',
+    interiorColor: 'Preto',
+    location: 'Criciúma, SC',
+    stockCode: 'INTEGRATION-DRAFT-001',
+    status: 'Publicado',
+  }
+  await assert.rejects(
+    integrated('/integration/v1/vehicles', {
+      method: 'POST',
+      body: JSON.stringify(draftPayload),
+    }),
+    (error) => error.status === 403,
+  )
+  const writer = await create({
+    name: 'Cadastro de rascunhos',
+    scopes: ['vehicles:create', 'vehicles:read'],
+  })
+  const writeApi = createApiClient(server.base, writer.token)
+  const draft = await writeApi('/integration/v1/vehicles', {
+    method: 'POST',
+    body: JSON.stringify(draftPayload),
+  })
+  assert.equal(draft.status, 'Rascunho')
+  assert.equal(draft.requiresReview, true)
+  const storedDraft = db
+    .prepare(
+      'SELECT organization_id organizationId,status,assigned_user_id assignedUserId FROM vehicles WHERE id=?',
+    )
+    .get(draft.id)
+  assert.equal(storedDraft.organizationId, org)
+  assert.equal(storedDraft.status, 'Rascunho')
+  assert.equal(
+    db.prepare('SELECT COUNT(*) count FROM publication_jobs WHERE vehicle_id=?').get(draft.id)
+      .count,
+    0,
+  )
+  await assert.rejects(
+    writeApi('/integration/v1/vehicles', {
+      method: 'POST',
+      body: JSON.stringify(draftPayload),
+    }),
+    (error) => error.status === 409,
+  )
+  await assert.rejects(
+    writeApi('/integration/v1/vehicles', {
+      method: 'POST',
+      body: JSON.stringify({ ...draftPayload, stockCode: 'INTEGRATION-INVALID', year: 1800 }),
+    }),
+    (error) => error.status === 400,
+  )
+  const ownVehicles = await writeApi('/integration/v1/vehicles')
+  assert(ownVehicles.vehicles.some((vehicle) => vehicle.id === draft.id))
+  assert(
+    db
+      .prepare(
+        "SELECT COUNT(*) count FROM integration_audit_events WHERE organization_id=? AND action='vehicles:create' AND resource_id=?",
+      )
+      .get(org, draft.id).count > 0,
+  )
   const foreignOrg = Number(
     db.prepare("INSERT INTO organizations(name) VALUES('Outro tenant')").run().lastInsertRowid,
   )
