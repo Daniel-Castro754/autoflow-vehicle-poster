@@ -510,6 +510,9 @@ export async function handlePublicationReadRoute(
         )
         recordJobEvent(auth.organizationId, job.id, 'stalled_publish_ambiguous', auth.userId, {
           elapsedMinutes,
+          retryCount: job.retryCount,
+          maxRetries: job.maxRetries,
+          recoveredBy: 'manual',
         })
         db.exec('COMMIT')
       } catch (error) {
