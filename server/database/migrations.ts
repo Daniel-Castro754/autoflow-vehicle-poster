@@ -422,7 +422,7 @@ const migrations: Migration[] = [
       ON integration_audit_events (organization_id,id DESC);
     CREATE INDEX IF NOT EXISTS idx_integration_audit_credential_time
       ON integration_audit_events (credential_id,id DESC);`,
-  }
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {
