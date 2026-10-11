@@ -124,7 +124,11 @@ assert.equal(
 )
 
 const reusedJob = Number(
-  db.prepare("INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status) VALUES (1,10,5,'completed')").run().lastInsertRowid,
+  db
+    .prepare(
+      "INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status) VALUES (1,10,5,'completed')",
+    )
+    .run().lastInsertRowid,
 )
 recordConfirmedListing(db, {
   organizationId: 1,
@@ -134,7 +138,11 @@ recordConfirmedListing(db, {
   resultUrl: 'https://facebook.com/marketplace/item/998877',
 })
 assert.equal(
-  db.prepare("SELECT publication_job_id jobId FROM publication_listing_ledger WHERE external_listing_id='998877'").get().jobId,
+  db
+    .prepare(
+      "SELECT publication_job_id jobId FROM publication_listing_ledger WHERE external_listing_id='998877'",
+    )
+    .get().jobId,
   100,
   'An external listing ID must keep its original job provenance.',
 )
