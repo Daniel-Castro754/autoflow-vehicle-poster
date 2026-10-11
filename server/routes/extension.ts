@@ -7,6 +7,7 @@ import { calculateBackoff } from '../lib/retry.ts'
 import { profileCapacity } from '../services/profile-capacity.ts'
 import { publicationPhotoPayload, PhotoCurationConflict } from '../services/photo-curation.ts'
 import { classifyExtensionFailure } from '../services/publication-policy.ts'
+import { recordConfirmedListing } from '../services/publication-ledger.ts'
 import { sendCriticalAlert } from '../services/alerting.ts'
 import {
   openSelectorCircuitBreaker,
@@ -1010,6 +1011,13 @@ export async function handleExtensionRoute(
           auth.organizationId,
         )
         refreshVehiclePublicationStatus(vehicleId, auth.organizationId)
+        const listing = recordConfirmedListing(db, {
+          organizationId: auth.organizationId,
+          vehicleId,
+          publicationJobId: job.id,
+          socialAccountId: job.accountId,
+          resultUrl: b.resultUrl,
+        })
         recordJobEvent(
           auth.organizationId,
           job.id,
@@ -1017,6 +1025,8 @@ export async function handleExtensionRoute(
           null,
           {
             resultUrl: String(b.resultUrl || '').slice(0, 500),
+            externalListingId: listing.externalListingId,
+            canonicalUrl: listing.canonicalUrl,
             selectedGroups: report.selectedGroups.length,
             extensionVersion: String(b.extensionVersion || '').slice(0, 30),
           },
