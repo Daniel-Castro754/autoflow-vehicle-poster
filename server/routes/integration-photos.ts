@@ -29,7 +29,15 @@ export async function handleIntegrationPhotoUpload(
     send(res, 405, { error: 'Método não permitido.' })
     return true
   }
+  const auditDenied = (reason: string) => {
+    db.prepare(
+      `INSERT INTO integration_audit_events
+       (organization_id,credential_id,actor_user_id,action,outcome,details)
+       VALUES (?,?,?,'photos:write','denied',?)`,
+    ).run(auth.organizationId, auth.credentialId, auth.createdBy, JSON.stringify({ reason }))
+  }
   if (!integrationHasScope(auth, 'photos:write')) {
+    auditDenied('missing_scope')
     send(res, 403, { error: 'Escopo photos:write obrigatório.' })
     return true
   }
@@ -38,15 +46,18 @@ export async function handleIntegrationPhotoUpload(
     .prepare('SELECT status FROM vehicles WHERE id=? AND organization_id=?')
     .get(vehicleId, auth.organizationId) as { status: string } | undefined
   if (!vehicle) {
+    auditDenied('vehicle_not_found')
     send(res, 404, { error: 'Veículo não encontrado.' })
     return true
   }
   if (vehicle.status !== 'Rascunho') {
+    auditDenied('vehicle_not_draft')
     send(res, 409, { error: 'Envio pela integração permitido somente em rascunhos.' })
     return true
   }
   const input = await jsonBody(req, 17 * 1024 * 1024)
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    auditDenied('invalid_body')
     send(res, 400, { error: 'Dados da foto inválidos.' })
     return true
   }
@@ -60,6 +71,7 @@ export async function handleIntegrationPhotoUpload(
     encoded.length % 4 !== 0 ||
     !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)
   ) {
+    auditDenied('invalid_encoding')
     send(res, 400, { error: 'Envie uma imagem JPG, PNG ou WebP em base64 válido.' })
     return true
   }
@@ -70,6 +82,7 @@ export async function handleIntegrationPhotoUpload(
     bytes.toString('base64') !== encoded ||
     !(await validImageContent(bytes, mime))
   ) {
+    auditDenied('invalid_image')
     send(res, 400, { error: 'Imagem inválida, incompleta ou maior que 12 MB.' })
     return true
   }
@@ -87,6 +100,7 @@ export async function handleIntegrationPhotoUpload(
     .prepare('SELECT COUNT(*) total FROM vehicle_images WHERE vehicle_id=? AND organization_id=?')
     .get(vehicleId, auth.organizationId) as { total: number }
   if (count.total >= 20) {
+    auditDenied('photo_limit')
     send(res, 409, { error: 'Limite de 20 fotos por veículo.' })
     return true
   }
