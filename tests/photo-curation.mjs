@@ -74,10 +74,10 @@ try {
   assert.equal(loaded.preferredCount, 8)
   assert.equal(loaded.approved, false)
   assert.equal(loaded.recommendation.length, 8)
-  assert.equal(
-    publicationPhotoPayload(db, org, id, '/uploads/').length,
-    10,
-    'Legacy workflows should keep uploading all photos until explicit approval',
+  assert.throws(
+    () => publicationPhotoPayload(db, org, id, '/uploads/'),
+    /exige uma seleção de fotos revisada e aprovada/,
+    'Publication must remain blocked until photo selection is explicitly approved',
   )
   await fail(() => anonymous(root + '/curation'), 401)
   await fail(
@@ -170,10 +170,13 @@ try {
 
   await api(root + '/selection', { method: 'DELETE' })
   assert.equal((await api(root + '/curation')).enabled, false)
-  assert.equal(publicationPhotoPayload(db, org, id, '/uploads/').length, 11)
+  assert.throws(
+    () => publicationPhotoPayload(db, org, id, '/uploads/'),
+    /exige uma seleção de fotos revisada e aprovada/,
+  )
 
   console.log(
-    '✓ Photo curation: eight-photo proposals, cover, approval, tenant isolation and stale safety',
+    '✓ Photo curation: mandatory approval, eight-photo proposals, cover, tenant isolation and stale safety',
   )
 } finally {
   db.close()
