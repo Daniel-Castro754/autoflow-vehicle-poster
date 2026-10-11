@@ -20,7 +20,11 @@ type Dependencies = {
 }
 
 export async function handlePhotoCurationRoute(
-  req: IncomingMessage, res: ServerResponse, url: URL, auth: Auth, deps: Dependencies,
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  auth: Auth,
+  deps: Dependencies,
 ): Promise<boolean> {
   const collection = url.pathname.match(/^\/api\/vehicles\/(\d+)\/photos\/(curation|selection)$/)
   const categoryRoute = url.pathname.match(/^\/api\/vehicles\/(\d+)\/photos\/(\d+)\/category$/)
@@ -30,15 +34,19 @@ export async function handlePhotoCurationRoute(
     deps.send(res, 400, { error: 'Veículo inválido.' })
     return true
   }
-  const vehicle = deps.db.prepare(
-    'SELECT id FROM vehicles WHERE id=? AND organization_id=?',
-  ).get(vehicleId, auth.organizationId)
+  const vehicle = deps.db
+    .prepare('SELECT id FROM vehicles WHERE id=? AND organization_id=?')
+    .get(vehicleId, auth.organizationId)
   if (!vehicle) {
     deps.send(res, 404, { error: 'Veículo não encontrado.' })
     return true
   }
   if (req.method === 'GET' && collection?.[2] === 'curation') {
-    deps.send(res, 200, readPhotoCuration(deps.db, auth.organizationId, vehicleId, deps.imageBaseUrl))
+    deps.send(
+      res,
+      200,
+      readPhotoCuration(deps.db, auth.organizationId, vehicleId, deps.imageBaseUrl),
+    )
     return true
   }
   if (!deps.canWriteVehicle(vehicleId, auth)) {
@@ -49,18 +57,31 @@ export async function handlePhotoCurationRoute(
     if (req.method === 'PATCH' && categoryRoute) {
       const body = (await deps.jsonBody(req)) as Record<string, unknown>
       const imageId = Number(categoryRoute[2])
-      if (!Number.isSafeInteger(imageId) || !PHOTO_CATEGORIES.includes(body?.category as PhotoCategory)) {
+      if (
+        !Number.isSafeInteger(imageId) ||
+        !PHOTO_CATEGORIES.includes(body?.category as PhotoCategory)
+      ) {
         deps.send(res, 400, { error: 'Foto ou categoria inválida.' })
         return true
       }
-      setPhotoCategory(deps.db, auth.organizationId, vehicleId, imageId, body.category as PhotoCategory)
+      setPhotoCategory(
+        deps.db,
+        auth.organizationId,
+        vehicleId,
+        imageId,
+        body.category as PhotoCategory,
+      )
       deps.send(res, 200, { ok: true })
       return true
     }
     if (req.method === 'POST' && collection?.[2] === 'selection') {
       const body = (await deps.jsonBody(req)) as Record<string, unknown>
       const result = approvePhotoSelection(
-        deps.db, auth.organizationId, vehicleId, body?.photoIds, body?.fingerprint,
+        deps.db,
+        auth.organizationId,
+        vehicleId,
+        body?.photoIds,
+        body?.fingerprint,
       )
       deps.send(res, 200, result)
       return true
