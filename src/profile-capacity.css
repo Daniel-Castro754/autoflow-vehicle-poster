@@ -1,0 +1,39 @@
+.profile-capacity {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--af-border, #dbe4e1);
+  border-radius: 10px;
+  background: var(--af-surface-muted, #f6f8f7);
+}
+.profile-capacity-stats,
+.profile-capacity-fields {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.profile-capacity-stats {
+  align-items: baseline;
+  justify-content: space-between;
+}
+.profile-capacity label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+.profile-capacity input {
+  width: 108px;
+  min-height: 34px;
+}
+.profile-capacity button {
+  min-height: 34px;
+}
+.profile-capacity small {
+  color: var(--af-muted, #65716d);
+}
+.profile-capacity .profile-capacity-error {
+  color: #af252d;
+}
