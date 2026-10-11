@@ -269,7 +269,8 @@ export async function handlePublicationManagementRoute(
     const placeholders = ids.map(() => '?').join(',')
     const jobs = db
       .prepare(
-        `SELECT j.id,j.status,j.social_account_id accountId,
+        `SELECT j.id,j.status,j.vehicle_id vehicleId,j.social_account_id accountId,
+          j.retry_count retryCount,COALESCE(j.max_retries,3) maxRetries,
           COALESCE(a.automation_paused,0) automationPaused,
           COALESCE(a.automation_pause_reason,'') automationPauseReason
         FROM publication_jobs j
@@ -279,7 +280,10 @@ export async function handlePublicationManagementRoute(
       .all(auth.organizationId, ...ids) as Array<{
       id: number
       status: string
+      vehicleId: number
       accountId?: number
+      retryCount: number
+      maxRetries: number
       automationPaused: number
       automationPauseReason: string
     }>
@@ -301,20 +305,37 @@ export async function handlePublicationManagementRoute(
           'Um dos perfis selecionados está com a automação pausada até revisão do Marketplace.',
         accountPaused: true,
       })
+    const exhaustedJob = jobs.find((job) => job.retryCount >= job.maxRetries)
+    if (exhaustedJob)
+      return send(res, 409, {
+        error: `O trabalho #${exhaustedJob.id} esgotou o limite de recuperações (${exhaustedJob.retryCount}/${exhaustedJob.maxRetries}). Revise-o antes de criar um novo trabalho.`,
+        retryBudgetExhausted: true,
+        jobId: exhaustedJob.id,
+      })
+    for (const job of jobs) {
+      const duplicateRisk = publicationDuplicateRisk(auth.organizationId, job.vehicleId, job.id)
+      if (duplicateRisk)
+        return send(res, 409, {
+          error: duplicateRisk.message,
+          duplicate: duplicateRisk,
+          jobId: job.id,
+        })
+    }
 
     db.exec('BEGIN')
     try {
       db.prepare(
         `UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,
           error_code=NULL,fill_report='',publish_attempt_at=NULL,last_lease_token=NULL,
-          started_at=NULL,filled_at=NULL,removed_at=NULL,lease_token=NULL,lease_owner=NULL,
-          lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP
+          started_at=NULL,filled_at=NULL,removed_at=NULL,retry_count=retry_count+1,
+          lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP
         WHERE organization_id=? AND id IN (${placeholders})`,
       ).run(auth.organizationId, ...ids)
       for (const id of ids)
         recordJobEvent(auth.organizationId, id, 'retry_requested', auth.userId, {
           status: 'pending',
           batch: true,
+          retryConsumed: true,
         })
       db.exec('COMMIT')
     } catch (error) {
