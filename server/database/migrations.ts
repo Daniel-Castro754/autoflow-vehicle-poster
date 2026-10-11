@@ -364,7 +364,7 @@ const migrations: Migration[] = [
       publication_job_id INTEGER NOT NULL REFERENCES publication_jobs(id) ON DELETE CASCADE,
       social_account_id INTEGER REFERENCES social_accounts(id),
       platform TEXT NOT NULL DEFAULT 'facebook_marketplace',
-      external_listing_id TEXT NOT NULL DEFAULT '',
+      external_listing_id TEXT,
       canonical_url TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','removed')),
       first_confirmed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
