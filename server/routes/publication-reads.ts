@@ -290,11 +290,11 @@ export async function handlePublicationReadRoute(
         j.id jobId,j.status jobStatus,j.extension_version extensionVersion,v.year,v.make,v.model,
         COALESCE(a.label,'Perfil não definido') accountLabel,COALESCE(u.name,'Não atribuído') seller,
         (SELECT MAX(latest.id) FROM publication_job_events latest WHERE latest.publication_job_id=j.id
-          AND latest.event_type IN ('fill_error','filled_waiting_confirmation','stalled_recovered','duplicate_blocked')) latestIssueEventId
+          AND latest.event_type IN ('fill_error','filled_waiting_confirmation','stalled_recovered','stalled_exhausted','stalled_publish_ambiguous','duplicate_blocked')) latestIssueEventId
         FROM publication_job_events event JOIN publication_jobs j ON j.id=event.publication_job_id
         JOIN vehicles v ON v.id=j.vehicle_id LEFT JOIN social_accounts a ON a.id=j.social_account_id
         LEFT JOIN users u ON u.id=v.assigned_user_id WHERE event.organization_id=?
-        AND event.event_type IN ('fill_error','filled_waiting_confirmation','stalled_recovered','duplicate_blocked')`
+        AND event.event_type IN ('fill_error','filled_waiting_confirmation','stalled_recovered','stalled_exhausted','stalled_publish_ambiguous','duplicate_blocked')`
     const rows = (
       before === null
         ? db
@@ -331,6 +331,9 @@ export async function handlePublicationReadRoute(
         ((row.eventType === 'fill_error' && row.jobStatus === 'error') ||
           (row.eventType === 'filled_waiting_confirmation' &&
             row.jobStatus === 'awaiting_confirmation') ||
+          (row.eventType === 'stalled_exhausted' && row.jobStatus === 'error') ||
+          (row.eventType === 'stalled_publish_ambiguous' &&
+            row.jobStatus === 'awaiting_confirmation') ||
           (row.eventType === 'duplicate_blocked' &&
             ['pending', 'awaiting_confirmation'].includes(row.jobStatus)))
       const add = (severity: 'error' | 'warning', category: string, message: string) =>
@@ -354,6 +357,18 @@ export async function handlePublicationReadRoute(
           'warning',
           'recovery',
           `Execução travada recuperada${Number(details.elapsedMinutes) > 0 ? ` após ${details.elapsedMinutes} min` : ''}.`,
+        )
+      if (row.eventType === 'stalled_exhausted')
+        add(
+          'error',
+          'recovery',
+          `Recuperação esgotada após ${details.retryCount ?? '—'}/${details.maxRetries ?? '—'} retries. Revisão manual necessária.`,
+        )
+      if (row.eventType === 'stalled_publish_ambiguous')
+        add(
+          'error',
+          'recovery',
+          'A execução parou após uma possível publicação. Confira o Facebook antes de liberar outra tentativa.',
         )
       if (row.eventType === 'duplicate_blocked')
         add(
@@ -454,9 +469,9 @@ export async function handlePublicationReadRoute(
       })
     const job = db
       .prepare(
-        `SELECT id,status,started_at startedAt,lease_expires_at leaseExpiresAt,publish_attempt_at publishAttemptAt,fill_report fillReport FROM publication_jobs WHERE id=? AND organization_id=?`,
+        `SELECT id,status,started_at startedAt,lease_expires_at leaseExpiresAt,publish_attempt_at publishAttemptAt,fill_report fillReport,retry_count retryCount,COALESCE(max_retries,(SELECT max_retries FROM organization_settings WHERE organization_id=?),3) maxRetries FROM publication_jobs WHERE id=? AND organization_id=?`,
       )
-      .get(Number(recoverPublication[1]), auth.organizationId) as
+      .get(auth.organizationId, Number(recoverPublication[1]), auth.organizationId) as
       | {
           id: number
           status: string
@@ -464,6 +479,8 @@ export async function handlePublicationReadRoute(
           leaseExpiresAt?: string
           publishAttemptAt?: string
           fillReport?: string
+          retryCount: number
+          maxRetries: number
         }
       | undefined
     if (!job) return send(res, 404, { error: 'Trabalho não encontrado.' })
@@ -508,6 +525,9 @@ export async function handlePublicationReadRoute(
         )
         recordJobEvent(auth.organizationId, job.id, 'stalled_publish_ambiguous', auth.userId, {
           elapsedMinutes,
+          retryCount: job.retryCount,
+          maxRetries: job.maxRetries,
+          recoveredBy: 'manual',
         })
         db.exec('COMMIT')
       } catch (error) {
@@ -516,17 +536,33 @@ export async function handlePublicationReadRoute(
       }
       return send(res, 200, { ok: true, status: 'awaiting_confirmation', ambiguous: true })
     }
+    const exhausted = job.retryCount >= job.maxRetries
     db.exec('BEGIN')
     try {
-      db.prepare(
-        "UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',last_lease_token=NULL,publish_attempt_at=NULL,started_at=NULL,filled_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
-      ).run(job.id, auth.organizationId)
-      recordJobEvent(auth.organizationId, job.id, 'stalled_recovered', auth.userId, {
-        fromStatus: 'filling',
-        toStatus: 'pending',
-        elapsedMinutes,
-        leaseExpired: true,
-      })
+      if (exhausted) {
+        db.prepare(
+          "UPDATE publication_jobs SET status='error',paused=0,extension_visible=1,error_code='Limite de recuperação automática esgotado.',last_lease_token=NULL,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+        ).run(job.id, auth.organizationId)
+        recordJobEvent(auth.organizationId, job.id, 'stalled_exhausted', auth.userId, {
+          elapsedMinutes,
+          retryCount: job.retryCount,
+          maxRetries: job.maxRetries,
+          recoveredBy: 'manual',
+        })
+      } else {
+        db.prepare(
+          "UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',last_lease_token=NULL,publish_attempt_at=NULL,started_at=NULL,filled_at=NULL,retry_count=retry_count+1,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+        ).run(job.id, auth.organizationId)
+        recordJobEvent(auth.organizationId, job.id, 'stalled_recovered', auth.userId, {
+          fromStatus: 'filling',
+          toStatus: 'pending',
+          elapsedMinutes,
+          leaseExpired: true,
+          retryCount: job.retryCount + 1,
+          maxRetries: job.maxRetries,
+          recoveredBy: 'manual',
+        })
+      }
       db.exec('COMMIT')
     } catch (error) {
       db.exec('ROLLBACK')
@@ -534,13 +570,16 @@ export async function handlePublicationReadRoute(
     }
     return send(res, 200, {
       ok: true,
-      status: 'pending',
+      status: exhausted ? 'error' : 'pending',
       recovery: {
         jobId: job.id,
         fromStatus: 'filling',
-        toStatus: 'pending',
+        toStatus: exhausted ? 'error' : 'pending',
         elapsedMinutes,
         leaseExpired: true,
+        exhausted,
+        retryCount: exhausted ? job.retryCount : job.retryCount + 1,
+        maxRetries: job.maxRetries,
       },
     })
   }
