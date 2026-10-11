@@ -85,7 +85,7 @@ try {
   const first = await makeJob(firstVehicle.id)
   const second = await makeJob(secondVehicle.id)
   const fingerprints = db
-    .prepare('SELECT listing_hash FROM published_ads WHERE publication_job_id IN (?,?)')
+    .prepare('SELECT listing_hash FROM published_ads WHERE publication_job_id IN (?,?) ORDER BY publication_job_id')
     .all(first.id, second.id)
   assert.equal(fingerprints.length, 2)
   assert.notEqual(fingerprints[0].listing_hash, fingerprints[1].listing_hash)
