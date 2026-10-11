@@ -5418,7 +5418,6 @@ td {
   }
 }
 
-
 /* Saúde e autonomia: controles consistentes no modo claro/escuro. */
 .readiness-dashboard {
   --readiness-surface: #ffffff;
@@ -5460,7 +5459,10 @@ td {
   text-align: center;
   text-decoration: none;
   cursor: pointer;
-  transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
 }
 
 .readiness-dashboard .readiness-button svg {
@@ -5633,7 +5635,9 @@ td {
   gap: 9px;
   margin: 0;
   color: var(--readiness-foreground);
-  font: 700 13px Manrope, sans-serif;
+  font:
+    700 13px Manrope,
+    sans-serif;
 }
 
 .readiness-backup-heading svg {

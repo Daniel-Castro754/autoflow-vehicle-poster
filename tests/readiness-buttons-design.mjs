@@ -10,7 +10,8 @@ for (const path of [
   '/health/backups',
   '/health/backups/verify',
   '/health/backups/restore-drill',
-]) assert(ui.includes(path), 'Required endpoint unchanged: ' + path)
+])
+  assert(ui.includes(path), 'Required endpoint unchanged: ' + path)
 
 assert(ui.includes("confirmation: 'TESTAR_RESTAURACAO_ISOLADA'"))
 assert(ui.includes('window.confirm('))
@@ -20,7 +21,8 @@ for (const action of [
   'onClick={() => void restoreTest(backup.id)}',
   'onClick={() => navigate(guide.destination)}',
   'onClick={() => void load()}',
-]) assert(ui.includes(action), 'Interactive control not wired: ' + action)
+])
+  assert(ui.includes(action), 'Interactive control not wired: ' + action)
 
 for (const classname of [
   'readiness-guide-trigger',
@@ -39,4 +41,6 @@ assert(css.includes('.theme-dark .readiness-dashboard'), 'Provide dark-theme sup
 assert(css.includes(':focus-visible'), 'Include keyboard focus')
 assert(css.includes(':disabled'), 'Include disabled states')
 assert(css.includes('@media (max-width: 700px)'), 'Include small-screen layouts')
-console.log('✓ Readiness buttons: actions preserved, backup confirmation retained, focus and dark theme styled')
+console.log(
+  '✓ Readiness buttons: actions preserved, backup confirmation retained, focus and dark theme styled',
+)

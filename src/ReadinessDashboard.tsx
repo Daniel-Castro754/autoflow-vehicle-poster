@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Activity, ArrowRight, ChevronDown, ClipboardCheck, DatabaseBackup, FolderSearch, RefreshCcw, RotateCcw, ShieldCheck } from 'lucide-react'
+import {
+  Activity,
+  ArrowRight,
+  ChevronDown,
+  ClipboardCheck,
+  DatabaseBackup,
+  FolderSearch,
+  RefreshCcw,
+  RotateCcw,
+  ShieldCheck,
+} from 'lucide-react'
 
 type Status = 'ok' | 'attention' | 'inactive' | 'unknown'
 type Section = 'security' | 'integrations' | 'automation'
@@ -260,7 +270,8 @@ export function ReadinessDashboard({
           disabled={refreshing}
           onClick={() => void load()}
         >
-          <RefreshCcw size={16} aria-hidden="true" /> {refreshing ? 'Atualizando...' : 'Atualizar diagnóstico'}
+          <RefreshCcw size={16} aria-hidden="true" />{' '}
+          {refreshing ? 'Atualizando...' : 'Atualizar diagnóstico'}
         </button>
       </div>
       {error && (
@@ -334,7 +345,11 @@ export function ReadinessDashboard({
                 </span>
               </div>
               {Object.values(reviewed).some(Boolean) && (
-                <button className="readiness-button readiness-button--quiet" type="button" onClick={() => setReviewed({})}>
+                <button
+                  className="readiness-button readiness-button--quiet"
+                  type="button"
+                  onClick={() => setReviewed({})}
+                >
                   <RotateCcw size={15} aria-hidden="true" /> Limpar marcações
                 </button>
               )}
@@ -370,11 +385,17 @@ export function ReadinessDashboard({
                         <small>{guide.summary}</small>
                       </span>
                       <span
-                        className={'readiness-guide-priority readiness-guide-priority--' + guide.priority}
+                        className={
+                          'readiness-guide-priority readiness-guide-priority--' + guide.priority
+                        }
                       >
                         {guidancePriority[guide.priority]}
                       </span>
-                      <ChevronDown className="readiness-guide-chevron" size={19} aria-hidden="true" />
+                      <ChevronDown
+                        className="readiness-guide-chevron"
+                        size={19}
+                        aria-hidden="true"
+                      />
                     </button>
                     {opened && (
                       <div id={'remediation-detail-' + guide.id} className="readiness-guide-detail">
@@ -458,28 +479,28 @@ export function ReadinessDashboard({
                                       <small>{backup.id}</small>
                                     </div>
                                     <div className="readiness-backup-actions">
-                                    <button
-                                      className="readiness-button readiness-button--outline"
-                                      type="button"
-                                      disabled={Boolean(backupVerifying) || Boolean(restoring)}
-                                      onClick={() => void verifyBackup(backup.id)}
-                                    >
-                                      <ClipboardCheck size={16} aria-hidden="true" />
-                                      {backupVerifying === backup.id
-                                        ? 'Verificando...'
-                                        : 'Verificar integridade'}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="readiness-button readiness-button--primary"
-                                      disabled={Boolean(backupVerifying) || Boolean(restoring)}
-                                      onClick={() => void restoreTest(backup.id)}
-                                    >
-                                      <DatabaseBackup size={16} aria-hidden="true" />
-                                      {restoring === backup.id
-                                        ? 'Testando restauração...'
-                                        : 'Ensaiar restauração isolada'}
-                                    </button>
+                                      <button
+                                        className="readiness-button readiness-button--outline"
+                                        type="button"
+                                        disabled={Boolean(backupVerifying) || Boolean(restoring)}
+                                        onClick={() => void verifyBackup(backup.id)}
+                                      >
+                                        <ClipboardCheck size={16} aria-hidden="true" />
+                                        {backupVerifying === backup.id
+                                          ? 'Verificando...'
+                                          : 'Verificar integridade'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="readiness-button readiness-button--primary"
+                                        disabled={Boolean(backupVerifying) || Boolean(restoring)}
+                                        onClick={() => void restoreTest(backup.id)}
+                                      >
+                                        <DatabaseBackup size={16} aria-hidden="true" />
+                                        {restoring === backup.id
+                                          ? 'Testando restauração...'
+                                          : 'Ensaiar restauração isolada'}
+                                      </button>
                                     </div>
                                   </div>
                                 ))}
