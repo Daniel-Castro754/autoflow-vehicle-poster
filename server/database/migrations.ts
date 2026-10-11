@@ -385,7 +385,43 @@ const migrations: Migration[] = [
       CASE WHEN status='removed' THEN COALESCE(removed_at,updated_at) ELSE NULL END
     FROM publication_jobs
     WHERE status IN ('completed','removed') AND COALESCE(result_url,'')!='';`,
-  },
+  },,
+  {
+    version: 23,
+    columns: [],
+    sql: `CREATE TABLE IF NOT EXISTS integration_credentials (
+      id INTEGER PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      created_by INTEGER REFERENCES users(id),
+      name TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      scopes TEXT NOT NULL DEFAULT '[]',
+      active INTEGER NOT NULL DEFAULT 1,
+      expires_at TEXT,
+      last_used_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      revoked_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_integration_credentials_org_active
+      ON integration_credentials (organization_id,active,expires_at);
+    CREATE TABLE IF NOT EXISTS integration_audit_events (
+      id INTEGER PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      credential_id INTEGER REFERENCES integration_credentials(id),
+      actor_user_id INTEGER REFERENCES users(id),
+      action TEXT NOT NULL,
+      resource_type TEXT NOT NULL DEFAULT '',
+      resource_id TEXT NOT NULL DEFAULT '',
+      outcome TEXT NOT NULL CHECK(outcome IN ('allowed','denied','error')),
+      request_id TEXT NOT NULL DEFAULT '',
+      details TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_integration_audit_org_time
+      ON integration_audit_events (organization_id,id DESC);
+    CREATE INDEX IF NOT EXISTS idx_integration_audit_credential_time
+      ON integration_audit_events (credential_id,id DESC);`,
+  }
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {
