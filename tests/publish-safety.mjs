@@ -384,6 +384,41 @@ try {
       'Um job que esgotou o orçamento de retry deveria virar erro em vez de repetir para sempre.',
     )
 
+  // 3a. Recuperação manual usa o mesmo orçamento de retry do monitor e não pode criar loop infinito.
+  const manualRecovery = await call('/publications', adminToken, {
+    method: 'POST',
+    body: JSON.stringify({ vehicleId: vehicle.id, accountId: account.id }),
+  })
+  const manualPrepared = await call(`/extension/jobs/${manualRecovery.id}/prepare`, adminToken, {
+    method: 'POST',
+    body: JSON.stringify({ accountId: account.id, instanceId: 'manual_recovery_budget' }),
+  })
+  testDb
+    .prepare(
+      "UPDATE publication_jobs SET started_at=datetime('now','-30 minutes'),lease_expires_at=datetime('now','-1 second'),retry_count=max_retries WHERE id=?",
+    )
+    .run(manualRecovery.id)
+  const manualExhausted = await call(`/publications/${manualRecovery.id}/recover`, adminToken, {
+    method: 'POST',
+  })
+  if (
+    manualExhausted.status !== 'error' ||
+    manualExhausted.recovery?.exhausted !== true ||
+    manualExhausted.recovery?.toStatus !== 'error'
+  )
+    throw new Error('A recuperação manual deveria respeitar o orçamento de retries esgotado.')
+  const manualRow = jobRow(manualRecovery.id)
+  if (manualRow.status !== 'error')
+    throw new Error('Um job esgotado não pode voltar para a fila pela recuperação manual.')
+  const exhaustedEvent = testDb
+    .prepare(
+      "SELECT details FROM publication_job_events WHERE publication_job_id=? AND event_type='stalled_exhausted' ORDER BY id DESC LIMIT 1",
+    )
+    .get(manualRecovery.id)
+  if (!exhaustedEvent)
+    throw new Error('A recuperação manual esgotada deveria registrar stalled_exhausted.')
+  void manualPrepared
+
   // 3b. attempt_count alto por causa de falhas sem auto-retry ativo (equivalente a reaberturas
   //     fora do mecanismo de retry automático) não deve, sozinho, esgotar o auto-retry do
   //     fill-result quando ele finalmente for ativado — só retry_count governa essa decisão.
