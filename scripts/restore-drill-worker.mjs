@@ -184,8 +184,8 @@ try {
       : code === 'INSUFFICIENT_SPACE'
         ? 'O disco temporário não possui espaço suficiente para a restauração isolada.'
         : /^PROBE_[A-Z_]+$/.test(code)
-        ? 'Falha na inicialização restrita: ' + code
-        : 'Não foi possível restaurar e validar a cópia em ambiente isolado.'
+          ? 'Falha na inicialização restrita: ' + code
+          : 'Não foi possível restaurar e validar a cópia em ambiente isolado.'
   response = { ok: false, error: reason }
 } finally {
   if (temporary) {
