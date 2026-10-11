@@ -316,6 +316,22 @@ const migrations: Migration[] = [
     CREATE INDEX IF NOT EXISTS idx_ai_operation_history_org
       ON ai_operation_history (organization_id,id DESC);`,
   },
+  {
+    version: 19,
+    columns: [],
+    sql: `CREATE TABLE IF NOT EXISTS listing_text_previews (
+      id TEXT PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+      payload TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expires_at TEXT NOT NULL,
+      consumed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_listing_text_previews_scope
+      ON listing_text_previews (organization_id,user_id,vehicle_id,expires_at);`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {
