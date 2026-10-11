@@ -27,14 +27,13 @@ export function handleIntegrationMonthlyReport(
     return true
   }
   const month = url.searchParams.get('month') || ''
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+  if (!/^(20\d{2})-(0[1-9]|1[0-2])$/.test(month)) {
     send(res, 400, { error: 'Informe month no formato AAAA-MM.' })
     return true
   }
   const start = month + '-01'
-  const end = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 1))
-    .toISOString()
-    .slice(0, 10)
+  const endDate = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 1))
+  const end = endDate.toISOString().slice(0, 10)
   const publication = db
     .prepare(
       `SELECT COUNT(*) total,
