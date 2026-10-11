@@ -45,13 +45,6 @@ export async function handleIntegrationPhotoUpload(
     send(res, 409, { error: 'Envio pela integração permitido somente em rascunhos.' })
     return true
   }
-  const count = db
-    .prepare('SELECT COUNT(*) total FROM vehicle_images WHERE vehicle_id=? AND organization_id=?')
-    .get(vehicleId, auth.organizationId) as { total: number }
-  if (count.total >= 20) {
-    send(res, 409, { error: 'Limite de 20 fotos por veículo.' })
-    return true
-  }
   const input = await jsonBody(req, 17 * 1024 * 1024)
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     send(res, 400, { error: 'Dados da foto inválidos.' })
@@ -88,6 +81,13 @@ export async function handleIntegrationPhotoUpload(
     .get(vehicleId, auth.organizationId, hash) as { id: number } | undefined
   if (duplicate) {
     send(res, 200, { id: duplicate.id, duplicate: true, requiresReview: true })
+    return true
+  }
+  const count = db
+    .prepare('SELECT COUNT(*) total FROM vehicle_images WHERE vehicle_id=? AND organization_id=?')
+    .get(vehicleId, auth.organizationId) as { total: number }
+  if (count.total >= 20) {
+    send(res, 409, { error: 'Limite de 20 fotos por veículo.' })
     return true
   }
   const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg'
