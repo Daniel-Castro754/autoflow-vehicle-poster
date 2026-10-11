@@ -511,6 +511,7 @@ try {
       body: JSON.stringify({ vehicleId: sellerVehicle.id, accountId: first.id }),
     }),
   )
+  await approveCurrentPhotos(sellerVehicle.id, sellerToken)
   const sellerPublication = await call('/publications', sellerToken, {
     method: 'POST',
     body: JSON.stringify({ vehicleId: sellerVehicle.id, accountId: second.id }),
@@ -543,7 +544,6 @@ try {
     method: 'PATCH',
     body: JSON.stringify({ ids: [sellerPublication.id], visible: true }),
   })
-  await approveCurrentPhotos(sellerVehicle.id, sellerToken)
   const sellerPrepared = await call(
     `/extension/jobs/${sellerPublication.id}/prepare`,
     sellerToken,
