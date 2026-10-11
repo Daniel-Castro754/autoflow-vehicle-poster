@@ -334,9 +334,7 @@ const migrations: Migration[] = [
   },
   {
     version: 20,
-    columns: [
-      ['vehicle_images', 'photo_category', "TEXT NOT NULL DEFAULT 'other'"],
-    ],
+    columns: [['vehicle_images', 'photo_category', "TEXT NOT NULL DEFAULT 'other'"]],
     sql: `CREATE TABLE IF NOT EXISTS vehicle_photo_selections (
       organization_id INTEGER NOT NULL REFERENCES organizations(id),
       vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
