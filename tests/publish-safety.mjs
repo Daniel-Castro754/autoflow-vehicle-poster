@@ -385,9 +385,10 @@ try {
     )
 
   // 3a. Recuperação manual usa o mesmo orçamento de retry do monitor e não pode criar loop infinito.
+  const manualVehicle = await createReadyVehicle(adminToken)
   const manualRecovery = await call('/publications', adminToken, {
     method: 'POST',
-    body: JSON.stringify({ vehicleId: vehicle.id, accountId: account.id }),
+    body: JSON.stringify({ vehicleId: manualVehicle.id, accountId: account.id }),
   })
   const manualPrepared = await call(`/extension/jobs/${manualRecovery.id}/prepare`, adminToken, {
     method: 'POST',
