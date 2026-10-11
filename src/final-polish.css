@@ -457,7 +457,6 @@ body,
   }
 }
 
-
 /* Ações: hierarquia consistente, áreas clicáveis e estados de interação. */
 .app-shell :is(.title-row .title-actions, .bulk-bar, .drawer) :is(button.primary, button.secondary),
 .app-shell :is(.toolbar, .queue-filters, .report-filters) button {
@@ -474,21 +473,32 @@ body,
   text-align: center;
   vertical-align: middle;
   cursor: pointer;
-  transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
 }
-.app-shell :is(.title-row .title-actions, .bulk-bar, .drawer) :is(button.primary, button.secondary) svg,
+.app-shell
+  :is(.title-row .title-actions, .bulk-bar, .drawer)
+  :is(button.primary, button.secondary)
+  svg,
 .app-shell :is(.toolbar, .queue-filters, .report-filters) button svg {
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
 }
-.app-shell :is(.title-row .title-actions, .bulk-bar, .drawer) :is(button.primary, button.secondary):not(:disabled):active,
+.app-shell
+  :is(.title-row .title-actions, .bulk-bar, .drawer)
+  :is(button.primary, button.secondary):not(:disabled):active,
 .app-shell :is(.toolbar, .queue-filters, .report-filters) button:not(:disabled):active {
   transform: translateY(1px);
 }
-.app-shell :is(.title-row .title-actions, .bulk-bar, .drawer) :is(button.primary, button.secondary):disabled,
+.app-shell
+  :is(.title-row .title-actions, .bulk-bar, .drawer)
+  :is(button.primary, button.secondary):disabled,
 .app-shell :is(.toolbar, .queue-filters, .report-filters) button:disabled {
-  opacity: .52;
+  opacity: 0.52;
   cursor: not-allowed;
   box-shadow: none;
 }
