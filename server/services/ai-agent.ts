@@ -579,7 +579,7 @@ async function planAutopilotJobs(
   }
 
   const assignments: AutopilotResult['assignments'] = []
-  let descriptionsOptimized = 0
+  const descriptionsOptimized = 0
 
   // Autopilot may schedule approved inventory, but it must never rewrite listing copy.
   // Generated copy is applied only through the explicit preview/approval flows.
