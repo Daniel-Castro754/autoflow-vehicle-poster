@@ -6,6 +6,7 @@ import { calculateOptimalSchedule } from '../services/smart-scheduler.ts'
 import { profileCapacity } from '../services/profile-capacity.ts'
 import { findBestAccountForVehicle } from '../services/session-manager.ts'
 import { publicationReadinessIssues } from '../services/publication-policy.ts'
+import { markListingRemoved, recordConfirmedListing } from '../services/publication-ledger.ts'
 
 type AuthContext = { userId: number; organizationId: number }
 type Dependencies = {
@@ -633,10 +634,10 @@ export async function handlePublicationManagementRoute(
     if (!allowed.includes(String(b.status))) return send(res, 400, { error: 'Status inválido.' })
     const job = db
       .prepare(
-        'SELECT vehicle_id vehicleId,status,fill_report fillReport,publish_attempt_at publishAttemptAt FROM publication_jobs WHERE id=? AND organization_id=?',
+        'SELECT vehicle_id vehicleId,social_account_id accountId,result_url resultUrl,status,fill_report fillReport,publish_attempt_at publishAttemptAt FROM publication_jobs WHERE id=? AND organization_id=?',
       )
       .get(Number(publication[1]), auth.organizationId) as
-      | { vehicleId: number; status: string; fillReport?: string; publishAttemptAt?: string }
+      | { vehicleId: number; accountId: number | null; resultUrl?: string; status: string; fillReport?: string; publishAttemptAt?: string }
       | undefined
     if (!job) return send(res, 404, { error: 'Publicação não encontrada.' })
     if (!canManageJobs([Number(publication[1])], auth))
@@ -672,6 +673,16 @@ export async function handlePublicationManagementRoute(
         ).run(nextStatus, Number(publication[1]), auth.organizationId)
       if (nextStatus === 'completed' || nextStatus === 'removed')
         refreshVehiclePublicationStatus(job.vehicleId, auth.organizationId)
+      if (nextStatus === 'completed')
+        recordConfirmedListing(db, {
+          organizationId: auth.organizationId,
+          vehicleId: job.vehicleId,
+          publicationJobId: Number(publication[1]),
+          socialAccountId: job.accountId,
+          resultUrl: job.resultUrl,
+        })
+      if (nextStatus === 'removed')
+        markListingRemoved(db, auth.organizationId, Number(publication[1]))
       const eventType: Record<string, string> = {
         pending: 'retry_requested',
         filling: 'filling_started',
