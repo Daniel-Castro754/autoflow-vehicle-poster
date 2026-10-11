@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statfsSync } from 'node:fs'
+import { createReadStream, mkdtempSync, readdirSync, rmSync, statfsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -28,7 +28,10 @@ try {
   const destination = join(temporary, 'isolated-restoration')
   restoreBackup(directory, destination)
   const databaseFile = join(destination, 'autoflow.db')
-  const digest = createHash('sha256').update(readFileSync(databaseFile)).digest('hex')
+  // Stream large SQLite snapshots instead of holding the database in RAM.
+  const hash = createHash('sha256')
+  for await (const block of createReadStream(databaseFile)) hash.update(block)
+  const digest = hash.digest('hex')
   if (digest !== manifest.database.sha256) throw new Error('RESTORED_DB_MISMATCH')
   const db = new DatabaseSync(databaseFile, { readOnly: true })
   let orgCount, vehicleCount, accountCount
