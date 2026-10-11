@@ -290,11 +290,11 @@ export async function handlePublicationReadRoute(
         j.id jobId,j.status jobStatus,j.extension_version extensionVersion,v.year,v.make,v.model,
         COALESCE(a.label,'Perfil não definido') accountLabel,COALESCE(u.name,'Não atribuído') seller,
         (SELECT MAX(latest.id) FROM publication_job_events latest WHERE latest.publication_job_id=j.id
-          AND latest.event_type IN ('fill_error','filled_waiting_confirmation','stalled_recovered','duplicate_blocked')) latestIssueEventId
+          AND latest.event_type IN ('fill_error','filled_waiting_confirmation','stalled_recovered','stalled_exhausted','stalled_publish_ambiguous','duplicate_blocked')) latestIssueEventId
         FROM publication_job_events event JOIN publication_jobs j ON j.id=event.publication_job_id
         JOIN vehicles v ON v.id=j.vehicle_id LEFT JOIN social_accounts a ON a.id=j.social_account_id
         LEFT JOIN users u ON u.id=v.assigned_user_id WHERE event.organization_id=?
-        AND event.event_type IN ('fill_error','filled_waiting_confirmation','stalled_recovered','duplicate_blocked')`
+        AND event.event_type IN ('fill_error','filled_waiting_confirmation','stalled_recovered','stalled_exhausted','stalled_publish_ambiguous','duplicate_blocked')`
     const rows = (
       before === null
         ? db
@@ -331,6 +331,9 @@ export async function handlePublicationReadRoute(
         ((row.eventType === 'fill_error' && row.jobStatus === 'error') ||
           (row.eventType === 'filled_waiting_confirmation' &&
             row.jobStatus === 'awaiting_confirmation') ||
+          (row.eventType === 'stalled_exhausted' && row.jobStatus === 'error') ||
+          (row.eventType === 'stalled_publish_ambiguous' &&
+            row.jobStatus === 'awaiting_confirmation') ||
           (row.eventType === 'duplicate_blocked' &&
             ['pending', 'awaiting_confirmation'].includes(row.jobStatus)))
       const add = (severity: 'error' | 'warning', category: string, message: string) =>
@@ -354,6 +357,18 @@ export async function handlePublicationReadRoute(
           'warning',
           'recovery',
           `Execução travada recuperada${Number(details.elapsedMinutes) > 0 ? ` após ${details.elapsedMinutes} min` : ''}.`,
+        )
+      if (row.eventType === 'stalled_exhausted')
+        add(
+          'error',
+          'recovery',
+          `Recuperação esgotada após ${details.retryCount ?? '—'}/${details.maxRetries ?? '—'} retries. Revisão manual necessária.`,
+        )
+      if (row.eventType === 'stalled_publish_ambiguous')
+        add(
+          'error',
+          'recovery',
+          'A execução parou após uma possível publicação. Confira o Facebook antes de liberar outra tentativa.',
         )
       if (row.eventType === 'duplicate_blocked')
         add(
