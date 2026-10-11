@@ -121,7 +121,9 @@ try {
   assert.deepEqual(Buffer.from(await repeat.arrayBuffer()), jpeg)
   const invalid = image.url.replace(/[a-f0-9]{64}\.jpg$/, '0'.repeat(64) + '.jpg')
   assert.equal((await fetch(invalid)).status, 403)
-  console.log('✓ Signed images are faithful, stable and limited to approved photos; distinct stock units can be listed.')
+  console.log(
+    '✓ Signed images are faithful, stable and limited to approved photos; distinct stock units can be listed.',
+  )
 } finally {
   db.close()
   await server.close()

@@ -1,7 +1,11 @@
 import { handleIntegrationMonthlyReport } from './integration-reports.ts'
 import { handleIntegrationPhotoUpload } from './integration-photos.ts'
 import { applyVehicleDefaults, validateVehicleBody } from '../services/vehicle-input.ts'
-import { findVehicleIdentifierConflict, normalizeInventoryIdentifier, validateInventoryIdentifiers } from '../services/vehicle-import.ts'
+import {
+  findVehicleIdentifierConflict,
+  normalizeInventoryIdentifier,
+  validateInventoryIdentifiers,
+} from '../services/vehicle-import.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import {
@@ -94,23 +98,42 @@ export async function handleIntegrationRoute(
     }
     const conflict = findVehicleIdentifierConflict(db, auth.organizationId, stockCode, vin)
     if (conflict) {
-      send(res, 409, { error: 'Identificador de estoque ou chassi já cadastrado.', duplicateVehicleId: conflict.id })
+      send(res, 409, {
+        error: 'Identificador de estoque ou chassi já cadastrado.',
+        duplicateVehicleId: conflict.id,
+      })
       return true
     }
-    const created = db.prepare(
-      `INSERT INTO vehicles
+    const created = db
+      .prepare(
+        `INSERT INTO vehicles
        (organization_id,year,make,model,trim,price,km,stock_code,vin,status,assigned_user_id,
         vehicle_type,location,transmission,fuel_type,body_type,exterior_color,interior_color,
         vehicle_condition,description)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    ).run(
-      auth.organizationId, Number(vehicle.year), String(vehicle.make), String(vehicle.model).trim(),
-      String(vehicle.trim || ''), Number(vehicle.price), Number(vehicle.km), stockCode, vin,
-      'Rascunho', auth.createdBy, String(vehicle.vehicleType), String(vehicle.location).trim(),
-      String(vehicle.transmission), String(vehicle.fuelType), String(vehicle.bodyType),
-      String(vehicle.exteriorColor), String(vehicle.interiorColor), String(vehicle.condition),
-      String(vehicle.description).trim(),
-    )
+      )
+      .run(
+        auth.organizationId,
+        Number(vehicle.year),
+        String(vehicle.make),
+        String(vehicle.model).trim(),
+        String(vehicle.trim || ''),
+        Number(vehicle.price),
+        Number(vehicle.km),
+        stockCode,
+        vin,
+        'Rascunho',
+        auth.createdBy,
+        String(vehicle.vehicleType),
+        String(vehicle.location).trim(),
+        String(vehicle.transmission),
+        String(vehicle.fuelType),
+        String(vehicle.bodyType),
+        String(vehicle.exteriorColor),
+        String(vehicle.interiorColor),
+        String(vehicle.condition),
+        String(vehicle.description).trim(),
+      )
     const id = Number(created.lastInsertRowid)
     db.prepare(
       `INSERT INTO integration_audit_events
@@ -131,7 +154,8 @@ export async function handleIntegrationRoute(
       status: 'ready',
       apiVersion: 'v1',
       integration: auth.name,
-      readOnly: !integrationHasScope(auth, 'vehicles:create') && !integrationHasScope(auth, 'photos:write'),
+      readOnly:
+        !integrationHasScope(auth, 'vehicles:create') && !integrationHasScope(auth, 'photos:write'),
       scopes: [...auth.scopes].sort(),
     })
     return true

@@ -66,11 +66,12 @@ export function signedPublicationPhotoToken(
   jobId: number,
   imageId: number,
 ): string {
-  if (!secret || ![organizationId, jobId, imageId].every((id) => Number.isSafeInteger(id) && id > 0))
+  if (
+    !secret ||
+    ![organizationId, jobId, imageId].every((id) => Number.isSafeInteger(id) && id > 0)
+  )
     throw new Error('Referência inválida para imagem da publicação.')
-  return createHmac('sha256', secret)
-    .update(`${organizationId}:${jobId}:${imageId}`)
-    .digest('hex')
+  return createHmac('sha256', secret).update(`${organizationId}:${jobId}:${imageId}`).digest('hex')
 }
 
 // The only changes are mild presentation corrections to the *same* approved
@@ -80,8 +81,7 @@ export async function renderMildPhotoVariant(
   jobId: number,
   imageId: number,
 ): Promise<Buffer> {
-  if (!Buffer.isBuffer(buffer) || !buffer.length)
-    throw new Error('Fotografia inválida.')
+  if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error('Fotografia inválida.')
   if (![jobId, imageId].every((value) => Number.isSafeInteger(value) && value > 0))
     throw new Error('Identificador de fotografia inválido.')
   const seed = (jobId * 31 + imageId * 17) % 5

@@ -622,9 +622,7 @@ async function planAutopilotJobs(
     for (const account of accounts) {
       const lastActivity = lastProfileActivityAt(db, organizationId, account.id)
       const pacing = profileCapacity(db, organizationId, account.id)
-      const baseAllowed = lastActivity == null
-        ? 0
-        : lastActivity + pacing.intervalMinutes * 60000
+      const baseAllowed = lastActivity == null ? 0 : lastActivity + pacing.intervalMinutes * 60000
       const cooldownAllowed = pacing.nextAllowedAt ? Date.parse(pacing.nextAllowedAt) : 0
       accountNextAllowedAt.set(
         account.id,

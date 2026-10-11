@@ -117,8 +117,7 @@ export function profileCapacity(
     )
     .get(organizationId, accountId) as { nextAllowedAt: string | null } | undefined
   const cooldownAt = parseSqliteTimestamp(storedCooldown?.nextAllowedAt)
-  const regularAt =
-    lastActivityAt == null ? null : lastActivityAt + limits.intervalMinutes * 60000
+  const regularAt = lastActivityAt == null ? null : lastActivityAt + limits.intervalMinutes * 60000
   const nextAllowedTime = Math.max(regularAt || 0, cooldownAt || 0) || null
   const retryAfterSeconds =
     nextAllowedTime != null && nextAllowedTime > now ? Math.ceil((nextAllowedTime - now) / 1000) : 0

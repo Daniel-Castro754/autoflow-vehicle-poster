@@ -463,8 +463,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           WHERE job.id=? AND i.id=? AND job.status!='canceled'`,
         )
         .get(jobId, photoId) as
-        | { organizationId: number; fileName: string; photoIds: string }
-        | undefined
+        { organizationId: number; fileName: string; photoIds: string } | undefined
       if (!source) return send(res, 404, { error: 'Fotografia não encontrada.' })
       const expected = signedPublicationPhotoToken(secret, source.organizationId, jobId, photoId)
       if (!timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(imageVariant[3], 'hex')))

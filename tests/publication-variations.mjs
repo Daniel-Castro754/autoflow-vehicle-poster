@@ -66,9 +66,16 @@ assert.equal(info.format, 'jpeg')
 assert(info.width <= 1600 && info.height <= 1600)
 const mild = await renderMildPhotoVariant(real, 1, 1)
 assert.equal((await sharp(mild).metadata()).format, 'jpeg')
-assert.deepEqual(await renderMildPhotoVariant(real, 1, 1), mild, 'Image edits must be deterministic.')
+assert.deepEqual(
+  await renderMildPhotoVariant(real, 1, 1),
+  mild,
+  'Image edits must be deterministic.',
+)
 assert.equal(signedPublicationPhotoToken('secret', 1, 1, 1).length, 64)
-assert.notEqual(signedPublicationPhotoToken('secret', 1, 1, 1), signedPublicationPhotoToken('secret', 1, 1, 2))
+assert.notEqual(
+  signedPublicationPhotoToken('secret', 1, 1, 1),
+  signedPublicationPhotoToken('secret', 1, 1, 2),
+)
 
 const db = new DatabaseSync(':memory:')
 try {
@@ -97,7 +104,11 @@ try {
   const secondHash = calculateListingHash(second)
   assert(first.description.includes('AF-000001'))
   assert(second.description.includes('AF-000002'))
-  assert.notEqual(hash, secondHash, 'Two inventory units can have the same model, price and original copy.')
+  assert.notEqual(
+    hash,
+    secondHash,
+    'Two inventory units can have the same model, price and original copy.',
+  )
   assert.deepEqual(listingSnapshotForVehicle(db, 1, 1), first, 'Text remains stable on retry.')
   assert.match(hash, /^[a-f0-9]{64}$/)
   assert.notEqual(calculateListingHash({ ...first, price: first.price + 1 }), hash)
@@ -123,4 +134,6 @@ try {
 } finally {
   db.close()
 }
-console.log('✓ Publication variation: category blocks, faithful Sharp resize, scoped hashes, idempotency and cooldown.')
+console.log(
+  '✓ Publication variation: category blocks, faithful Sharp resize, scoped hashes, idempotency and cooldown.',
+)
