@@ -50,6 +50,7 @@ type Dependencies = {
   refreshVehiclePublicationStatus: (vehicleId: number, organizationId: number) => void
   parseGroupTarget: (value: unknown) => { name: string; groupKey: string; url: string }
   imageBaseUrl: string
+  imageVariantSecret: string
 }
 
 export function isExtensionRoute(req: IncomingMessage, url: URL) {
@@ -95,6 +96,7 @@ export async function handleExtensionRoute(
     refreshVehiclePublicationStatus,
     parseGroupTarget,
     imageBaseUrl,
+    imageVariantSecret,
   }: Dependencies,
 ): Promise<void> {
   if (req.method === 'GET' && url.pathname === '/api/extension/accounts') {
@@ -328,6 +330,8 @@ export async function handleExtensionRoute(
     if (!vehicle) return send(res, 404, { error: 'Veículo não encontrado.' })
     let images: ReturnType<typeof publicationPhotoPayload>
     let preparedListingHash: string
+    let preparedTitle = ''
+    let preparedDescription = ''
     try {
       images = publicationPhotoPayload(db, auth.organizationId, job.vehicleId, imageBaseUrl)
       const prepared = prepareListingForPublication(
@@ -337,8 +341,11 @@ export async function handleExtensionRoute(
         job.vehicleId,
         imageBaseUrl,
         images,
+        imageVariantSecret,
       )
       preparedListingHash = prepared.listingHash
+      preparedTitle = prepared.content.title
+      preparedDescription = prepared.content.description
       images = prepared.images
     } catch (error) {
       if (error instanceof PhotoCurationConflict)
@@ -442,7 +449,7 @@ export async function handleExtensionRoute(
       leaseSeconds,
       tabId,
       document,
-      vehicle: { ...vehicle, images },
+      vehicle: { ...vehicle, title: preparedTitle, description: preparedDescription, images },
       automation: {
         autoAdvance: Boolean(settings?.autoAdvance),
         fillGroups: Boolean(settings?.fillGroups),
