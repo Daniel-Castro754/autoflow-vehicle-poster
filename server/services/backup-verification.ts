@@ -1,10 +1,14 @@
-import { lstatSync, readdirSync, realpathSync } from 'node:fs'
+import { lstatSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const nameFormat = /^autoflow-backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z$/
 const workerFile = fileURLToPath(new URL('../../scripts/verify-backup-worker.mjs', import.meta.url))
+const restoreWorker = fileURLToPath(
+  new URL('../../scripts/restore-drill-worker.mjs', import.meta.url),
+)
 let verificationBusy = false
 
 export type ListedBackup = {
@@ -185,6 +189,164 @@ export async function verifyLocalBackup(id: string): Promise<VerificationResult>
       })
     })
   } finally {
+    verificationBusy = false
+  }
+}
+
+export type RestoreDrill = {
+  id: string
+  testedAt: string
+  createdAt: string
+  databaseBytes: number
+  imageCount: number
+  vaultIncluded: boolean
+  organizationCount: number
+  vehicleCount: number
+  accountCount: number
+  restoredFiles: true
+  databaseOpened: true
+  applicationStarted: false
+  dpapiValidated: false
+  temporaryRemoved: true
+}
+
+export type RestoreDrillResult =
+  { ok: true; result: RestoreDrill } | { ok: false; status: number; error: string }
+
+/**
+ * Always isolates restored bytes in an OS-generated sandbox, which is owned
+ * by the parent process. Parent cleanup also runs when a worker times out.
+ * Shares the verifier's busy flag to avoid overlapping costly disk operations.
+ */
+export async function runIsolatedRestoreDrill(id: string): Promise<RestoreDrillResult> {
+  const selected = selectedBackup(id)
+  if (!selected) {
+    return { ok: false, status: 400, error: 'Cópia não encontrada ou contém itens não permitidos.' }
+  }
+  if (verificationBusy) {
+    return { ok: false, status: 409, error: 'Já existe uma operação de backup em andamento.' }
+  }
+  verificationBusy = true
+  let sandbox: string | null = null
+  try {
+    sandbox = mkdtempSync(join(tmpdir(), 'autoflow-restore-check-'))
+    const tempPath = sandbox
+    return await new Promise<RestoreDrillResult>((done) => {
+      const child = spawn(process.execPath, [restoreWorker, selected, tempPath], {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: {
+          PATH: process.env.PATH || '',
+          Path: process.env.Path || '',
+          SystemRoot: process.env.SystemRoot || '',
+          TEMP: process.env.TEMP || '',
+          TMP: process.env.TMP || '',
+        },
+      })
+      let output = ''
+      let timedOut = false
+      let oversized = false
+      let launchError = false
+      const timer = setTimeout(() => {
+        timedOut = true
+        child.kill()
+      }, 180_000)
+      child.stdout.on('data', (chunk: Buffer) => {
+        output += chunk.toString('utf8')
+        if (output.length > 8192) {
+          oversized = true
+          child.kill()
+        }
+      })
+      child.on('error', () => {
+        launchError = true
+      })
+      child.on('close', (code) => {
+        clearTimeout(timer)
+        let cleaned = false
+        try {
+          rmSync(tempPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+          cleaned = true
+          sandbox = null
+        } catch {
+          // Never return success if the restored database might be left on disk.
+        }
+        if (!cleaned) {
+          done({ ok: false, status: 500, error: 'Falha ao limpar a área temporária do teste.' })
+          return
+        }
+        if (timedOut) {
+          done({
+            ok: false,
+            status: 504,
+            error: 'Teste excedeu três minutos; diretório temporário removido.',
+          })
+          return
+        }
+        if (oversized || launchError) {
+          done({ ok: false, status: 502, error: 'Falha no processo isolado de restauração.' })
+          return
+        }
+        try {
+          const payload = JSON.parse(output) as Record<string, unknown>
+          if (
+            code === 0 &&
+            payload.ok === true &&
+            payload.restoredFiles === true &&
+            payload.databaseOpened === true &&
+            payload.applicationStarted === false &&
+            payload.dpapiValidated === false &&
+            Number.isSafeInteger(payload.databaseBytes) &&
+            Number.isSafeInteger(payload.imageCount) &&
+            Number.isSafeInteger(payload.organizationCount) &&
+            Number.isSafeInteger(payload.vehicleCount) &&
+            Number.isSafeInteger(payload.accountCount) &&
+            typeof payload.createdAt === 'string'
+          ) {
+            done({
+              ok: true,
+              result: {
+                id,
+                testedAt: new Date().toISOString(),
+                createdAt: payload.createdAt,
+                databaseBytes: payload.databaseBytes as number,
+                imageCount: payload.imageCount as number,
+                organizationCount: payload.organizationCount as number,
+                vehicleCount: payload.vehicleCount as number,
+                accountCount: payload.accountCount as number,
+                vaultIncluded: payload.vaultIncluded === true,
+                restoredFiles: true,
+                databaseOpened: true,
+                applicationStarted: false,
+                dpapiValidated: false,
+                temporaryRemoved: true,
+              },
+            })
+          } else {
+            done({
+              ok: false,
+              status: 422,
+              error:
+                typeof payload.error === 'string'
+                  ? payload.error.slice(0, 180)
+                  : 'O ensaio isolado de restauração falhou.',
+            })
+          }
+        } catch {
+          done({ ok: false, status: 502, error: 'Resposta inválida do ensaio isolado.' })
+        }
+      })
+    })
+  } catch {
+    return { ok: false, status: 500, error: 'Não foi possível preparar o ambiente temporário.' }
+  } finally {
+    if (sandbox) {
+      try {
+        rmSync(sandbox, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+      } catch {
+        // The worker never receives the production DATA_DIR.
+      }
+    }
     verificationBusy = false
   }
 }

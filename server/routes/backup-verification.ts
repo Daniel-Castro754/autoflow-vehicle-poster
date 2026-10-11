@@ -1,6 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
-import { listLocalBackups, verifyLocalBackup } from '../services/backup-verification.ts'
+import {
+  listLocalBackups,
+  runIsolatedRestoreDrill,
+  verifyLocalBackup,
+} from '../services/backup-verification.ts'
 
 type Auth = { organizationId: number }
 type Deps = {
@@ -24,7 +28,8 @@ export async function handleBackupVerificationRoute(
 ): Promise<boolean> {
   const list = url.pathname === '/api/health/backups'
   const verify = url.pathname === '/api/health/backups/verify'
-  if (!list && !verify) return false
+  const restoreDrill = url.pathname === '/api/health/backups/restore-drill'
+  if (!list && !verify && !restoreDrill) return false
   res.setHeader('Cache-Control', 'no-store')
   if (!isAdmin) {
     send(res, 403, { error: 'Somente administradores podem verificar backups.' })
@@ -41,7 +46,7 @@ export async function handleBackupVerificationRoute(
     send(res, 200, listLocalBackups())
     return true
   }
-  if (verify && req.method === 'POST') {
+  if ((verify || restoreDrill) && req.method === 'POST') {
     const body = await jsonBody(req)
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       send(res, 400, { error: 'Selecione uma cópia válida.' })
@@ -52,7 +57,16 @@ export async function handleBackupVerificationRoute(
       send(res, 400, { error: 'Identificador de cópia inválido.' })
       return true
     }
-    const result = await verifyLocalBackup(candidate)
+    if (
+      restoreDrill &&
+      (body as Record<string, unknown>).confirmation !== 'TESTAR_RESTAURACAO_ISOLADA'
+    ) {
+      send(res, 400, { error: 'É necessário confirmar o teste de restauração isolada.' })
+      return true
+    }
+    const result = restoreDrill
+      ? await runIsolatedRestoreDrill(candidate)
+      : await verifyLocalBackup(candidate)
     if (!result.ok) send(res, result.status, { error: result.error })
     else send(res, 200, result.result)
     return true

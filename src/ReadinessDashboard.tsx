@@ -15,6 +15,23 @@ type VerifiedBackup = {
   restoreTested: false
 }
 
+type RestoredBackupTest = {
+  id: string
+  testedAt: string
+  createdAt: string
+  databaseBytes: number
+  imageCount: number
+  vaultIncluded: boolean
+  vehicleCount: number
+  accountCount: number
+  organizationCount: number
+  restoredFiles: true
+  databaseOpened: true
+  applicationStarted: false
+  dpapiValidated: false
+  temporaryRemoved: true
+}
+
 type ReadinessCheck = {
   id: string
   section: Section
@@ -112,9 +129,13 @@ export function ReadinessDashboard({
   const [backupResult, setBackupResult] = useState<VerifiedBackup | null>(null)
   const [backupVerifying, setBackupVerifying] = useState<string | null>(null)
   const [backupLoading, setBackupLoading] = useState(false)
+  const [restoring, setRestoring] = useState<string | null>(null)
+  const [restoredResult, setRestoredResult] = useState<RestoredBackupTest | null>(null)
   async function listBackups() {
     setBackupLoading(true)
     setBackupListError('')
+    setBackupResult(null)
+    setRestoredResult(null)
     try {
       const found = await api<{ available: boolean; backups: BackupEntry[] }>('/health/backups')
       setBackupCopies(found.backups)
@@ -140,6 +161,7 @@ export function ReadinessDashboard({
       return
     setBackupVerifying(backupId)
     setBackupResult(null)
+    setRestoredResult(null)
     setBackupListError('')
     try {
       const result = await api<VerifiedBackup>('/health/backups/verify', {
@@ -153,6 +175,34 @@ export function ReadinessDashboard({
       )
     } finally {
       setBackupVerifying(null)
+    }
+  }
+
+  async function restoreTest(backupId: string) {
+    if (
+      !window.confirm(
+        'Executar ENSAIO de restauração da cópia ' +
+          backupId +
+          ' em pasta temporária? O AutoFlow não será iniciado nem os seus dados atuais alterados. ' +
+          'Os arquivos temporários serão eliminados depois da validação. Pode levar até três minutos.',
+      )
+    )
+      return
+    setRestoring(backupId)
+    setRestoredResult(null)
+    setBackupListError('')
+    try {
+      const result = await api<RestoredBackupTest>('/health/backups/restore-drill', {
+        method: 'POST',
+        body: JSON.stringify({ backupId, confirmation: 'TESTAR_RESTAURACAO_ISOLADA' }),
+      })
+      setRestoredResult(result)
+    } catch {
+      setBackupListError(
+        'O ensaio de restauração não foi concluído. Mantenha o backup original e verifique o disco temporário do servidor se houve falha de limpeza.',
+      )
+    } finally {
+      setRestoring(null)
     }
   }
 
@@ -378,17 +428,20 @@ export function ReadinessDashboard({
                               marginBottom: 14,
                             }}
                           >
-                            <strong>Conferência de integridade de backups</strong>
+                            <strong>Verificação e ensaio de restauração de backups</strong>
                             <p className="health-note">
                               Procura somente na pasta de backups do servidor. A verificação confere
-                              hashes, SQLite, fotos e cofre. Não restaura arquivos, não confirma que
-                              as chaves DPAPI funcionem em outro Windows e não substitui um teste
-                              real de restauração.
+                              hashes, SQLite, fotos e cofre. O ensaio separado copia o backup para
+                              uma pasta temporária, abre o banco restaurado e apaga a cópia de
+                              teste. Não confirma que o servidor inicia, que a extensão funciona ou
+                              que o DPAPI pode ser aberto em outro usuário Windows.
                             </p>
                             <button
                               className="secondary"
                               type="button"
-                              disabled={backupLoading || Boolean(backupVerifying)}
+                              disabled={
+                                backupLoading || Boolean(backupVerifying) || Boolean(restoring)
+                              }
                               onClick={() => void listBackups()}
                             >
                               <RefreshCcw size={14} />
@@ -427,16 +480,37 @@ export function ReadinessDashboard({
                                     <button
                                       className="secondary"
                                       type="button"
-                                      disabled={Boolean(backupVerifying)}
+                                      disabled={Boolean(backupVerifying) || Boolean(restoring)}
                                       onClick={() => void verifyBackup(backup.id)}
                                     >
                                       {backupVerifying === backup.id
                                         ? 'Verificando...'
                                         : 'Verificar integridade'}
                                     </button>
+                                    <button
+                                      type="button"
+                                      className="secondary"
+                                      disabled={Boolean(backupVerifying) || Boolean(restoring)}
+                                      onClick={() => void restoreTest(backup.id)}
+                                    >
+                                      {restoring === backup.id
+                                        ? 'Testando restauração...'
+                                        : 'Ensaiar restauração isolada'}
+                                    </button>
                                   </div>
                                 ))}
                               </div>
+                            )}
+                            {restoredResult && (
+                              <p role="status" className="health-note" style={{ marginTop: 12 }}>
+                                Cópia restaurada em ambiente temporário em{' '}
+                                {displayMoment(restoredResult.testedAt)}. Banco SQLite aberto,{' '}
+                                {restoredResult.vehicleCount} veículo(s),{' '}
+                                {restoredResult.accountCount} usuário(s),{' '}
+                                {restoredResult.imageCount} imagem(ns). Arquivos temporários
+                                removidos. O servidor AutoFlow não foi iniciado e o DPAPI não foi
+                                testado.
+                              </p>
                             )}
                             {backupResult && (
                               <p role="status" className="health-note" style={{ marginTop: 12 }}>
