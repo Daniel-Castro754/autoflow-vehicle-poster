@@ -71,6 +71,17 @@ async function expectStatus(status, operation) {
     if (error.status !== status) throw error
   }
 }
+async function approveCurrentPhotos(vehicleId, token) {
+  const curation = await call(`/vehicles/${vehicleId}/photos/curation`, token)
+  if (!curation.recommendation?.length) throw new Error('Fixture sem fotos para aprovar.')
+  await call(`/vehicles/${vehicleId}/photos/selection`, token, {
+    method: 'POST',
+    body: JSON.stringify({
+      photoIds: curation.recommendation,
+      fingerprint: curation.fingerprint,
+    }),
+  })
+}
 async function expectMissingSecretFailure() {
   const env = { ...process.env, PORT: '3398', DATA_DIR: join(dataDir, 'missing-secret') }
   delete env.AUTH_SECRET
@@ -532,6 +543,7 @@ try {
     method: 'PATCH',
     body: JSON.stringify({ ids: [sellerPublication.id], visible: true }),
   })
+  await approveCurrentPhotos(sellerVehicle.id, sellerToken)
   const sellerPrepared = await call(
     `/extension/jobs/${sellerPublication.id}/prepare`,
     sellerToken,
