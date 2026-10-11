@@ -14,6 +14,7 @@ import {
   validImageContent,
   validateVehicleBody,
 } from '../services/vehicle-input.ts'
+import { releaseUnpublishedHash } from '../services/duplicate-checker.ts'
 import {
   csvVehicles,
   findVehicleIdentifierConflict,
@@ -742,7 +743,10 @@ export async function handleVehicleMutationRoute(
           { reason: 'vehicle_sold', requiresReview: needsReview },
         )
         if (needsReview) reviewJobs++
-        else canceledJobs++
+        else {
+          releaseUnpublishedHash(db, auth.organizationId, job.id)
+          canceledJobs++
+        }
       }
       db.exec('COMMIT')
     } catch (error) {
