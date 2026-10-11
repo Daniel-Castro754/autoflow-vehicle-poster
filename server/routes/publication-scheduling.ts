@@ -2,6 +2,7 @@ import { organizationScheduleHistory } from '../services/schedule-history.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { calculateOptimalSchedule } from '../services/smart-scheduler.ts'
+import { profileLimits } from '../services/profile-capacity.ts'
 
 type AuthContext = { userId: number; organizationId: number }
 type Dependencies = {
@@ -62,6 +63,7 @@ export async function handlePublicationSchedulingRoute(
     const optimal = calculateOptimalSchedule({
       existingTimestamps,
       accountId: job.accountId,
+      spacingMinutes: profileLimits(db, auth.organizationId, job.accountId).intervalMinutes,
       historicalData: organizationScheduleHistory(db, auth.organizationId),
     })
 
@@ -144,6 +146,7 @@ async function scheduleBatch(
     const optimal = calculateOptimalSchedule({
       existingTimestamps: profileTimes,
       accountId: job.accountId,
+      spacingMinutes: profileLimits(db, auth.organizationId, job.accountId).intervalMinutes,
       historicalData: organizationScheduleHistory(db, auth.organizationId),
     })
     profileTimes.push(optimal.scheduledAt.getTime())

@@ -346,6 +346,14 @@ const migrations: Migration[] = [
     CREATE INDEX IF NOT EXISTS idx_vehicle_photo_selections_org
       ON vehicle_photo_selections (organization_id,vehicle_id);`,
   },
+  {
+    version: 21,
+    columns: [
+      ['social_accounts', 'daily_limit_override', 'INTEGER'],
+      ['social_accounts', 'execution_interval_minutes_override', 'INTEGER'],
+    ],
+    sql: '',
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

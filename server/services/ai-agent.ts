@@ -8,6 +8,7 @@ import {
 } from './description-generator.ts'
 import { generateVehicleHashtags } from './trending-hashtags.ts'
 import { calculateOptimalSchedule } from './smart-scheduler.ts'
+import { profileLimits, lastProfileActivityAt } from './profile-capacity.ts'
 import { organizationScheduleHistory } from './schedule-history.ts'
 import { findBestAccountForVehicle } from './session-manager.ts'
 import { coordinateAutopilot, skippedAutopilot } from './autopilot-coordinator.ts'
@@ -473,11 +474,11 @@ async function planAutopilotJobs(
   const dailyLimit = Math.max(1, Number(settings?.dailyLimit) || 10)
   const accountCapacity = db
     .prepare(
-      `SELECT a.id,MAX(0,?-COALESCE(SUM(CASE WHEN autoflow_day(j.created_at)=autoflow_day(CURRENT_TIMESTAMP) AND j.status!='canceled' THEN 1 ELSE 0 END),0)) remaining
+      `SELECT a.id,MAX(0,MIN(COALESCE(a.daily_limit_override,?),?)-COALESCE(SUM(CASE WHEN autoflow_day(j.created_at)=autoflow_day(CURRENT_TIMESTAMP) AND j.status!='canceled' THEN 1 ELSE 0 END),0)) remaining
     FROM social_accounts a LEFT JOIN publication_jobs j ON j.organization_id=a.organization_id AND j.social_account_id=a.id
-    WHERE a.organization_id=? AND a.status='connected' GROUP BY a.id`,
+    WHERE a.organization_id=? AND a.status='connected' AND COALESCE(a.automation_paused,0)=0 GROUP BY a.id`,
     )
-    .all(dailyLimit, organizationId) as Array<{ id: number; remaining: number }>
+    .all(dailyLimit, dailyLimit, organizationId) as Array<{ id: number; remaining: number }>
   const remainingCapacity = accountCapacity.reduce(
     (total, account) => total + Math.max(0, Number(account.remaining) || 0),
     0,
@@ -622,15 +623,6 @@ async function planAutopilotJobs(
       db.exec('COMMIT')
       return skippedAutopilot('Rodada interrompida: configuração alterada ou execução expirada.')
     }
-    const latestSettings = db
-      .prepare(
-        'SELECT execution_interval_minutes executionIntervalMinutes FROM organization_settings WHERE organization_id=?',
-      )
-      .get(organizationId) as { executionIntervalMinutes: number }
-    const executionIntervalMinutes = Math.max(
-      0,
-      Math.min(1440, Number(latestSettings.executionIntervalMinutes ?? 25)),
-    )
     // Existing upcoming jobs to avoid schedule collision
     const existingJobs = db
       .prepare(
@@ -652,21 +644,15 @@ async function planAutopilotJobs(
         )
       }
     }
-    const completedJobs = db
-      .prepare(
-        `SELECT social_account_id accountId,MAX(updated_at) completedAt FROM publication_jobs
-    WHERE organization_id=? AND status IN ('completed','removed') GROUP BY social_account_id`,
+    for (const account of accounts) {
+      const lastActivity = lastProfileActivityAt(db, organizationId, account.id)
+      if (lastActivity == null) continue
+      const nextAllowed =
+        lastActivity + profileLimits(db, organizationId, account.id).intervalMinutes * 60000
+      accountNextAllowedAt.set(
+        account.id,
+        Math.max(accountNextAllowedAt.get(account.id) || 0, nextAllowed),
       )
-      .all(organizationId) as Array<{ accountId: number; completedAt: string }>
-    for (const item of completedJobs) {
-      const completedAt = Date.parse(`${item.completedAt.replace(' ', 'T')}Z`)
-      if (Number.isFinite(completedAt)) {
-        const nextAllowedAt = completedAt + executionIntervalMinutes * 60000
-        accountNextAllowedAt.set(
-          item.accountId,
-          Math.max(accountNextAllowedAt.get(item.accountId) || 0, nextAllowedAt),
-        )
-      }
     }
 
     const historicalData = organizationScheduleHistory(db, organizationId)
@@ -724,6 +710,11 @@ async function planAutopilotJobs(
 
       const targetAccountId = best.id
       const targetAccountLabel = best.label
+      const profileIntervalMinutes = profileLimits(
+        db,
+        organizationId,
+        targetAccountId,
+      ).intervalMinutes
 
       // Step C: Calculate optimal schedule
       const existingTimestamps = accountSchedules.get(targetAccountId) || []
@@ -733,11 +724,12 @@ async function planAutopilotJobs(
         accountId: targetAccountId,
         referenceDate: new Date(referenceTime),
         historicalData,
+        spacingMinutes: profileIntervalMinutes,
       })
       accountSchedules.set(targetAccountId, [...existingTimestamps, optimal.scheduledAt.getTime()])
       accountNextAllowedAt.set(
         targetAccountId,
-        optimal.scheduledAt.getTime() + executionIntervalMinutes * 60000,
+        optimal.scheduledAt.getTime() + profileIntervalMinutes * 60000,
       )
 
       // Step D: Insert into publication jobs

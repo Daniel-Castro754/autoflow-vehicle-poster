@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { closeSelectorCircuitBreaker } from '../services/selector-health.ts'
+import { profileCapacity } from '../services/profile-capacity.ts'
 import { recordAiAudit } from '../services/ai-audit-history.ts'
 import { encryptCredential } from '../services/credential-vault.ts'
 import { validateTelegramDestination, validateWebhookAddress } from '../services/alert-secrets.ts'
@@ -494,6 +495,57 @@ export async function handleOrganizationRoute(
       throw error
     }
     send(res, 200, { ok: true, active: body.active })
+    return true
+  }
+
+  const capacityRoute = url.pathname.match(/^\/api\/social-accounts\/(\d+)\/capacity$/)
+  if (capacityRoute && (req.method === 'GET' || req.method === 'PATCH')) {
+    const accountId = Number(capacityRoute[1])
+    const account = db
+      .prepare('SELECT id,user_id userId FROM social_accounts WHERE id=? AND organization_id=?')
+      .get(accountId, auth.organizationId) as { id: number; userId: number } | undefined
+    if (!account) {
+      send(res, 404, { error: 'Perfil de publicação não encontrado.' })
+      return true
+    }
+    if (!isAdmin(auth) && account.userId !== auth.userId) {
+      send(res, 403, { error: 'Você não pode consultar este perfil.' })
+      return true
+    }
+    if (req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store')
+      send(res, 200, profileCapacity(db, auth.organizationId, accountId))
+      return true
+    }
+    if (!isAdmin(auth)) {
+      send(res, 403, { error: 'Somente administradores podem alterar os limites de perfis.' })
+      return true
+    }
+    const body = (await jsonBody(req)) as Record<string, unknown> | null
+    const validOverride = (value: unknown, min: number, max: number) =>
+      value === null ||
+      (typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max)
+    if (
+      !body ||
+      !Object.hasOwn(body, 'dailyLimitOverride') ||
+      !Object.hasOwn(body, 'intervalMinutesOverride') ||
+      !validOverride(body.dailyLimitOverride, 1, 50) ||
+      !validOverride(body.intervalMinutesOverride, 0, 1440)
+    ) {
+      send(res, 400, { error: 'Informe limites inteiros válidos ou null para herdar os padrões.' })
+      return true
+    }
+    db.prepare(
+      'UPDATE social_accounts SET daily_limit_override=?,execution_interval_minutes_override=? ' +
+        'WHERE id=? AND organization_id=?',
+    ).run(
+      body.dailyLimitOverride as number | null,
+      body.intervalMinutesOverride as number | null,
+      accountId,
+      auth.organizationId,
+    )
+    res.setHeader('Cache-Control', 'no-store')
+    send(res, 200, profileCapacity(db, auth.organizationId, accountId))
     return true
   }
 

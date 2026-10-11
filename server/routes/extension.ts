@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto'
 import { publicationMayExist, readPublicationReport } from '../services/publication-evidence.ts'
 import { findBestAccountForVehicle } from '../services/session-manager.ts'
 import { calculateBackoff } from '../lib/retry.ts'
-import { dailyExecutionAttempts } from '../services/daily-capacity.ts'
+import { profileCapacity } from '../services/profile-capacity.ts'
 import { publicationPhotoPayload, PhotoCurationConflict } from '../services/photo-curation.ts'
 import { classifyExtensionFailure } from '../services/publication-policy.ts'
 import { sendCriticalAlert } from '../services/alerting.ts'
@@ -277,46 +277,17 @@ export async function handleExtensionRoute(
         error:
           'Esta execução pode já ter publicado o anúncio. Reconcilie o resultado antes de iniciar outra tentativa.',
       })
-    const executionSettings = db
-      .prepare(
-        `SELECT daily_limit dailyLimit,execution_interval_minutes executionIntervalMinutes
-        FROM organization_settings WHERE organization_id=?`,
-      )
-      .get(auth.organizationId) as
-      { dailyLimit?: number; executionIntervalMinutes?: number } | undefined
-    const dailyLimit = Math.max(1, Number(executionSettings?.dailyLimit || 10))
-    const intervalMinutes = Math.max(
-      0,
-      Math.min(1440, Number(executionSettings?.executionIntervalMinutes ?? 25)),
-    )
-    const executionCount = dailyExecutionAttempts(db, auth.organizationId, accountId)
-    const usage = db
-      .prepare(
-        `SELECT MAX(CASE WHEN status IN ('completed','removed') THEN updated_at END) lastCompletedAt
-        FROM publication_jobs WHERE organization_id=? AND social_account_id=?`,
-      )
-      .get(auth.organizationId, accountId) as { lastCompletedAt?: string | null } | undefined
-    if (executionCount >= dailyLimit)
+    const capacity = profileCapacity(db, auth.organizationId, accountId)
+    if (capacity.blockedByDailyLimit)
       return send(res, 409, {
-        error: `O limite diário deste perfil foi atingido (${dailyLimit} execuções).`,
-        capacity: { dailyLimit, used: executionCount, remaining: 0 },
+        error: 'O perfil atingiu o limite diário de execuções.',
+        capacity,
       })
-    if (intervalMinutes > 0 && usage?.lastCompletedAt) {
-      const elapsed = Date.now() - Date.parse(String(usage.lastCompletedAt).replace(' ', 'T') + 'Z')
-      if (Number.isFinite(elapsed) && elapsed < intervalMinutes * 60000) {
-        const retryAfterSeconds = Math.ceil((intervalMinutes * 60000 - elapsed) / 1000)
-        return send(res, 409, {
-          error: `Aguarde ${Math.ceil(retryAfterSeconds / 60)} min antes de iniciar outra execução neste perfil.`,
-          capacity: {
-            dailyLimit,
-            used: executionCount,
-            remaining: Math.max(0, dailyLimit - executionCount),
-            intervalMinutes,
-            retryAfterSeconds,
-          },
-        })
-      }
-    }
+    if (capacity.retryAfterSeconds > 0)
+      return send(res, 409, {
+        error: 'Aguarde o intervalo operacional deste perfil antes de outra execução.',
+        capacity,
+      })
     let previousReport: Record<string, unknown> = {}
     try {
       previousReport = job.fillReport ? JSON.parse(job.fillReport) : {}
@@ -376,12 +347,16 @@ export async function handleExtensionRoute(
     db.exec('BEGIN IMMEDIATE')
     let acquired: boolean
     try {
-      const currentUsage = dailyExecutionAttempts(db, auth.organizationId, accountId)
-      if (currentUsage >= dailyLimit) {
+      // Enforce capacity after BEGIN IMMEDIATE as well: two API processes cannot
+      // claim two jobs between the preflight capacity check and the lease update.
+      const currentCapacity = profileCapacity(db, auth.organizationId, accountId)
+      if (currentCapacity.blockedByDailyLimit || currentCapacity.retryAfterSeconds > 0) {
         db.exec('COMMIT')
         return send(res, 409, {
-          error: `O limite diário deste perfil foi atingido (${dailyLimit} execuções).`,
-          capacity: { dailyLimit, used: currentUsage, remaining: 0 },
+          error: currentCapacity.blockedByDailyLimit
+            ? 'O perfil atingiu o limite diário de execuções.'
+            : 'O intervalo operacional deste perfil ainda não terminou.',
+          capacity: currentCapacity,
         })
       }
       const result = db

@@ -34,7 +34,8 @@ db.exec(`
     last_seen_at TEXT,
     automation_paused INTEGER NOT NULL DEFAULT 0,
     automation_pause_reason TEXT NOT NULL DEFAULT '',
-    automation_paused_at TEXT
+    automation_paused_at TEXT,
+    daily_limit_override INTEGER
   );
   CREATE TABLE publication_jobs (
     id INTEGER PRIMARY KEY,

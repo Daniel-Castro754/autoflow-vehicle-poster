@@ -12,6 +12,7 @@ export interface ScheduleOptions {
   existingTimestamps?: number[]
   historicalData?: HistoricalEngagement[]
   minDelayMinutes?: number
+  spacingMinutes?: number
   timezone?: string
   accountId?: number
 }
@@ -48,7 +49,10 @@ export function calculateOptimalSchedule(options: ScheduleOptions = {}): Optimal
   const p = localParts(new Date(earliest), timezone)
   const day = new Date(Date.UTC(p.year, p.month - 1, p.day))
   const existing = (options.existingTimestamps || []).filter(Number.isFinite).sort((a, b) => a - b)
-  const spacing = 25 * 60000
+  const requestedSpacing = options.spacingMinutes ?? 25
+  if (!Number.isInteger(requestedSpacing) || requestedSpacing < 0 || requestedSpacing > 1440)
+    throw new Error('Intervalo do perfil inválido.')
+  const spacing = requestedSpacing * 60000
   const freeTime = (start: number) => {
     let result = start
     for (const occupied of existing)
