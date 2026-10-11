@@ -655,7 +655,7 @@ export async function handlePublicationManagementRoute(
     if (!allowed.includes(String(b.status))) return send(res, 400, { error: 'Status inválido.' })
     const job = db
       .prepare(
-        'SELECT vehicle_id vehicleId,social_account_id accountId,result_url resultUrl,status,fill_report fillReport,publish_attempt_at publishAttemptAt FROM publication_jobs WHERE id=? AND organization_id=?',
+        'SELECT vehicle_id vehicleId,social_account_id accountId,result_url resultUrl,status,fill_report fillReport,publish_attempt_at publishAttemptAt,retry_count retryCount,COALESCE(max_retries,3) maxRetries FROM publication_jobs WHERE id=? AND organization_id=?',
       )
       .get(Number(publication[1]), auth.organizationId) as
       | {
@@ -665,6 +665,8 @@ export async function handlePublicationManagementRoute(
           status: string
           fillReport?: string
           publishAttemptAt?: string
+          retryCount: number
+          maxRetries: number
         }
       | undefined
     if (!job) return send(res, 404, { error: 'Publicação não encontrada.' })
@@ -685,11 +687,25 @@ export async function handlePublicationManagementRoute(
         error:
           'Antes de repetir, verifique em “Seus classificados” se o anúncio foi criado. Confirme no painel que ele NÃO foi publicado para liberar uma nova tentativa.',
       })
+    if (nextStatus === 'pending' && job.retryCount >= job.maxRetries)
+      return send(res, 409, {
+        error: `O limite de recuperações deste trabalho foi esgotado (${job.retryCount}/${job.maxRetries}). Revise o caso e crie um novo trabalho somente se for seguro.`,
+        retryBudgetExhausted: true,
+      })
+    if (nextStatus === 'pending') {
+      const duplicateRisk = publicationDuplicateRisk(
+        auth.organizationId,
+        job.vehicleId,
+        Number(publication[1]),
+      )
+      if (duplicateRisk)
+        return send(res, 409, { error: duplicateRisk.message, duplicate: duplicateRisk })
+    }
     db.exec('BEGIN')
     try {
       if (nextStatus === 'pending')
         db.prepare(
-          "UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',publish_attempt_at=NULL,last_lease_token=NULL,started_at=NULL,filled_at=NULL,removed_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+          "UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',publish_attempt_at=NULL,last_lease_token=NULL,started_at=NULL,filled_at=NULL,removed_at=NULL,retry_count=retry_count+1,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
         ).run(Number(publication[1]), auth.organizationId)
       else if (nextStatus === 'removed')
         db.prepare(
@@ -725,7 +741,7 @@ export async function handlePublicationManagementRoute(
         Number(publication[1]),
         eventType[nextStatus] || 'status_changed',
         auth.userId,
-        { status: nextStatus },
+        { status: nextStatus, retryConsumed: nextStatus === 'pending' },
       )
       db.exec('COMMIT')
     } catch (error) {
