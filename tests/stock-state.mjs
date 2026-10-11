@@ -94,6 +94,13 @@ async function fixture(name) {
     { name: `${name}.jpg`, mimeType: 'image/jpeg', dataBase64: jpegBase64(name) },
     201,
   )
+  const curation = await call(`/vehicles/${vehicleId}/photos/curation`)
+  await call(
+    `/vehicles/${vehicleId}/photos/selection`,
+    'POST',
+    { photoIds: curation.recommendation, fingerprint: curation.fingerprint },
+    200,
+  )
   const { id: jobId } = await call('/publications', 'POST', { vehicleId, accountId }, 201)
   return { vehicleId, jobId }
 }

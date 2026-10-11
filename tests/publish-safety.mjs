@@ -138,6 +138,14 @@ async function createReadyVehicle(token, overrides = {}) {
       dataBase64: jpegBase64(`foto-${vehicle.id}`),
     }),
   })
+  const curation = await call(`/vehicles/${vehicle.id}/photos/curation`, token)
+  await call(`/vehicles/${vehicle.id}/photos/selection`, token, {
+    method: 'POST',
+    body: JSON.stringify({
+      photoIds: curation.recommendation,
+      fingerprint: curation.fingerprint,
+    }),
+  })
   return vehicle
 }
 
