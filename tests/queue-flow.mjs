@@ -1727,6 +1727,7 @@ try {
       dataBase64: jpegBase64('retry-transient'),
     }),
   })
+  await approveCurrentPhotos(retryVehicle.id, adminToken)
   const retryJob = await call('/publications', adminToken, {
     method: 'POST',
     body: JSON.stringify({ vehicleId: retryVehicle.id, accountId: first.id }),
