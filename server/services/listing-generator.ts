@@ -15,7 +15,9 @@ const currencyFormat = new Intl.NumberFormat('pt-BR', {
 })
 
 function checkedText(value: unknown, label: string): string {
-  const text = String(value ?? '').trim().replace(/\s+/g, ' ')
+  const text = String(value ?? '')
+    .trim()
+    .replace(/\s+/g, ' ')
   if (text.length > 120 || /[{}|<>]/.test(text))
     throw new Error('Campo inválido para gerar anúncio: ' + label + '.')
   return text
@@ -51,8 +53,7 @@ export function renderListingTemplate(
       throw new Error('Variável não permitida no modelo: ' + key + '.')
     return facts[key]
   })
-  if (/[{}]/.test(rendered))
-    throw new Error('Modelo com chaves inválidas ou Spintax aninhado.')
+  if (/[{}]/.test(rendered)) throw new Error('Modelo com chaves inválidas ou Spintax aninhado.')
   return rendered.replace(/[ \t]+\n/g, '\n').trim()
 }
 
@@ -77,8 +78,7 @@ export function generateListingTextVariants(
     throw new Error('Confira o ano, preço e quilometragem antes de gerar o texto.')
   const make = checkedText(vehicle.make, 'marca')
   const model = checkedText(vehicle.model, 'modelo')
-  if (!make || !model)
-    throw new Error('Marca e modelo precisam estar preenchidos.')
+  if (!make || !model) throw new Error('Marca e modelo precisam estar preenchidos.')
 
   const trim = checkedText(vehicle.trim, 'versão')
   const details = [
@@ -121,9 +121,7 @@ export function generateListingTextVariants(
   ]
   return descriptionTemplates.map((template, index) => ({
     id: index + 1,
-    title: renderListingTemplate(titleTemplates[index], facts, index)
-      .replace(/\s+/g, ' ')
-      .trim(),
+    title: renderListingTemplate(titleTemplates[index], facts, index).replace(/\s+/g, ' ').trim(),
     description: renderListingTemplate(template, facts, index),
   }))
 }
