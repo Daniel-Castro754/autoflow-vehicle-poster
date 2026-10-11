@@ -8,6 +8,13 @@ import { profileCapacity } from '../services/profile-capacity.ts'
 import { publicationPhotoPayload, PhotoCurationConflict } from '../services/photo-curation.ts'
 import { classifyExtensionFailure } from '../services/publication-policy.ts'
 import { recordConfirmedListing } from '../services/publication-ledger.ts'
+import { prepareListingForPublication } from '../services/publication-service.ts'
+import {
+  calculateListingHash,
+  listingSnapshotForVehicle,
+  reserveListingHash,
+  DuplicateListingHashError,
+} from '../services/duplicate-checker.ts'
 import { sendCriticalAlert } from '../services/alerting.ts'
 import {
   openSelectorCircuitBreaker,
@@ -320,11 +327,26 @@ export async function handleExtensionRoute(
       .get(job.vehicleId, auth.organizationId) as Record<string, unknown> | undefined
     if (!vehicle) return send(res, 404, { error: 'Veículo não encontrado.' })
     let images: ReturnType<typeof publicationPhotoPayload>
+    let preparedListingHash: string
     try {
       images = publicationPhotoPayload(db, auth.organizationId, job.vehicleId, imageBaseUrl)
+      const prepared = prepareListingForPublication(
+        db,
+        auth.organizationId,
+        job.id,
+        job.vehicleId,
+        imageBaseUrl,
+        images,
+      )
+      preparedListingHash = prepared.listingHash
+      images = prepared.images
     } catch (error) {
       if (error instanceof PhotoCurationConflict)
         return send(res, 409, { error: error.message, photoCurationNeedsReview: true })
+      if (error instanceof DuplicateListingHashError)
+        return send(res, 409, { error: error.message, duplicate: { type: 'listing_hash' } })
+      if (error instanceof Error && /dados do anúncio foram alterados/.test(error.message))
+        return send(res, 409, { error: error.message })
       throw error
     }
     const settings = db
@@ -360,6 +382,16 @@ export async function handleExtensionRoute(
           capacity: currentCapacity,
         })
       }
+      const latestListing = listingSnapshotForVehicle(db, auth.organizationId, job.vehicleId)
+      if (!latestListing || calculateListingHash(latestListing) !== preparedListingHash)
+        throw new Error('Os dados do anúncio mudaram enquanto a fila era preparada.')
+      reserveListingHash(
+        db,
+        auth.organizationId,
+        job.vehicleId,
+        job.id,
+        preparedListingHash,
+      )
       const result = db
         .prepare(
           `UPDATE publication_jobs SET status='filling',attempt_count=attempt_count+1,error_code=NULL,started_at=CURRENT_TIMESTAMP,
@@ -393,6 +425,10 @@ export async function handleExtensionRoute(
       db.exec('COMMIT')
     } catch (error) {
       db.exec('ROLLBACK')
+      if (error instanceof DuplicateListingHashError)
+        return send(res, 409, { error: error.message, duplicate: { type: 'listing_hash' } })
+      if (error instanceof Error && /anúncio mudaram/.test(error.message))
+        return send(res, 409, { error: error.message })
       throw error
     }
     if (!acquired)
