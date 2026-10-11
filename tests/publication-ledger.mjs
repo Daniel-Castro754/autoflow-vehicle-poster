@@ -48,7 +48,7 @@ db.exec(`
   CREATE TABLE publication_listing_ledger (
     id INTEGER PRIMARY KEY,organization_id INTEGER NOT NULL,vehicle_id INTEGER NOT NULL,
     publication_job_id INTEGER NOT NULL,social_account_id INTEGER,platform TEXT NOT NULL DEFAULT 'facebook_marketplace',
-    external_listing_id TEXT NOT NULL DEFAULT '',canonical_url TEXT NOT NULL DEFAULT '',
+    external_listing_id TEXT,canonical_url TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'active',first_confirmed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_confirmed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,removed_at TEXT,
     UNIQUE(organization_id,publication_job_id),UNIQUE(organization_id,platform,external_listing_id)
@@ -100,6 +100,10 @@ recordConfirmedListing(db, {
   resultUrl: 'https://facebook.com/marketplace/item/223344',
 })
 assert.equal(activeListingEvidence(db, 1, 20), undefined, 'Ledger evidence must be tenant-scoped.')
+
+const noUrlJob = Number(db.prepare("INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status) VALUES (1,10,5,'completed')").run().lastInsertRowid)
+recordConfirmedListing(db, { organizationId: 1, vehicleId: 10, publicationJobId: noUrlJob, socialAccountId: 5 })
+assert.equal(db.prepare('SELECT external_listing_id externalId FROM publication_listing_ledger WHERE publication_job_id=?').get(noUrlJob).externalId, null)
 
 console.log(
   '✓ Listing ledger: canonical URL, durable duplicate evidence, removal and tenant isolation.',
