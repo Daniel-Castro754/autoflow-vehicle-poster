@@ -178,6 +178,22 @@ try {
       .count,
     1,
   )
+  await assert.rejects(integrated('/integration/v1/reports/monthly?month=2026-10'), (error) => error.status === 403)
+  const reporter = await create({
+    name: 'Relatório mensal',
+    scopes: ['reports:read'],
+  })
+  const reportApi = createApiClient(server.base, reporter.token)
+  await assert.rejects(
+    reportApi('/integration/v1/reports/monthly?month=2026-13'),
+    (error) => error.status === 400,
+  )
+  const report = await reportApi('/integration/v1/reports/monthly?month=2026-10')
+  assert.equal(report.month, '2026-10')
+  assert.equal(report.period.start, '2026-10-01')
+  assert.equal(report.period.endExclusive, '2026-11-01')
+  assert(report.currentInventorySnapshot.total >= 1)
+  assert(Array.isArray(report.notes) && report.notes.length > 0)
   const foreignOrg = Number(
     db.prepare("INSERT INTO organizations(name) VALUES('Outro tenant')").run().lastInsertRowid,
   )
