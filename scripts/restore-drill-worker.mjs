@@ -1,9 +1,104 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
+import { spawn } from 'node:child_process'
+import { createServer as createSocketServer } from 'node:net'
+import { fileURLToPath } from 'node:url'
 import { createReadStream, mkdtempSync, readdirSync, rmSync, statfsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { restoreBackup, verifyBackup } from './backup.mjs'
+
+const appEntry = fileURLToPath(new URL('../server/server.ts', import.meta.url))
+const appCwd = dirname(dirname(appEntry))
+
+async function reserveLoopbackPort() {
+  const server = createSocketServer()
+  await new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const address = server.address()
+  await new Promise((resolve) => server.close(resolve))
+  if (!address || typeof address === 'string') throw new Error('PORT')
+  return address.port
+}
+
+async function verifySafeBoot(directory) {
+  const port = await reserveLoopbackPort()
+  const challenge = randomBytes(32).toString('hex')
+  const child = spawn(process.execPath, [appEntry], {
+    cwd: appCwd,
+    windowsHide: true,
+    stdio: ['ignore', 'ignore', 'ignore'],
+    env: {
+      PATH: process.env.PATH || '',
+      Path: process.env.Path || '',
+      SystemRoot: process.env.SystemRoot || '',
+      TEMP: process.env.TEMP || '',
+      TMP: process.env.TMP || '',
+      HOST: '127.0.0.1',
+      PORT: String(port),
+      DATA_DIR: directory,
+      AUTH_SECRET: randomBytes(48).toString('hex'),
+      AUTOFLOW_RESTORE_BOOT_PROBE: '1',
+      AUTOFLOW_RESTORE_BOOT_NONCE: challenge,
+      // No original login, provider, Google, Facebook or webhook secrets.
+    },
+  })
+  let exited = false
+  const exit = new Promise((resolve) => child.once('exit', (code) => {
+    exited = true
+    resolve(code)
+  }))
+  try {
+    const deadline = Date.now() + 20000
+    let lastError = null
+    while (Date.now() < deadline) {
+      if (exited) throw new Error('PROBE_DID_NOT_START')
+      try {
+        const address = 'http://127.0.0.1:' + port
+        const response = await fetch(address + '/health/ready', {
+          headers: { 'x-autoflow-restore-probe': challenge },
+          signal: AbortSignal.timeout(1600),
+        })
+        if (response.status === 503) throw new Error('PROBE_NOT_READY')
+        const result = await response.json()
+        if (!response.ok ||
+          result.mode !== 'restored_readonly_boot_probe' ||
+          result.databaseReadOnly !== true ||
+          result.workersStarted !== false ||
+          result.externalIntegrationsTested !== false) {
+          throw new Error('PROBE_UNSAFE_RESULT')
+        }
+        // Auth/write routes must remain unreachable, even with the challenge.
+        const denied = await fetch(address + '/api/ai/autopilot/run', {
+          method: 'POST',
+          headers: { 'x-autoflow-restore-probe': challenge },
+          signal: AbortSignal.timeout(1600),
+        })
+        if (denied.status !== 404) throw new Error('PROBE_WRITE_ROUTE_ACCESSIBLE')
+        const protectedProbe = await fetch(address + '/health/ready', {
+          signal: AbortSignal.timeout(1600),
+        })
+        if (protectedProbe.status !== 403) throw new Error('PROBE_PUBLICLY_ACCESSIBLE')
+        return true
+      } catch (error) {
+        lastError = error
+        if (error instanceof Error && /PROBE_(?:UNSAFE_RESULT|WRITE_ROUTE_ACCESSIBLE|PUBLICLY_ACCESSIBLE)/.test(error.message))
+          throw error
+        await new Promise((resolve) => setTimeout(resolve, 180))
+      }
+    }
+    throw lastError || new Error('PROBE_TIMEOUT')
+  } finally {
+    if (!exited) child.kill()
+    // Wait until the server process is stopped before deleting the restored DB.
+    await Promise.race([
+      exit,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('PROBE_SHUTDOWN_TIMEOUT')), 5000)),
+    ])
+  }
+}
 
 const directory = process.argv[2]
 const sandboxParent = process.argv[3]
@@ -48,7 +143,15 @@ try {
   }
   const imageCount = readdirSync(join(destination, 'uploads')).length
   if (imageCount !== manifest.uploads.length) throw new Error('RESTORED_UPLOADS_MISMATCH')
+  const bootProbePassed = await verifySafeBoot(destination)
+  // Ensure read-only probe did not mutate the restored database.
+  const after = createHash('sha256')
+  for await (const block of createReadStream(databaseFile)) after.update(block)
+  if (after.digest('hex') !== digest) throw new Error('PROBE_CHANGED_DATABASE')
   response = {
+    bootProbePassed,
+    probeDatabaseReadOnly: true,
+    backgroundWorkersStarted: false,
     ok: true,
     createdAt: manifest.createdAt,
     databaseBytes: manifest.database.bytes,
