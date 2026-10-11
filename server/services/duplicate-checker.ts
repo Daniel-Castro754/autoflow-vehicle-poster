@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
+import { renderVehicleListingCopy } from './listing-copy-variants.ts'
 
 export type ListingContent = { title: string; description: string; price: number }
 
@@ -20,15 +21,18 @@ export function listingSnapshotForVehicle(
   organizationId: number,
   vehicleId: number,
 ): ListingContent | undefined {
-  return db
+  const facts = db
     .prepare(
-      `SELECT printf('%d %s %s %s',v.year,v.make,v.model,v.trim) title,
+      `SELECT v.id,v.year,v.make,v.model,v.trim,v.price,
        CASE WHEN length(v.description)>0 THEN v.description
          ELSE printf('%d %s %s %s com %d km. Entre em contato para consultar disponibilidade e condições.',v.year,v.make,v.model,v.trim,v.km)
-       END description,v.price
+       END description
        FROM vehicles v WHERE v.id=? AND v.organization_id=?`,
     )
-    .get(vehicleId, organizationId) as ListingContent | undefined
+    .get(vehicleId, organizationId) as
+    | { id: number; year: number; make: string; model: string; trim: string; price: number; description: string }
+    | undefined
+  return facts ? renderVehicleListingCopy(facts) : undefined
 }
 
 export function calculateListingHash(content: ListingContent): string {
