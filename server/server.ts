@@ -45,6 +45,7 @@ import {
 import { handleAlertRoute } from './routes/alerts.ts'
 import { handlePhotoCurationRoute } from './routes/photo-curation.ts'
 import { handleIntegrationRoute, isIntegrationRoute } from './routes/integration.ts'
+import { handleIntegrationCredentialsRoute } from './routes/integration-credentials.ts'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 // Only the isolated restore worker may use this read-only, restricted startup mode.
@@ -474,6 +475,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (!activeSession(auth))
       return send(res, 401, { error: 'Esta sessão foi encerrada ou revogada. Entre novamente.' })
     if (await handleAuthRoute(req, res, url, auth, authRouteDependencies)) return
+    if (await handleIntegrationCredentialsRoute(req, res, url, auth, { db, send, jsonBody, isAdmin }))
+      return
     if (
       await handleInterventionsRoute(req, res, url, auth, {
         db,
