@@ -288,6 +288,8 @@ try {
   })
   if (jobRow(publicationB.id).status !== 'pending')
     throw new Error('A confirmação manual deveria liberar o trabalho para a fila.')
+  if (jobRow(publicationB.id).retryCount !== 1)
+    throw new Error('A repetição manual deveria consumir uma unidade do orçamento de retry.')
 
   // The PR's bound document can still reconcile a confirmed result after main's
   // watchdog recovery, including records that predate the checkpoint column.
