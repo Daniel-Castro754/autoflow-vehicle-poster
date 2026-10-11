@@ -17,7 +17,7 @@ Nenhuma das duas operações altera o **DATA_DIR** do AutoFlow em execução, cr
 
 O sistema copia o backup para uma pasta sob `os.tmpdir()`, verifica o banco restaurado (`PRAGMA integrity_check` e tabelas de empresas, veículos e usuários), a cópia do cofre e a quantidade de imagens. A pasta temporária é removida ao fim, inclusive por proteção adicional do processo principal se o verificador ultrapassar o tempo limite.
 
-O resultado contém `restoredFiles: true`, `databaseOpened: true`, `applicationStarted: false`, `dpapiValidated: false` e `temporaryRemoved: true` somente quando a operação foi concluída com sucesso.
+O resultado inclui `restoredFiles: true`, `databaseOpened: true`, `bootProbePassed: true`, `applicationStarted: false`, `dpapiValidated: false` e `temporaryRemoved: true` somente quando o ensaio foi concluído com sucesso. A abertura HTTP é restrita ao diagnóstico; o aplicativo funcional completo não é iniciado. Veja [Teste de inicialização restrita](RESTORED_BOOT_SMOKE_TEST.md).
 
 ## Segurança e limitações
 
@@ -26,7 +26,7 @@ O resultado contém `restoredFiles: true`, `databaseOpened: true`, `applicationS
 - **Instalações com múltiplas empresas continuam bloqueadas**, porque os backups são globais e contêm dados de todos os tenants.
 - Há limite de um processo de verificação de backup por vez, de **três minutos** para o ensaio, **8 GB** de dados e checagem prévia de espaço livre no disco temporário.
 - O subprocesso recebe apenas variáveis básicas do ambiente, sem chaves de IA ou Telegram. Nenhum conteúdo do banco é enviado à interface, além dos contadores agregados.
-- Não inicia o AutoFlow sobre a cópia restaurada, não testa migrações de versão, login, extensões do Facebook, credenciais Gemini/OpenAI ou se o DPAPI pode ser decriptado sob outro usuário Windows.
+- Inicia somente um processo do servidor em **modo diagnóstico local e somente leitura**, sem trabalhadores autônomos e sem rotas operacionais. Não testa migrações de versão, login, extensão Facebook, credenciais Gemini/OpenAI ou se o DPAPI pode ser aberto por outro usuário Windows.
 - Mesmo após ensaio bem-sucedido, ainda é importante realizar um teste operacional de recuperação sob o mesmo usuário Windows, ou preparar o pacote de recuperação portátil antes de migrar entre perfis.
 - Se o programa informar falha de limpeza, verifique manualmente a pasta temporária do sistema. Não compartilhe os arquivos restaurados.
 - O ensaio executa no sistema onde o servidor AutoFlow está rodando, **não** no navegador.
