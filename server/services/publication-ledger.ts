@@ -35,6 +35,19 @@ export function recordConfirmedListing(
   // A successful publish without a trustworthy listing URL is still evidence
   // for this job/vehicle, but must not participate in the cross-job external-ID unique key.
   const storedExternalId = listing.externalListingId || null
+  const existingByExternalId = storedExternalId
+    ? (db.prepare(
+        `SELECT publication_job_id jobId,vehicle_id vehicleId,status FROM publication_listing_ledger
+         WHERE organization_id=? AND platform='facebook_marketplace' AND external_listing_id=?`,
+      ).get(input.organizationId, storedExternalId) as
+        | { jobId: number; vehicleId: number; status: string }
+        | undefined)
+    : undefined
+  if (existingByExternalId && existingByExternalId.jobId !== input.publicationJobId) {
+    // An external ID can only identify one listing. Preserve the first provenance and
+    // let duplicate policy surface it instead of overwriting evidence from another job.
+    return listing
+  }
   db.prepare(
     `INSERT INTO publication_listing_ledger
       (organization_id,vehicle_id,publication_job_id,social_account_id,external_listing_id,canonical_url,status)
