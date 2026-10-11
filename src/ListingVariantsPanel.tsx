@@ -77,13 +77,17 @@ export function ListingVariantsPanel({
         {busy ? <Loader2 size={15} /> : <FileText size={15} />}
         {busy ? 'Processando...' : preview ? 'Gerar novas opções' : 'Gerar 3 opções'}
       </button>
-      {error && <p className="listing-variants-error" role="alert">{error}</p>}
+      {error && (
+        <p className="listing-variants-error" role="alert">
+          {error}
+        </p>
+      )}
       {preview && (
         <div className="listing-variants-choices">
           <p className="listing-variants-note">
             <ShieldCheck size={15} />
-            Escolha uma opção. A prévia expira em {preview.expiresInMinutes} minutos.
-            O título apresentado é uma sugestão; o Marketplace continua usando os campos do veículo.
+            Escolha uma opção. A prévia expira em {preview.expiresInMinutes} minutos. O título
+            apresentado é uma sugestão; o Marketplace continua usando os campos do veículo.
           </p>
           {preview.variants.map((variant) => (
             <label key={variant.id} className="listing-variant-choice">

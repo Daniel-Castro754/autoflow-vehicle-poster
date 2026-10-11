@@ -14,7 +14,10 @@ import {
   type VehicleInput,
 } from '../services/description-generator.ts'
 import { generateVehicleHashtags } from '../services/trending-hashtags.ts'
-import { prepareListingTextPreview, approveListingTextPreview } from '../services/listing-text-previews.ts'
+import {
+  prepareListingTextPreview,
+  approveListingTextPreview,
+} from '../services/listing-text-previews.ts'
 import { getAiAuditHistory, recordAiAudit } from '../services/ai-audit-history.ts'
 import {
   applyBatchDescriptionPreview,
@@ -51,16 +54,30 @@ export async function handleAIRoute(
         auth.userId,
         Number(b?.vehicleId),
       )
-      recordAiAudit(db, auth.organizationId, auth.userId, 'listing_text_preview', 'preview', 'procedural', preview.variants.length)
+      recordAiAudit(
+        db,
+        auth.organizationId,
+        auth.userId,
+        'listing_text_preview',
+        'preview',
+        'procedural',
+        preview.variants.length,
+      )
       send(res, 200, preview)
     } catch (err) {
-      send(res, 409, { error: err instanceof Error ? err.message : 'Não foi possível preparar o anúncio.' })
+      send(res, 409, {
+        error: err instanceof Error ? err.message : 'Não foi possível preparar o anúncio.',
+      })
     }
     return true
   }
   if (req.method === 'POST' && url.pathname === '/api/ai/listing-text/approve') {
     const b = (await jsonBody(req)) as Record<string, unknown>
-    if (typeof b?.previewId !== 'string' || typeof b.variantId !== 'number' || !Number.isInteger(b.variantId)) {
+    if (
+      typeof b?.previewId !== 'string' ||
+      typeof b.variantId !== 'number' ||
+      !Number.isInteger(b.variantId)
+    ) {
       send(res, 428, { error: 'É necessário revisar uma prévia e aprovar uma versão.' })
       return true
     }
@@ -72,7 +89,15 @@ export async function handleAIRoute(
         b.previewId,
         Number(b.variantId),
       )
-      recordAiAudit(db, auth.organizationId, auth.userId, 'listing_text_approved', 'applied', 'procedural', 1)
+      recordAiAudit(
+        db,
+        auth.organizationId,
+        auth.userId,
+        'listing_text_approved',
+        'applied',
+        'procedural',
+        1,
+      )
       send(res, 200, result)
     } catch (err) {
       send(res, 409, { error: err instanceof Error ? err.message : 'Prévia inválida.' })

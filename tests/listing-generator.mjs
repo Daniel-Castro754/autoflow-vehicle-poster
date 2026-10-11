@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
-import { generateListingTextVariants, renderListingTemplate } from '../server/services/listing-generator.ts'
+import {
+  generateListingTextVariants,
+  renderListingTemplate,
+} from '../server/services/listing-generator.ts'
 import { approveListingTextPreview } from '../server/services/listing-text-previews.ts'
 import { startTestServer, createApiClient } from './helpers/server.mjs'
 
@@ -81,24 +84,34 @@ try {
   })
   const current = () =>
     db.prepare('SELECT description FROM vehicles WHERE id=?').get(created.id).description
-  const preview = () => api('/ai/listing-text/preview', {
-    method: 'POST',
-    body: JSON.stringify({ vehicleId: created.id }),
-  })
-  const approve = (previewId, variantId = 1) => api('/ai/listing-text/approve', {
-    method: 'POST',
-    body: JSON.stringify({ previewId, variantId }),
-  })
+  const preview = () =>
+    api('/ai/listing-text/preview', {
+      method: 'POST',
+      body: JSON.stringify({ vehicleId: created.id }),
+    })
+  const approve = (previewId, variantId = 1) =>
+    api('/ai/listing-text/approve', {
+      method: 'POST',
+      body: JSON.stringify({ previewId, variantId }),
+    })
 
-  await fail(() => anonymous('/ai/listing-text/preview', {
-    method: 'POST',
-    body: JSON.stringify({ vehicleId: created.id }),
-  }), 401)
+  await fail(
+    () =>
+      anonymous('/ai/listing-text/preview', {
+        method: 'POST',
+        body: JSON.stringify({ vehicleId: created.id }),
+      }),
+    401,
+  )
   await fail(() => approve(undefined), 428)
-  await fail(() => api('/ai/listing-text/preview', {
-    method: 'POST',
-    body: JSON.stringify({ vehicleId: 'invalid' }),
-  }), 409)
+  await fail(
+    () =>
+      api('/ai/listing-text/preview', {
+        method: 'POST',
+        body: JSON.stringify({ vehicleId: 'invalid' }),
+      }),
+    409,
+  )
 
   const first = await preview()
   assert.equal(first.requiresApproval, true)
@@ -111,9 +124,7 @@ try {
   const foreignOrg = Number(
     db.prepare("INSERT INTO organizations(name) VALUES('Outra organização')").run().lastInsertRowid,
   )
-  assert.throws(() =>
-    approveListingTextPreview(db, foreignOrg, logged.user.id, first.previewId, 1),
-  )
+  assert.throws(() => approveListingTextPreview(db, foreignOrg, logged.user.id, first.previewId, 1))
   assert.equal(current(), 'Descrição original.')
 
   db.prepare('UPDATE vehicles SET price=? WHERE id=?').run(150000, created.id)
@@ -124,9 +135,11 @@ try {
   // A publication in progress prevents any new text variant from being approved.
   const second = await preview()
   const pendingId = Number(
-    db.prepare(
-      "INSERT INTO publication_jobs(organization_id,vehicle_id,status) VALUES (?,?,'pending')",
-    ).run(organization, created.id).lastInsertRowid,
+    db
+      .prepare(
+        "INSERT INTO publication_jobs(organization_id,vehicle_id,status) VALUES (?,?,'pending')",
+      )
+      .run(organization, created.id).lastInsertRowid,
   )
   await fail(() => approve(second.previewId), 409)
   await fail(() => preview(), 409)
@@ -140,7 +153,9 @@ try {
   assert.equal(current(), selected.description)
   await fail(() => approve(third.previewId, selected.id), 409)
 
-  console.log('✓ Listing text: approved variants, truthful facts, scoped preview, stale and duplicate guards')
+  console.log(
+    '✓ Listing text: approved variants, truthful facts, scoped preview, stale and duplicate guards',
+  )
 } finally {
   db.close()
   await server.close()
