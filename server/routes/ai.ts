@@ -60,7 +60,7 @@ export async function handleAIRoute(
   }
   if (req.method === 'POST' && url.pathname === '/api/ai/listing-text/approve') {
     const b = (await jsonBody(req)) as Record<string, unknown>
-    if (typeof b?.previewId !== 'string' || !Number.isInteger(b.variantId)) {
+    if (typeof b?.previewId !== 'string' || typeof b.variantId !== 'number' || !Number.isInteger(b.variantId)) {
       send(res, 428, { error: 'É necessário revisar uma prévia e aprovar uma versão.' })
       return true
     }
