@@ -43,6 +43,7 @@ import {
   isPublicationManagementRoute,
 } from './routes/publication-management.ts'
 import { handleAlertRoute } from './routes/alerts.ts'
+import { handlePhotoCurationRoute } from './routes/photo-curation.ts'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 // Only the isolated restore worker may use this read-only, restricted startup mode.
@@ -493,6 +494,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         imageBaseUrl,
         validStatuses: vehicleOptions.status,
         pageStatements: vehiclePageStatements,
+      })
+    )
+      return
+    if (
+      await handlePhotoCurationRoute(req, res, url, auth, {
+        db,
+        send,
+        jsonBody,
+        imageBaseUrl,
+        canWriteVehicle,
       })
     )
       return
