@@ -1048,32 +1048,34 @@ function TeamView({
                 const owner = team.find((u) => u.id === account.userId)
                 return (
                   <div className="account-card" key={account.id}>
-                    <span className="browser-icon">
-                      <Laptop />
-                    </span>
-                    <div>
-                      <strong>{account.label}</strong>
-                      <small>
-                        {account.browserProfile} · {owner?.name || 'Sem responsável'}
-                      </small>
-                    </div>
-                    <span
-                      className={`connection ${account.automationPaused ? 'paused' : ''}`}
-                      title={account.automationPauseReason || ''}
-                    >
-                      <i />
-                      {account.automationPaused ? 'Automação pausada' : 'Aguardando extensão'}
-                    </span>
-                    {canManage && <ProfileCapacityEditor api={api} accountId={account.id} />}
-                    {account.automationPaused && canManage && (
-                      <button
-                        className="team-user-toggle"
-                        onClick={() => void onSetAccountAutomation(account, false)}
-                        title={account.automationPauseReason || 'Retomar automação'}
+                    <div className="account-card-header">
+                      <span className="browser-icon">
+                        <Laptop />
+                      </span>
+                      <div className="account-card-identity">
+                        <strong>{account.label}</strong>
+                        <small>
+                          {account.browserProfile} · {owner?.name || 'Sem responsável'}
+                        </small>
+                      </div>
+                      <span
+                        className={`connection ${account.automationPaused ? 'paused' : ''}`}
+                        title={account.automationPauseReason || ''}
                       >
-                        Retomar
-                      </button>
-                    )}
+                        <i />
+                        {account.automationPaused ? 'Automação pausada' : 'Aguardando extensão'}
+                      </span>
+                      {account.automationPaused && canManage && (
+                        <button
+                          className="team-user-toggle"
+                          onClick={() => void onSetAccountAutomation(account, false)}
+                          title={account.automationPauseReason || 'Retomar automação'}
+                        >
+                          Retomar
+                        </button>
+                      )}
+                    </div>
+                    {canManage && <ProfileCapacityEditor api={api} accountId={account.id} />}
                   </div>
                 )
               })}

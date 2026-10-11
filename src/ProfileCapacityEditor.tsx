@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import './profile-capacity.css'
 
 type Api = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
 type Capacity = {
@@ -73,19 +74,39 @@ export function ProfileCapacityEditor({ api, accountId }: { api: Api; accountId:
     }
   }
 
-  if (!capacity) return <small role="status">{error || 'Carregando limites operacionais…'}</small>
+  if (!capacity)
+    return (
+      <small className="profile-capacity-loading" role="status">
+        {error || 'Carregando limites operacionais…'}
+      </small>
+    )
 
   return (
-    <form className="profile-capacity" onSubmit={(event) => void save(event)}>
-      <div className="profile-capacity-stats">
-        <strong>Capacidade do perfil</strong>
-        <small>
-          {capacity.used}/{capacity.dailyLimit} execuções hoje · {capacity.queuedToday} trabalhos
-          criados hoje
-        </small>
+    <form
+      className="profile-capacity"
+      onSubmit={(event) => void save(event)}
+      aria-label="Limites operacionais do perfil"
+    >
+      <div className="profile-capacity-heading">
+        <div className="profile-capacity-intro">
+          <h3>Capacidade do perfil</h3>
+          <p>Defina os limites de execução deste perfil.</p>
+        </div>
+        <div className="profile-capacity-today" aria-label="Atividade do perfil hoje">
+          <div className="profile-capacity-metric">
+            <strong>
+              {capacity.used} <span>de {capacity.dailyLimit}</span>
+            </strong>
+            <span>Execuções hoje</span>
+          </div>
+          <div className="profile-capacity-metric">
+            <strong>{capacity.queuedToday}</strong>
+            <span>Trabalhos criados hoje</span>
+          </div>
+        </div>
       </div>
       <div className="profile-capacity-fields">
-        <label>
+        <label className="profile-capacity-field">
           Limite diário
           <input
             type="number"
@@ -96,9 +117,12 @@ export function ProfileCapacityEditor({ api, accountId }: { api: Api; accountId:
             onChange={(event) => setDaily(event.target.value)}
             disabled={loading}
           />
+          <span className="profile-capacity-hint">
+            Padrão da empresa: {capacity.organizationDailyLimit} por dia
+          </span>
         </label>
-        <label>
-          Intervalo (min)
+        <label className="profile-capacity-field">
+          Intervalo entre execuções (min)
           <input
             type="number"
             min="0"
@@ -108,26 +132,35 @@ export function ProfileCapacityEditor({ api, accountId }: { api: Api; accountId:
             onChange={(event) => setMinutes(event.target.value)}
             disabled={loading}
           />
+          <span className="profile-capacity-hint">
+            Padrão da empresa: {capacity.organizationIntervalMinutes} min
+          </span>
         </label>
+      </div>
+      <div className="profile-capacity-footer">
+        <p className="profile-capacity-note">
+          Deixe um campo vazio para usar o padrão da empresa. Estes são limites internos, não regras
+          oficiais da plataforma.
+        </p>
         <button type="submit" className="secondary" disabled={loading}>
           {loading ? 'Salvando...' : 'Salvar limites'}
         </button>
       </div>
-      <small>
-        Campos vazios herdam os padrões da empresa. Esses limites são internos, não regras oficiais
-        da plataforma.
-      </small>
       {capacity.nextAllowedAt && (
-        <small>
+        <p className="profile-capacity-next-run">
           Próxima execução possível após {new Date(capacity.nextAllowedAt).toLocaleString('pt-BR')}.
-        </small>
+        </p>
       )}
       {error && (
-        <small role="alert" className="profile-capacity-error">
+        <p role="alert" className="profile-capacity-error">
           {error}
-        </small>
+        </p>
       )}
-      {message && <small role="status">{message}</small>}
+      {message && (
+        <p role="status" className="profile-capacity-success">
+          {message}
+        </p>
+      )}
     </form>
   )
 }
