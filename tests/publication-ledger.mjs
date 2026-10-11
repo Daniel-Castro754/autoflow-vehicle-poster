@@ -22,7 +22,10 @@ assert.deepEqual(
     canonicalUrl: 'https://www.facebook.com/marketplace/item/123456789',
   },
 )
-assert.equal(canonicalMarketplaceListing('https://example.com/marketplace/item/123').externalListingId, '')
+assert.equal(
+  canonicalMarketplaceListing('https://example.com/marketplace/item/123').externalListingId,
+  '',
+)
 assert.equal(canonicalMarketplaceListing('javascript:alert(1)').canonicalUrl, '')
 
 const db = new DatabaseSync(':memory:')
@@ -75,7 +78,8 @@ recordConfirmedListing(db, {
   resultUrl: 'https://m.facebook.com/marketplace/item/998877?ref=share',
 })
 assert.equal(
-  db.prepare('SELECT COUNT(*) total FROM publication_listing_ledger WHERE organization_id=1').get().total,
+  db.prepare('SELECT COUNT(*) total FROM publication_listing_ledger WHERE organization_id=1').get()
+    .total,
   1,
   'Equivalent URLs must update the same ledger row.',
 )
@@ -93,4 +97,6 @@ recordConfirmedListing(db, {
 })
 assert.equal(activeListingEvidence(db, 1, 20), undefined, 'Ledger evidence must be tenant-scoped.')
 
-console.log('✓ Listing ledger: canonical URL, durable duplicate evidence, removal and tenant isolation.')
+console.log(
+  '✓ Listing ledger: canonical URL, durable duplicate evidence, removal and tenant isolation.',
+)
