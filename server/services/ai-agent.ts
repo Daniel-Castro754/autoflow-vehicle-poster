@@ -579,41 +579,10 @@ async function planAutopilotJobs(
   }
 
   const assignments: AutopilotResult['assignments'] = []
-  let descriptionsOptimized = 0
+  const descriptionsOptimized = 0
 
-  const aiConf = getAiCredentials(db, organizationId)
-  const aiProviderSettings = resolveAIProviderSettings(aiConf)
-
-  const optimizedDescriptions = new Map<number, string>()
-  for (const vehicle of eligibleVehicles) {
-    if (!ownsLease())
-      return skippedAutopilot('Rodada interrompida: configuração alterada ou execução expirada.')
-    if (
-      !vehicle.description ||
-      vehicle.description.length < 60 ||
-      vehicle.description.includes('{ano}')
-    ) {
-      const input: VehicleInput = {
-        year: vehicle.year,
-        make: vehicle.make,
-        model: vehicle.model,
-        trim: vehicle.trim,
-        km: vehicle.km,
-        price: vehicle.price,
-        exteriorColor: vehicle.exteriorColor,
-        transmission: vehicle.transmission,
-        fuelType: vehicle.fuelType,
-        condition: vehicle.condition,
-        location: vehicle.location,
-      }
-      const generated = await generateVehicleDescription(input, {
-        tone: 'vendedor',
-        ...aiProviderSettings,
-      })
-      const tags = generateVehicleHashtags(input)
-      optimizedDescriptions.set(vehicle.id, `${generated.description}\n\n${tags.join(' ')}`)
-    }
-  }
+  // Autopilot may schedule approved inventory, but it must never rewrite listing copy.
+  // Generated copy is applied only through the explicit preview/approval flows.
 
   if (!ownsLease())
     return skippedAutopilot('Rodada interrompida: configuração alterada ou execução expirada.')
@@ -682,15 +651,8 @@ async function planAutopilotJobs(
         'location',
       ] as const
       if (descriptionFields.some((field) => vehicle[field] !== candidate[field])) continue
-      const optimizedDescription =
-        vehicle.description === candidate.description
-          ? optimizedDescriptions.get(vehicle.id)
-          : undefined
-      const effectiveVehicle = {
-        ...vehicle,
-        description: optimizedDescription || vehicle.description,
-      }
-      if (publicationReadinessIssues(effectiveVehicle, vehicle.imageCount).length) continue
+      if (vehicle.description !== candidate.description) continue
+      if (publicationReadinessIssues(vehicle, vehicle.imageCount).length) continue
       if (publicationDuplicateRisk(db, organizationId, vehicle.id)) continue
       const active = db
         .prepare(
@@ -701,13 +663,6 @@ async function planAutopilotJobs(
       if (active) continue
       const best = findBestAccountForVehicle(db, organizationId, vehicle.id)
       if (!best) continue
-      if (optimizedDescription) {
-        db.prepare(
-          'UPDATE vehicles SET description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?',
-        ).run(optimizedDescription, vehicle.id, organizationId)
-        descriptionsOptimized++
-      }
-
       const targetAccountId = best.id
       const targetAccountLabel = best.label
       const profileIntervalMinutes = profileLimits(

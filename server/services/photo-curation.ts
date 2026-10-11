@@ -256,18 +256,19 @@ export function publicationPhotoPayload(
 ) {
   const photos = inventory(db, org, vehicleId)
   const saved = selection(db, org, vehicleId)
-  let ordered = photos
-  if (saved) {
-    if (saved.inventoryFingerprint !== photoInventoryFingerprint(photos))
-      throw new PhotoCurationConflict(
-        'A seleção aprovada não corresponde mais às fotos atuais. Revise a curadoria antes de publicar.',
-      )
-    const ids = parseIds(saved.photoIds)
-    const byId = new Map(photos.map((photo) => [photo.id, photo]))
-    if (ids.some((id) => !byId.has(id)))
-      throw new PhotoCurationConflict('Seleção de fotografias inconsistente.')
-    ordered = ids.map((id) => byId.get(id)!)
-  }
+  if (!saved)
+    throw new PhotoCurationConflict(
+      'A publicação exige uma seleção de fotos revisada e aprovada. Revise a curadoria antes de publicar.',
+    )
+  if (saved.inventoryFingerprint !== photoInventoryFingerprint(photos))
+    throw new PhotoCurationConflict(
+      'A seleção aprovada não corresponde mais às fotos atuais. Revise a curadoria antes de publicar.',
+    )
+  const ids = parseIds(saved.photoIds)
+  const byId = new Map(photos.map((photo) => [photo.id, photo]))
+  if (ids.some((id) => !byId.has(id)))
+    throw new PhotoCurationConflict('Seleção de fotografias inconsistente.')
+  const ordered = ids.map((id) => byId.get(id)!)
   return ordered.map((photo) => ({
     url: baseUrl + photo.fileName,
     name: photo.originalName,
