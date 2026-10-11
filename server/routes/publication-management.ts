@@ -7,6 +7,14 @@ import { profileCapacity } from '../services/profile-capacity.ts'
 import { findBestAccountForVehicle } from '../services/session-manager.ts'
 import { publicationReadinessIssues } from '../services/publication-policy.ts'
 import { markListingRemoved, recordConfirmedListing } from '../services/publication-ledger.ts'
+import {
+  calculateListingHash,
+  findDuplicateListingHash,
+  listingSnapshotForVehicle,
+  reserveListingHash,
+  releaseUnpublishedHash,
+  DuplicateListingHashError,
+} from '../services/duplicate-checker.ts'
 
 type AuthContext = { userId: number; organizationId: number }
 type Dependencies = {
@@ -161,6 +169,15 @@ export async function handlePublicationManagementRoute(
     const duplicateRisk = publicationDuplicateRisk(auth.organizationId, vehicle.id)
     if (duplicateRisk)
       return send(res, 409, { error: duplicateRisk.message, duplicate: duplicateRisk })
+    const listingContent = listingSnapshotForVehicle(db, auth.organizationId, vehicle.id)
+    if (!listingContent) return send(res, 404, { error: 'Veículo não encontrado.' })
+    const listingHash = calculateListingHash(listingContent)
+    const contentDuplicate = findDuplicateListingHash(db, auth.organizationId, listingHash)
+    if (contentDuplicate)
+      return send(res, 409, {
+        error: new DuplicateListingHashError(contentDuplicate.jobId).message,
+        duplicate: { type: 'listing_hash', ...contentDuplicate },
+      })
     const settings = db
       .prepare('SELECT max_retries maxRetries FROM organization_settings WHERE organization_id=?')
       .get(auth.organizationId) as { maxRetries?: number } | undefined
@@ -206,30 +223,63 @@ export async function handlePublicationManagementRoute(
       1,
       Math.min(10, Number(b.maxRetries) || Number(settings?.maxRetries) || 3),
     )
-    const result = db
-      .prepare(
-        'INSERT INTO publication_jobs (organization_id,vehicle_id,social_account_id,status,queue_priority,scheduled_at,max_retries) VALUES (?,?,?,?,?,?,?)',
-      )
-      .run(
-        auth.organizationId,
-        Number(b.vehicleId),
+    // Serialize duplicate validation and hash reservation with job creation.
+    // A failed insert must never leave an orphaned pending job.
+    let publicationJobId: number
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const concurrentRisk = publicationDuplicateRisk(auth.organizationId, vehicle.id)
+      if (concurrentRisk) {
+        db.exec('ROLLBACK')
+        return send(res, 409, { error: concurrentRisk.message, duplicate: concurrentRisk })
+      }
+      const currentCapacity = profileCapacity(db, auth.organizationId, accountId)
+      if (currentCapacity.queuedToday >= currentCapacity.dailyLimit) {
+        db.exec('ROLLBACK')
+        return send(res, 429, {
+          error: 'O perfil atingiu o limite operacional de trabalhos criados hoje.',
+          capacity: currentCapacity,
+        })
+      }
+      const currentListing = listingSnapshotForVehicle(db, auth.organizationId, vehicle.id)
+      if (!currentListing || calculateListingHash(currentListing) !== listingHash)
+        throw new Error('O veículo foi atualizado durante a preparação. Revise o anúncio.')
+      const result = db
+        .prepare(
+          'INSERT INTO publication_jobs (organization_id,vehicle_id,social_account_id,status,queue_priority,scheduled_at,max_retries) VALUES (?,?,?,?,?,?,?)',
+        )
+        .run(
+          auth.organizationId,
+          vehicle.id,
+          accountId,
+          'pending',
+          nextPriority,
+          scheduledAt,
+          maxRetries,
+        )
+      publicationJobId = Number(result.lastInsertRowid)
+      reserveListingHash(db, auth.organizationId, vehicle.id, publicationJobId, listingHash)
+      recordJobEvent(auth.organizationId, publicationJobId, 'created', auth.userId, {
         accountId,
-        'pending',
-        nextPriority,
         scheduledAt,
+        queuePriority: nextPriority,
         maxRetries,
-      )
-    recordJobEvent(auth.organizationId, Number(result.lastInsertRowid), 'created', auth.userId, {
-      accountId,
-      scheduledAt,
-      queuePriority: nextPriority,
-      maxRetries,
-      smartSchedule: Boolean(b.smartSchedule),
-    })
-    db.prepare(
-      "UPDATE vehicles SET status='Pronto',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
-    ).run(Number(b.vehicleId), auth.organizationId)
-    return send(res, 201, { id: Number(result.lastInsertRowid), accountId, scheduledAt })
+        smartSchedule: Boolean(b.smartSchedule),
+      })
+      db.prepare(
+        "UPDATE vehicles SET status='Pronto',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+      ).run(vehicle.id, auth.organizationId)
+      db.exec('COMMIT')
+    } catch (error) {
+      db.exec('ROLLBACK')
+      if (error instanceof DuplicateListingHashError)
+        return send(res, 409, {
+          error: error.message,
+          duplicate: { type: 'listing_hash', jobId: error.conflictingJobId },
+        })
+      throw error
+    }
+    return send(res, 201, { id: publicationJobId, accountId, scheduledAt })
   }
   if (req.method === 'PATCH' && url.pathname === '/api/publications/extension-visibility') {
     const b = (await jsonBody(req)) as Record<string, unknown>
@@ -727,6 +777,8 @@ export async function handlePublicationManagementRoute(
         })
       if (nextStatus === 'removed')
         markListingRemoved(db, auth.organizationId, Number(publication[1]))
+      if (nextStatus === 'canceled')
+        releaseUnpublishedHash(db, auth.organizationId, Number(publication[1]))
       const eventType: Record<string, string> = {
         pending: 'retry_requested',
         filling: 'filling_started',
