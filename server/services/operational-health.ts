@@ -37,10 +37,17 @@ export function operationalHealth(db: DatabaseSync, organizationId: number) {
   const events = db
     .prepare(
       `SELECT COALESCE(SUM(event_type='stalled_recovered'),0) recoveredCount,
+    COALESCE(SUM(event_type='stalled_exhausted'),0) exhaustedRecoveryCount,
+    COALESCE(SUM(event_type='stalled_publish_ambiguous'),0) ambiguousRecoveryCount,
     COALESCE(SUM(event_type='job_nearly_stuck'),0) warningCount
     FROM publication_job_events WHERE organization_id=? AND created_at>=datetime('now','-1 day')`,
     )
-    .get(organizationId) as { recoveredCount: number; warningCount: number }
+    .get(organizationId) as {
+      recoveredCount: number
+      exhaustedRecoveryCount: number
+      ambiguousRecoveryCount: number
+      warningCount: number
+    }
   const performance = db
     .prepare(
       `SELECT
@@ -206,6 +213,16 @@ export function prometheusMetrics(report: ReturnType<typeof operationalHealth>):
       report.performance.errors,
     ],
     ['jobs_recovered_24h', 'Recovery events in the last 24 hours.', report.recoveredCount],
+    [
+      'jobs_recovery_exhausted_24h',
+      'Stalled jobs whose retry budget was exhausted in the last 24 hours.',
+      report.exhaustedRecoveryCount,
+    ],
+    [
+      'jobs_recovery_ambiguous_24h',
+      'Stalled jobs requiring publication reconciliation in the last 24 hours.',
+      report.ambiguousRecoveryCount,
+    ],
     ['warnings_24h', 'Slow execution warnings recorded in the last 24 hours.', report.warningCount],
     [
       'accounts_connected',
