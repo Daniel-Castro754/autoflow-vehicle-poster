@@ -1615,13 +1615,15 @@ function VehicleDrawer({
           <div className="drawer-section">
             <h3 className="section-title-help">
               Fotos <span>{images.length + files.length}/20</span>
-              <HelpTip text="A primeira foto vira a capa. Use as setas para reordenar; a extensão envia no máximo 20 na ordem cadastrada." />
+              <HelpTip
+                text="Sem curadoria, a primeira foto será a capa e até 20 imagens serão enviadas. Com curadoria aprovada, a seleção define a capa e a ordem."
+              />
             </h3>
             {images.length > 0 && (
               <div className="image-grid">
                 {images.map((image, index) => (
                   <div key={image.id}>
-                    {index === 0 && <span className="cover-badge">Capa</span>}
+                    {index === 0 && <span className="cover-badge">Primeira da galeria</span>}
                     <img src={image.url} alt={image.originalName} />
                     <button
                       type="button"
