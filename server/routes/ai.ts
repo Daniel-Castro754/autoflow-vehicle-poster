@@ -14,6 +14,7 @@ import {
   type VehicleInput,
 } from '../services/description-generator.ts'
 import { generateVehicleHashtags } from '../services/trending-hashtags.ts'
+import { prepareListingTextPreview, approveListingTextPreview } from '../services/listing-text-previews.ts'
 import { getAiAuditHistory, recordAiAudit } from '../services/ai-audit-history.ts'
 import {
   applyBatchDescriptionPreview,
@@ -39,6 +40,43 @@ export async function handleAIRoute(
 ): Promise<boolean> {
   if (url.pathname.startsWith('/api/ai/') && !isAdmin(auth)) {
     send(res, 403, { error: 'Somente administradores podem operar a Central de IA.' })
+    return true
+  }
+  if (req.method === 'POST' && url.pathname === '/api/ai/listing-text/preview') {
+    const b = (await jsonBody(req)) as Record<string, unknown>
+    try {
+      const preview = prepareListingTextPreview(
+        db,
+        auth.organizationId,
+        auth.userId,
+        Number(b?.vehicleId),
+      )
+      recordAiAudit(db, auth.organizationId, auth.userId, 'listing_text_preview', 'preview', 'procedural', preview.variants.length)
+      send(res, 200, preview)
+    } catch (err) {
+      send(res, 409, { error: err instanceof Error ? err.message : 'Não foi possível preparar o anúncio.' })
+    }
+    return true
+  }
+  if (req.method === 'POST' && url.pathname === '/api/ai/listing-text/approve') {
+    const b = (await jsonBody(req)) as Record<string, unknown>
+    if (typeof b?.previewId !== 'string' || !Number.isInteger(b.variantId)) {
+      send(res, 428, { error: 'É necessário revisar uma prévia e aprovar uma versão.' })
+      return true
+    }
+    try {
+      const result = approveListingTextPreview(
+        db,
+        auth.organizationId,
+        auth.userId,
+        b.previewId,
+        Number(b.variantId),
+      )
+      recordAiAudit(db, auth.organizationId, auth.userId, 'listing_text_approved', 'applied', 'procedural', 1)
+      send(res, 200, result)
+    } catch (err) {
+      send(res, 409, { error: err instanceof Error ? err.message : 'Prévia inválida.' })
+    }
     return true
   }
   if (req.method === 'POST' && url.pathname === '/api/ai/generate-description') {
