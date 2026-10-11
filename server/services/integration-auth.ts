@@ -9,6 +9,7 @@ export const integrationReadScopes = [
   'accounts:read',
   'vehicles:create',
   'photos:write',
+  'reports:read',
 ] as const
 
 export type IntegrationScope = (typeof integrationReadScopes)[number]
