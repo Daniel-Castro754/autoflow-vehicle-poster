@@ -191,7 +191,9 @@ try {
     0,
     'Disabling recurring planning must stop pending inserts',
   )
-  db.prepare("UPDATE vehicles SET description='Veículo com descrição revisada para agendamento manual.' WHERE id=50").run()
+  db.prepare(
+    "UPDATE vehicles SET description='Veículo com descrição revisada para agendamento manual.' WHERE id=50",
+  ).run()
   assert.equal(
     (await runAutopilotPipeline(db, 5, 5)).jobsCreated,
     1,
