@@ -36,6 +36,7 @@ import {
   Sparkles,
   Sun,
   TrendingUp,
+  Upload,
   Users,
   WalletCards,
   Wifi,
@@ -3811,7 +3812,7 @@ export function SettingsView({
               </label>
               <div className="group-list-field group-manager">
                 <div className="group-manager-head">
-                  <div>
+                  <div className="group-manager-info">
                     <FieldLabel help="Cadastre nome e URL do Facebook. O ID extraído da URL é mais estável que o nome e reduz falhas quando o grupo for renomeado.">
                       Gerenciador de grupos
                     </FieldLabel>
@@ -3821,27 +3822,30 @@ export function SettingsView({
                       de cima para baixo
                     </small>
                   </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
+                  <div className="group-manager-actions" role="group" aria-label="Ações do gerenciador de grupos">
                     <button
                       type="button"
+                      className="group-manager-action group-manager-action--outline"
                       disabled={curating || !groups.length}
                       onClick={runAutoCurate}
                       title="Exibe uma prévia e altera apenas a ordem dos grupos"
                     >
-                      <Sparkles size={14} />
+                      <Sparkles size={16} aria-hidden="true" />
                       {curating ? 'Reorganizando...' : 'Reordenar grupos'}
                     </button>
                     <button
                       type="button"
+                      className="group-manager-action group-manager-action--outline"
                       disabled={curating}
                       onClick={() => void undoGroupCuration()}
                       title="Desfazer a última reorganização, se nenhum grupo foi modificado depois"
                     >
-                      <RotateCcw size={14} />
+                      <RotateCcw size={16} aria-hidden="true" />
                       Desfazer ordem
                     </button>
                     <button
                       type="button"
+                      className="group-manager-action group-manager-action--primary"
                       disabled={groups.length >= 2000}
                       onClick={() => {
                         setGroupEditsPending(true)
@@ -3851,15 +3855,17 @@ export function SettingsView({
                         ])
                       }}
                     >
-                      <Plus />
+                      <Plus size={17} aria-hidden="true" />
                       Adicionar grupo
                     </button>
-                    <label className="secondary" style={{ cursor: 'pointer', padding: 8 }}>
+                    <label className="group-manager-action group-manager-action--ghost">
+                      <Upload size={16} aria-hidden="true" />
                       Importar CSV
                       <input
+                        className="group-manager-csv-input"
                         type="file"
-                        hidden
                         accept=".csv,text/csv"
+                        aria-label="Importar arquivo CSV de grupos"
                         onChange={(event) => {
                           void importGroupCsv(event.target.files?.[0])
                           event.target.value = ''
