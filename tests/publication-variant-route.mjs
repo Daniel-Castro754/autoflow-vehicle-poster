@@ -4,7 +4,10 @@ import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
 import { startTestServer, createApiClient } from './helpers/server.mjs'
 import { jpegBase64 } from './helpers/images.mjs'
-import { calculateListingHash, listingSnapshotForVehicle } from '../server/services/duplicate-checker.ts'
+import {
+  calculateListingHash,
+  listingSnapshotForVehicle,
+} from '../server/services/duplicate-checker.ts'
 
 const server = await startTestServer()
 const db = new DatabaseSync(join(server.dataDir, 'autoflow.db'))
@@ -85,7 +88,9 @@ try {
   const first = await makeJob(firstVehicle.id)
   const second = await makeJob(secondVehicle.id)
   const fingerprints = db
-    .prepare('SELECT listing_hash FROM published_ads WHERE publication_job_id IN (?,?) ORDER BY publication_job_id')
+    .prepare(
+      'SELECT listing_hash FROM published_ads WHERE publication_job_id IN (?,?) ORDER BY publication_job_id',
+    )
     .all(first.id, second.id)
   assert.equal(fingerprints.length, 2)
   assert.notEqual(fingerprints[0].listing_hash, fingerprints[1].listing_hash)
