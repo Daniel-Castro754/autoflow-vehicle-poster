@@ -19,18 +19,23 @@ export async function handleIntegrationCredentialsRoute(
   { db, send, jsonBody, isAdmin }: Dependencies,
 ) {
   const base = '/api/integrations/credentials'
-  if (url.pathname !== base && !/^\/api\/integrations\/credentials\/\d+\/revoke$/.test(url.pathname))
+  if (
+    url.pathname !== base &&
+    !/^\/api\/integrations\/credentials\/\d+\/revoke$/.test(url.pathname)
+  )
     return false
   if (!isAdmin(auth)) {
     send(res, 403, { error: 'Apenas administradores podem gerenciar integrações.' })
     return true
   }
   if (url.pathname === base && req.method === 'GET') {
-    const credentials = db.prepare(
-      `SELECT id,name,scopes,active,expires_at expiresAt,last_used_at lastUsedAt,
+    const credentials = db
+      .prepare(
+        `SELECT id,name,scopes,active,expires_at expiresAt,last_used_at lastUsedAt,
         created_at createdAt,revoked_at revokedAt
        FROM integration_credentials WHERE organization_id=? ORDER BY id DESC`,
-    ).all(auth.organizationId)
+      )
+      .all(auth.organizationId)
     send(res, 200, {
       credentials: credentials.map((row) => {
         const item = row as Record<string, unknown>
@@ -40,13 +45,22 @@ export async function handleIntegrationCredentialsRoute(
     return true
   }
   if (url.pathname === base && req.method === 'POST') {
-    const body = await jsonBody(req) as Record<string, unknown>
+    const body = (await jsonBody(req)) as Record<string, unknown>
     const name = typeof body.name === 'string' ? body.name.trim() : ''
     const scopes = body.scopes
-    if (!name || name.length > 100 || !Array.isArray(scopes) || scopes.length < 1 ||
+    if (
+      !name ||
+      name.length > 100 ||
+      !Array.isArray(scopes) ||
+      scopes.length < 1 ||
       scopes.length > integrationReadScopes.length ||
-      !scopes.every((scope) => typeof scope === 'string' && integrationReadScopes.includes(scope as typeof integrationReadScopes[number])) ||
-      new Set(scopes).size !== scopes.length) {
+      !scopes.every(
+        (scope) =>
+          typeof scope === 'string' &&
+          integrationReadScopes.includes(scope as (typeof integrationReadScopes)[number]),
+      ) ||
+      new Set(scopes).size !== scopes.length
+    ) {
       send(res, 400, { error: 'Nome ou escopos inválidos.' })
       return true
     }
@@ -57,8 +71,11 @@ export async function handleIntegrationCredentialsRoute(
         return true
       }
       const date = new Date(body.expiresAt)
-      if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now() ||
-        date.getTime() > Date.now() + 366 * 24 * 60 * 60 * 1000) {
+      if (
+        !Number.isFinite(date.getTime()) ||
+        date.getTime() <= Date.now() ||
+        date.getTime() > Date.now() + 366 * 24 * 60 * 60 * 1000
+      ) {
         send(res, 400, { error: 'Validade deve estar no futuro, até 366 dias.' })
         return true
       }
