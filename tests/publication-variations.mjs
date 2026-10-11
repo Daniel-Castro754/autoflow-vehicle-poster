@@ -7,6 +7,8 @@ import {
   pickRandomOrderedSubset,
   publicationPhotoRandom,
   optimizeFaithfulPhoto,
+  renderMildPhotoVariant,
+  signedPublicationPhotoToken,
 } from '../server/services/image-manager.ts'
 import {
   listingSnapshotForVehicle,
@@ -62,6 +64,11 @@ const optimized = await optimizeFaithfulPhoto(real)
 const info = await sharp(optimized).metadata()
 assert.equal(info.format, 'jpeg')
 assert(info.width <= 1600 && info.height <= 1600)
+const mild = await renderMildPhotoVariant(real, 1, 1)
+assert.equal((await sharp(mild).metadata()).format, 'jpeg')
+assert.deepEqual(await renderMildPhotoVariant(real, 1, 1), mild, 'Image edits must be deterministic.')
+assert.equal(signedPublicationPhotoToken('secret', 1, 1, 1).length, 64)
+assert.notEqual(signedPublicationPhotoToken('secret', 1, 1, 1), signedPublicationPhotoToken('secret', 1, 1, 2))
 
 const db = new DatabaseSync(':memory:')
 try {
@@ -85,7 +92,13 @@ try {
       VALUES (1,1,1,1,'pending'),(2,1,2,1,'pending'),(3,2,3,2,'pending');
   `)
   const first = listingSnapshotForVehicle(db, 1, 1)
+  const second = listingSnapshotForVehicle(db, 1, 2)
   const hash = calculateListingHash(first)
+  const secondHash = calculateListingHash(second)
+  assert(first.description.includes('AF-000001'))
+  assert(second.description.includes('AF-000002'))
+  assert.notEqual(hash, secondHash, 'Two inventory units can have the same model, price and original copy.')
+  assert.deepEqual(listingSnapshotForVehicle(db, 1, 1), first, 'Text remains stable on retry.')
   assert.match(hash, /^[a-f0-9]{64}$/)
   assert.notEqual(calculateListingHash({ ...first, price: first.price + 1 }), hash)
   db.exec('BEGIN IMMEDIATE')
@@ -93,6 +106,7 @@ try {
   db.exec('COMMIT')
   assert.equal(findDuplicateListingHash(db, 1, hash)?.jobId, 1)
   assert.throws(() => reserveListingHash(db, 1, 2, 2, hash), DuplicateListingHashError)
+  reserveListingHash(db, 1, 2, 2, secondHash)
   // Organizations are isolated by their own hash namespace.
   reserveListingHash(db, 2, 3, 3, hash)
   assert.equal(confirmPublishedHash(db, 1, 1), true)
@@ -104,8 +118,8 @@ try {
   const capacity = profileCapacity(db, 1, 1)
   assert(capacity.retryAfterSeconds >= 30 * 60)
   markPublishedHashRemoved(db, 1, 1)
-  reserveListingHash(db, 1, 2, 2, hash)
-  assert.equal(findDuplicateListingHash(db, 1, hash)?.jobId, 2)
+  assert.equal(findDuplicateListingHash(db, 1, hash), undefined)
+  assert.equal(findDuplicateListingHash(db, 1, secondHash)?.jobId, 2)
 } finally {
   db.close()
 }
