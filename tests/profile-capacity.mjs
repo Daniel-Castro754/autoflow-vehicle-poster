@@ -15,12 +15,17 @@ try {
     body: JSON.stringify({ email: testServer.email, password: testServer.password }),
   })
   const api = createApiClient(testServer.base, login.token)
-  const org = db.prepare('SELECT organization_id org,id FROM users WHERE email=?')
+  const org = db
+    .prepare('SELECT organization_id org,id FROM users WHERE email=?')
     .get(testServer.email)
-  const accountId = Number(db.prepare(
-    "INSERT INTO social_accounts (organization_id,user_id,label,browser_profile,status) " +
-      "VALUES (?,?, 'Testes', 'brave-test', 'connected')",
-  ).run(org.org, org.id).lastInsertRowid)
+  const accountId = Number(
+    db
+      .prepare(
+        'INSERT INTO social_accounts (organization_id,user_id,label,browser_profile,status) ' +
+          "VALUES (?,?, 'Testes', 'brave-test', 'connected')",
+      )
+      .run(org.org, org.id).lastInsertRowid,
+  )
   const path = '/social-accounts/' + accountId + '/capacity'
   const patch = (value) => api(path, { method: 'PATCH', body: JSON.stringify(value) })
   const reject = (promise, status) => assert.rejects(promise, (e) => e.status === status)
@@ -43,26 +48,40 @@ try {
   assert.equal(updatedLimits.dailyLimit, 2)
   assert.equal(updatedLimits.intervalMinutes, 60)
 
-  const otherOrg = Number(db.prepare("INSERT INTO organizations(name) VALUES ('Outra empresa')")
-    .run().lastInsertRowid)
-  const foreignAccount = Number(db.prepare(
-    'INSERT INTO social_accounts(organization_id,user_id,label) VALUES (?,?,?)',
-  ).run(otherOrg, org.id, 'Isolado').lastInsertRowid)
+  const otherOrg = Number(
+    db.prepare("INSERT INTO organizations(name) VALUES ('Outra empresa')").run().lastInsertRowid,
+  )
+  const foreignAccount = Number(
+    db
+      .prepare('INSERT INTO social_accounts(organization_id,user_id,label) VALUES (?,?,?)')
+      .run(otherOrg, org.id, 'Isolado').lastInsertRowid,
+  )
   await reject(api('/social-accounts/' + foreignAccount + '/capacity'), 404)
-  await reject(api('/social-accounts/' + foreignAccount + '/capacity', {
-    method: 'PATCH',
-    body: JSON.stringify({ dailyLimitOverride: 1, intervalMinutesOverride: 60 }),
-  }), 404)
+  await reject(
+    api('/social-accounts/' + foreignAccount + '/capacity', {
+      method: 'PATCH',
+      body: JSON.stringify({ dailyLimitOverride: 1, intervalMinutesOverride: 60 }),
+    }),
+    404,
+  )
 
-  const vehicle = Number(db.prepare(
-    "INSERT INTO vehicles(organization_id,year,make,model,status) VALUES (?,2022,'Toyota','Corolla','Pronto')",
-  ).run(org.org).lastInsertRowid)
-  const job = Number(db.prepare(
-    "INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status) VALUES (?,?,?,'error')",
-  ).run(org.org, vehicle, accountId).lastInsertRowid)
+  const vehicle = Number(
+    db
+      .prepare(
+        "INSERT INTO vehicles(organization_id,year,make,model,status) VALUES (?,2022,'Toyota','Corolla','Pronto')",
+      )
+      .run(org.org).lastInsertRowid,
+  )
+  const job = Number(
+    db
+      .prepare(
+        "INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status) VALUES (?,?,?,'error')",
+      )
+      .run(org.org, vehicle, accountId).lastInsertRowid,
+  )
   db.prepare(
-    "INSERT INTO publication_job_events(organization_id,publication_job_id,event_type,details) " +
-    "VALUES (?,?, 'filling_started', ?)",
+    'INSERT INTO publication_job_events(organization_id,publication_job_id,event_type,details) ' +
+      "VALUES (?,?, 'filling_started', ?)",
   ).run(org.org, job, JSON.stringify({ accountId }))
   let capacity = profileCapacity(db, org.org, accountId)
   assert.equal(capacity.used, 1)
@@ -70,7 +89,8 @@ try {
   assert(capacity.retryAfterSeconds > 0)
   assert(capacity.nextAllowedAt)
   const fallback = await patch({
-    dailyLimitOverride: null, intervalMinutesOverride: null,
+    dailyLimitOverride: null,
+    intervalMinutesOverride: null,
   })
   assert.equal(fallback.dailyLimit, 10)
   assert.equal(fallback.intervalMinutes, 25)
@@ -92,7 +112,9 @@ try {
   assert(Number.isFinite(schedule.scheduledAt.getTime()))
   assert(Math.abs(schedule.scheduledAt.getTime() - occupancy) >= 90 * 60000)
 
-  console.log('✓ Profile capacity: tenant isolation, overrides, actual attempts, claim spacing and inherited limits')
+  console.log(
+    '✓ Profile capacity: tenant isolation, overrides, actual attempts, claim spacing and inherited limits',
+  )
 } finally {
   db.close()
   await testServer.close()
