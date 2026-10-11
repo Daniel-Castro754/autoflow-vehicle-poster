@@ -664,12 +664,7 @@ async function planAutopilotJobs(
       // Keep automated jobs consistent with manually created publications:
       // their editorial snapshot and reserved hash use the same persisted seed.
       const variantSeed = randomInt(1, 2_147_483_646)
-      const listingContent = listingSnapshotForVehicle(
-        db,
-        organizationId,
-        vehicle.id,
-        variantSeed,
-      )
+      const listingContent = listingSnapshotForVehicle(db, organizationId, vehicle.id, variantSeed)
       if (!listingContent) continue
       const listingHash = calculateListingHash(listingContent)
       if (findDuplicateListingHash(db, organizationId, listingHash)) continue
