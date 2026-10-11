@@ -4,12 +4,14 @@ import type { DatabaseSync } from 'node:sqlite'
 export type ListingContent = { title: string; description: string; price: number }
 
 export class DuplicateListingHashError extends Error {
-  constructor(public readonly conflictingJobId: number) {
+  readonly conflictingJobId: number
+  constructor(conflictingJobId: number) {
     super(
       'Um anúncio com o mesmo título, descrição e preço já está na fila ou publicado (trabalho #' +
         conflictingJobId +
         '). Resolva o anúncio existente antes de tentar novamente.',
     )
+    this.conflictingJobId = conflictingJobId
   }
 }
 
