@@ -24,7 +24,17 @@ export function prepareListingForPublication(
   approvedImages: PublicationPhoto[],
   imageVariantSecret: string,
 ) {
-  const listing = listingSnapshotForVehicle(db, organizationId, vehicleId)
+  const jobRow = db
+    .prepare(
+      'SELECT variant_seed variantSeed FROM publication_jobs WHERE id=? AND organization_id=?',
+    )
+    .get(publicationJobId, organizationId) as { variantSeed: number | null } | undefined
+  const listing = listingSnapshotForVehicle(
+    db,
+    organizationId,
+    vehicleId,
+    jobRow?.variantSeed ?? undefined,
+  )
   if (!listing) throw new Error('Veículo não encontrado para preparar a publicação.')
   const listingHash = calculateListingHash(listing)
   const existing = db
@@ -33,7 +43,9 @@ export function prepareListingForPublication(
     )
     .get(organizationId, publicationJobId) as { listingHash: string } | undefined
   if (existing && existing.listingHash !== listingHash)
-    throw new Error('Os dados do anúncio foram alterados após entrar na fila. Cancele e revise o trabalho.')
+    throw new Error(
+      'Os dados do anúncio foram alterados após entrar na fila. Cancele e revise o trabalho.',
+    )
   const duplicate = findDuplicateListingHash(db, organizationId, listingHash, publicationJobId)
   if (duplicate) throw new DuplicateListingHashError(duplicate.jobId)
   const rows = db
@@ -41,9 +53,7 @@ export function prepareListingForPublication(
       'SELECT id,file_name fileName,photo_category category FROM vehicle_images WHERE organization_id=? AND vehicle_id=?',
     )
     .all(organizationId, vehicleId) as Array<{ id: number; fileName: string; category: string }>
-  const photosByUrl = new Map(
-    rows.map((photo) => [imageBaseUrl + photo.fileName, photo]),
-  )
+  const photosByUrl = new Map(rows.map((photo) => [imageBaseUrl + photo.fileName, photo]))
   const categorized = approvedImages.map((photo) => {
     const source = photosByUrl.get(photo.url)
     if (!source) throw new Error('A seleção contém uma fotografia não pertencente ao veículo.')
@@ -61,12 +71,7 @@ export function prepareListingForPublication(
       url:
         imageBaseUrl +
         `variants/${publicationJobId}/${imageId}/` +
-        signedPublicationPhotoToken(
-          imageVariantSecret,
-          organizationId,
-          publicationJobId,
-          imageId,
-        ) +
+        signedPublicationPhotoToken(imageVariantSecret, organizationId, publicationJobId, imageId) +
         '.jpg',
       name: name.replace(/\.[^.]+$/, '') + '-apresentacao.jpg',
       mimeType: 'image/jpeg',

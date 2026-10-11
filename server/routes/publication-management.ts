@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto'
 import { publicationMayExist } from '../services/publication-evidence.ts'
 import { organizationScheduleHistory } from '../services/schedule-history.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -123,6 +124,7 @@ export async function handlePublicationManagementRoute(
         }
       | undefined
     if (!vehicle) return send(res, 400, { error: 'Veículo inválido.' })
+    const variantSeed = randomInt(1, 2_147_483_646)
     if (vehicle.status === 'Vendido' || vehicle.soldAt)
       return send(res, 409, { error: 'Veículos vendidos não podem ser publicados.' })
     if (!canWriteVehicle(vehicle.id, auth))
@@ -169,7 +171,12 @@ export async function handlePublicationManagementRoute(
     const duplicateRisk = publicationDuplicateRisk(auth.organizationId, vehicle.id)
     if (duplicateRisk)
       return send(res, 409, { error: duplicateRisk.message, duplicate: duplicateRisk })
-    const listingContent = listingSnapshotForVehicle(db, auth.organizationId, vehicle.id)
+    const listingContent = listingSnapshotForVehicle(
+      db,
+      auth.organizationId,
+      vehicle.id,
+      variantSeed,
+    )
     if (!listingContent) return send(res, 404, { error: 'Veículo não encontrado.' })
     const listingHash = calculateListingHash(listingContent)
     const contentDuplicate = findDuplicateListingHash(db, auth.organizationId, listingHash)
@@ -241,12 +248,17 @@ export async function handlePublicationManagementRoute(
           capacity: currentCapacity,
         })
       }
-      const currentListing = listingSnapshotForVehicle(db, auth.organizationId, vehicle.id)
+      const currentListing = listingSnapshotForVehicle(
+        db,
+        auth.organizationId,
+        vehicle.id,
+        variantSeed,
+      )
       if (!currentListing || calculateListingHash(currentListing) !== listingHash)
         throw new Error('O veículo foi atualizado durante a preparação. Revise o anúncio.')
       const result = db
         .prepare(
-          'INSERT INTO publication_jobs (organization_id,vehicle_id,social_account_id,status,queue_priority,scheduled_at,max_retries) VALUES (?,?,?,?,?,?,?)',
+          'INSERT INTO publication_jobs (organization_id,vehicle_id,social_account_id,status,queue_priority,scheduled_at,max_retries,variant_seed) VALUES (?,?,?,?,?,?,?,?)',
         )
         .run(
           auth.organizationId,
@@ -256,6 +268,7 @@ export async function handlePublicationManagementRoute(
           nextPriority,
           scheduledAt,
           maxRetries,
+          variantSeed,
         )
       publicationJobId = Number(result.lastInsertRowid)
       reserveListingHash(db, auth.organizationId, vehicle.id, publicationJobId, listingHash)
