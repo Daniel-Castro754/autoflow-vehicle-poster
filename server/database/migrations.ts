@@ -389,7 +389,8 @@ const migrations: Migration[] = [
   {
     version: 23,
     columns: [],
-    sql: `CREATE TABLE IF NOT EXISTS integration_credentials (
+    sql: `
+    CREATE TABLE IF NOT EXISTS integration_credentials (
       id INTEGER PRIMARY KEY,
       organization_id INTEGER NOT NULL REFERENCES organizations(id),
       created_by INTEGER REFERENCES users(id),

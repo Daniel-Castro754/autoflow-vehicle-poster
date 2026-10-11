@@ -44,7 +44,10 @@ function requireScope(
 ) {
   if (integrationHasScope(auth, scope)) return true
   audit(db, auth, req, scope, 'denied')
-  send(res, 403, { error: 'A credencial da integração não possui este escopo.', requiredScope: scope })
+  send(res, 403, {
+    error: 'A credencial da integração não possui este escopo.',
+    requiredScope: scope,
+  })
   return false
 }
 
