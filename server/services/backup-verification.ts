@@ -206,6 +206,9 @@ export type RestoreDrill = {
   restoredFiles: true
   databaseOpened: true
   applicationStarted: false
+  bootProbePassed: true
+  probeDatabaseReadOnly: true
+  backgroundWorkersStarted: false
   dpapiValidated: false
   temporaryRemoved: true
 }
@@ -295,6 +298,9 @@ export async function runIsolatedRestoreDrill(id: string): Promise<RestoreDrillR
             payload.restoredFiles === true &&
             payload.databaseOpened === true &&
             payload.applicationStarted === false &&
+            payload.bootProbePassed === true &&
+            payload.probeDatabaseReadOnly === true &&
+            payload.backgroundWorkersStarted === false &&
             payload.dpapiValidated === false &&
             Number.isSafeInteger(payload.databaseBytes) &&
             Number.isSafeInteger(payload.imageCount) &&
@@ -318,6 +324,9 @@ export async function runIsolatedRestoreDrill(id: string): Promise<RestoreDrillR
                 restoredFiles: true,
                 databaseOpened: true,
                 applicationStarted: false,
+                bootProbePassed: true,
+                probeDatabaseReadOnly: true,
+                backgroundWorkersStarted: false,
                 dpapiValidated: false,
                 temporaryRemoved: true,
               },

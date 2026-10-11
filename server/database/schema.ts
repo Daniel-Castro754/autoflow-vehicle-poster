@@ -2,10 +2,14 @@ import { logger } from '../lib/logger.ts'
 import { businessDate } from '../lib/timezone.ts'
 import type { DatabaseSync } from 'node:sqlite'
 
-export function initializeBaseSchema(db: DatabaseSync) {
+export function registerSqliteFunctions(db: DatabaseSync) {
   db.function('autoflow_day', { deterministic: true }, (value) =>
     value === null ? null : businessDate(String(value)),
   )
+}
+
+export function initializeBaseSchema(db: DatabaseSync) {
+  registerSqliteFunctions(db)
   db.exec(`
     PRAGMA foreign_keys = ON;
     PRAGMA busy_timeout = 5000;

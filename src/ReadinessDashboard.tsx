@@ -28,6 +28,9 @@ type RestoredBackupTest = {
   restoredFiles: true
   databaseOpened: true
   applicationStarted: false
+  bootProbePassed: true
+  probeDatabaseReadOnly: true
+  backgroundWorkersStarted: false
   dpapiValidated: false
   temporaryRemoved: true
 }
@@ -508,8 +511,10 @@ export function ReadinessDashboard({
                                 {restoredResult.vehicleCount} veículo(s),{' '}
                                 {restoredResult.accountCount} usuário(s),{' '}
                                 {restoredResult.imageCount} imagem(ns). Arquivos temporários
-                                removidos. O servidor AutoFlow não foi iniciado e o DPAPI não foi
-                                testado.
+                                removidos. A inicialização de diagnóstico do AutoFlow foi aprovada
+                                em modo somente leitura, na interface local restrita, sem iniciar
+                                trabalhadores de fundo. A aplicação completa, suas migrações e o
+                                DPAPI não foram testados neste ensaio.
                               </p>
                             )}
                             {backupResult && (

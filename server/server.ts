@@ -22,7 +22,7 @@ import { publicationDuplicateRisk as findPublicationDuplicateRisk } from './serv
 import { createAccessControl } from './services/access-control.ts'
 import { createMarketplaceGroupService } from './services/marketplace-groups.ts'
 import { applyMigrations } from './database/migrations.ts'
-import { initializeBaseSchema } from './database/schema.ts'
+import { initializeBaseSchema, registerSqliteFunctions } from './database/schema.ts'
 import { handleAIRoute } from './routes/ai.ts'
 import { initializeCredentialVault, migrateCredentials } from './services/credential-vault.ts'
 import { handleGroupsRoute } from './routes/groups.ts'
@@ -45,6 +45,8 @@ import {
 import { handleAlertRoute } from './routes/alerts.ts'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
+// Only the isolated restore worker may use this read-only, restricted startup mode.
+const restoreBootProbe = process.env.AUTOFLOW_RESTORE_BOOT_PROBE === '1'
 const configuredSecret = process.env.AUTH_SECRET?.trim()
 if (!configuredSecret || configuredSecret.length < 32)
   throw new Error('AUTH_SECRET deve ter pelo menos 32 caracteres.')
@@ -53,11 +55,19 @@ const dataDir = process.env.DATA_DIR ? resolve(process.env.DATA_DIR) : join(root
 mkdirSync(dataDir, { recursive: true })
 const uploadsDir = join(dataDir, 'uploads')
 mkdirSync(uploadsDir, { recursive: true })
-const db = new DatabaseSync(join(dataDir, 'autoflow.db'))
+const db = new DatabaseSync(join(dataDir, 'autoflow.db'), { readOnly: restoreBootProbe })
 const port = Number(process.env.PORT || 3333)
 if (!Number.isInteger(port) || port < 1 || port > 65535)
   throw new Error('PORT deve ser um número inteiro entre 1 e 65535.')
 const host = String(process.env.HOST || '127.0.0.1').trim() || '127.0.0.1'
+if (
+  restoreBootProbe &&
+  (host !== '127.0.0.1' ||
+    !process.env.DATA_DIR ||
+    !process.env.AUTOFLOW_RESTORE_BOOT_NONCE ||
+    process.env.AUTOFLOW_RESTORE_BOOT_NONCE.length < 32)
+)
+  throw new Error('Modo de restauração exige loopback, diretório isolado e desafio temporário.')
 const urlHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
 const publicOrigin = String(process.env.PUBLIC_ORIGIN || `http://${urlHost}:${port}`)
   .trim()
@@ -70,10 +80,12 @@ if (
   throw new Error('PUBLIC_ORIGIN deve conter apenas uma origem HTTP ou HTTPS válida.')
 const imageBaseUrl = `${publicOrigin}/uploads/`
 
-initializeBaseSchema(db)
-applyMigrations(db)
-initializeCredentialVault(dataDir)
-migrateCredentials(db)
+if (!restoreBootProbe) {
+  initializeBaseSchema(db)
+  applyMigrations(db)
+  initializeCredentialVault(dataDir)
+  migrateCredentials(db)
+} else registerSqliteFunctions(db)
 const automationStatements = createAutomationStatements(db)
 const vehiclePageStatements = createVehiclePageStatements(db)
 const {
@@ -84,11 +96,13 @@ const {
   replaceMarketplaceGroups,
 } = createMarketplaceGroupService(db)
 
-for (const image of db
-  .prepare(
-    "SELECT id,file_name fileName FROM vehicle_images WHERE content_hash='' OR content_hash IS NULL",
-  )
-  .all() as Array<{ id: number; fileName: string }>) {
+for (const image of restoreBootProbe
+  ? []
+  : (db
+      .prepare(
+        "SELECT id,file_name fileName FROM vehicle_images WHERE content_hash='' OR content_hash IS NULL",
+      )
+      .all() as Array<{ id: number; fileName: string }>)) {
   const path = join(uploadsDir, image.fileName)
   if (existsSync(path))
     db.prepare('UPDATE vehicle_images SET content_hash=? WHERE id=?').run(
@@ -248,7 +262,7 @@ const {
   allowedExtensionAccount,
 } = createAccessControl(db, userById)
 
-if (!db.prepare('SELECT id FROM users LIMIT 1').get()) {
+if (!restoreBootProbe && !db.prepare('SELECT id FROM users LIMIT 1').get()) {
   const adminName = String(process.env.INITIAL_ADMIN_NAME || 'Administrador').trim()
   const adminEmail = String(process.env.INITIAL_ADMIN_EMAIL || '')
     .trim()
@@ -338,9 +352,12 @@ if (!db.prepare('SELECT id FROM users LIMIT 1').get()) {
   )
   for (const row of rows) insert.run(orgId, ...row)
 }
-db.exec(`INSERT OR IGNORE INTO organization_settings (organization_id,default_location,daily_limit,require_confirmation,description_template)
+if (!restoreBootProbe)
+  db.exec(`INSERT OR IGNORE INTO organization_settings (organization_id,default_location,daily_limit,require_confirmation,description_template)
   SELECT id,'São Paulo, SP',10,1,'{ano} {marca} {modelo} {versao} com {km} km. Entre em contato para mais informações.' FROM organizations`)
-for (const organization of db.prepare('SELECT id FROM organizations').all() as Array<{
+for (const organization of (restoreBootProbe
+  ? []
+  : db.prepare('SELECT id FROM organizations').all()) as Array<{
   id: number
 }>) {
   if (!marketplaceGroups(organization.id).length) {
@@ -357,12 +374,53 @@ for (const organization of db.prepare('SELECT id FROM organizations').all() as A
     }
   }
 }
-startHealthMonitor(db, 60000)
-startGroupCurationWorker(db)
+if (!restoreBootProbe) {
+  startHealthMonitor(db, 60000)
+  startGroupCurationWorker(db)
+}
 const autopilotScheduler = createAutonomousScheduler(db)
-autopilotScheduler.start()
+if (!restoreBootProbe) autopilotScheduler.start()
 
 async function handleRequest(req: IncomingMessage, res: ServerResponse) {
+  if (restoreBootProbe) {
+    // Fail closed: no frontend, login, extension, AI, automation or mutable endpoints.
+    const header = req.headers['x-autoflow-restore-probe']
+    const expected = process.env.AUTOFLOW_RESTORE_BOOT_NONCE || ''
+    const received = typeof header === 'string' ? header : ''
+    if (
+      received.length !== expected.length ||
+      !timingSafeEqual(Buffer.from(received), Buffer.from(expected))
+    ) {
+      return send(res, 403, { error: 'Modo diagnóstico restrito.' })
+    }
+    if (req.method !== 'GET' || req.url !== '/health/ready') {
+      return send(res, 404, { error: 'Rota desabilitada no modo diagnóstico.' })
+    }
+    try {
+      const schema = db
+        .prepare(
+          "SELECT COUNT(*) n FROM sqlite_master WHERE type='table' AND name IN ('users','organizations','vehicles','publication_jobs','organization_settings')",
+        )
+        .get() as { n: number }
+      if (schema.n !== 5) throw new Error('schema')
+      const users = db.prepare('SELECT COUNT(*) n FROM users').get() as { n: number }
+      if (users.n < 1) throw new Error('missing users')
+      db.prepare('SELECT id FROM organizations LIMIT 1').get()
+      db.prepare('SELECT id FROM vehicles LIMIT 1').get()
+      db.prepare('SELECT id FROM publication_jobs LIMIT 1').get()
+      return send(res, 200, {
+        status: 'ready',
+        mode: 'restored_readonly_boot_probe',
+        databaseReadOnly: true,
+        workersStarted: false,
+        externalIntegrationsTested: false,
+        vaultDecryptionTested: false,
+        migrationsApplied: false,
+      })
+    } catch {
+      return send(res, 503, { status: 'not_ready', mode: 'restored_readonly_boot_probe' })
+    }
+  }
   const originAllowed = applyCors(req, res)
   if (req.method === 'OPTIONS')
     return originAllowed ? send(res, 204, null) : send(res, 403, { error: 'Origem não permitida.' })
