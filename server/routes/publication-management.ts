@@ -3,6 +3,7 @@ import { organizationScheduleHistory } from '../services/schedule-history.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { calculateOptimalSchedule } from '../services/smart-scheduler.ts'
+import { profileCapacity } from '../services/profile-capacity.ts'
 import { findBestAccountForVehicle } from '../services/session-manager.ts'
 import { publicationReadinessIssues } from '../services/publication-policy.ts'
 
@@ -159,21 +160,14 @@ export async function handlePublicationManagementRoute(
     const duplicateRisk = publicationDuplicateRisk(auth.organizationId, vehicle.id)
     if (duplicateRisk)
       return send(res, 409, { error: duplicateRisk.message, duplicate: duplicateRisk })
-    const settings = db
-      .prepare(
-        'SELECT daily_limit dailyLimit, max_retries maxRetries FROM organization_settings WHERE organization_id=?',
-      )
-      .get(auth.organizationId) as { dailyLimit: number; maxRetries?: number } | undefined
-    const today = (
-      db
-        .prepare(
-          "SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND autoflow_day(created_at)=autoflow_day(CURRENT_TIMESTAMP) AND status!='canceled'",
-        )
-        .get(auth.organizationId, accountId) as { total: number }
-    ).total
-    if (today >= Number(settings?.dailyLimit || 10))
+    const settings = db.prepare(
+      'SELECT max_retries maxRetries FROM organization_settings WHERE organization_id=?',
+    ).get(auth.organizationId) as { maxRetries?: number } | undefined
+    const capacity = profileCapacity(db, auth.organizationId, accountId)
+    if (capacity.queuedToday >= capacity.dailyLimit)
       return send(res, 429, {
-        error: `O perfil atingiu o limite diário de ${settings?.dailyLimit || 10} trabalhos.`,
+        error: 'O perfil atingiu o limite operacional de trabalhos criados hoje.',
+        capacity,
       })
     const nextPriority =
       (
@@ -203,6 +197,7 @@ export async function handlePublicationManagementRoute(
         existingTimestamps,
         accountId,
         historicalData: organizationScheduleHistory(db, auth.organizationId),
+        spacingMinutes: capacity.intervalMinutes,
       })
       scheduledAt = optimal.isoString
     }
@@ -424,19 +419,11 @@ export async function handlePublicationManagementRoute(
       return send(res, 409, {
         error: 'O perfil de destino já possui um trabalho ativo para um dos veículos selecionados.',
       })
-    const settings = db
-      .prepare('SELECT daily_limit dailyLimit FROM organization_settings WHERE organization_id=?')
-      .get(auth.organizationId) as { dailyLimit: number } | undefined
-    const today = (
-      db
-        .prepare(
-          "SELECT COUNT(*) total FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND autoflow_day(created_at)=autoflow_day(CURRENT_TIMESTAMP) AND status!='canceled'",
-        )
-        .get(auth.organizationId, accountId) as { total: number }
-    ).total
-    if (today + jobs.length > Number(settings?.dailyLimit || 10))
+    const targetCapacity = profileCapacity(db, auth.organizationId, accountId)
+    if (targetCapacity.queuedToday + jobs.length > targetCapacity.dailyLimit)
       return send(res, 429, {
-        error: `A transferência ultrapassaria o limite diário de ${settings?.dailyLimit || 10} trabalhos do perfil de destino.`,
+        error: 'A transferência ultrapassaria o limite operacional do perfil de destino.',
+        capacity: targetCapacity,
       })
     let nextPriority =
       (
