@@ -27,6 +27,10 @@ assert.equal(
   '',
 )
 assert.equal(canonicalMarketplaceListing('javascript:alert(1)').canonicalUrl, '')
+assert.equal(
+  canonicalMarketplaceListing('https://facebook.com/marketplace/item/late-1').externalListingId,
+  'late-1',
+)
 
 const db = new DatabaseSync(':memory:')
 db.exec(`
