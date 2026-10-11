@@ -105,10 +105,7 @@ async function verifySafeBoot(directory) {
       await Promise.race([
         exit,
         new Promise((_, reject) => {
-          shutdownTimer = setTimeout(
-            () => reject(new Error('PROBE_SHUTDOWN_TIMEOUT')),
-            5000,
-          )
+          shutdownTimer = setTimeout(() => reject(new Error('PROBE_SHUTDOWN_TIMEOUT')), 5000)
         }),
       ])
     } finally {
