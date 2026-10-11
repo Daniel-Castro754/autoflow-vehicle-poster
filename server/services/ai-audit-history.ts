@@ -4,6 +4,8 @@ export type AiAuditAction =
   | 'description_generated'
   | 'description_preview'
   | 'description_approved'
+  | 'listing_text_preview'
+  | 'listing_text_approved'
   | 'manual_pilot_preview'
   | 'manual_pilot_executed'
   | 'assistant_command'

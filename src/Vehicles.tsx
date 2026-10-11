@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { FieldLabel, HelpTip } from './HelpTip'
 import { DrawerFocusGuard } from './DrawerFocusGuard'
+import { ListingVariantsPanel } from './ListingVariantsPanel'
 import {
   BODY_TYPES,
   FUEL_TYPES,
@@ -167,8 +168,10 @@ export default function VehiclesView({
   reload,
   notify,
   refreshVersion,
+  canManage,
 }: {
   api: ApiFn
+  canManage: boolean
   refreshVersion: number
   vehicles: VehicleRecord[]
   accounts: AccountOption[]
@@ -1032,6 +1035,7 @@ export default function VehiclesView({
         <VehicleDrawer
           api={api}
           vehicle={editor}
+          canManage={canManage}
           onClose={() => setEditor(undefined)}
           onSaved={async (message) => {
             setEditor(undefined)
@@ -1172,11 +1176,13 @@ function QueueDrawer({
 function VehicleDrawer({
   api,
   vehicle,
+  canManage,
   onClose,
   onSaved,
 }: {
   api: ApiFn
   vehicle: VehicleRecord | null
+  canManage: boolean
   onClose: () => void
   onSaved: (message: string) => Promise<void>
 }) {
@@ -1595,6 +1601,15 @@ function VehicleDrawer({
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Se ficar em branco, será usado o modelo definido nas Configurações."
             />
+            {canManage && vehicle && (
+              <ListingVariantsPanel
+                api={api}
+                vehicleId={vehicle.id}
+                onApproved={async () => {
+                  await onSaved('Descrição revisada e aprovada para o veículo.')
+                }}
+              />
+            )}
           </div>
           <div className="drawer-section">
             <h3 className="section-title-help">
