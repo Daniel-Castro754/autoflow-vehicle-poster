@@ -123,6 +123,22 @@ assert.equal(
   null,
 )
 
+const reusedJob = Number(
+  db.prepare("INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status) VALUES (1,10,5,'completed')").run().lastInsertRowid,
+)
+recordConfirmedListing(db, {
+  organizationId: 1,
+  vehicleId: 10,
+  publicationJobId: reusedJob,
+  socialAccountId: 5,
+  resultUrl: 'https://facebook.com/marketplace/item/998877',
+})
+assert.equal(
+  db.prepare("SELECT publication_job_id jobId FROM publication_listing_ledger WHERE external_listing_id='998877'").get().jobId,
+  100,
+  'An external listing ID must keep its original job provenance.',
+)
+
 console.log(
   '✓ Listing ledger: canonical URL, durable duplicate evidence, removal and tenant isolation.',
 )
