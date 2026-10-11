@@ -44,6 +44,7 @@ import {
 } from './routes/publication-management.ts'
 import { handleAlertRoute } from './routes/alerts.ts'
 import { handlePhotoCurationRoute } from './routes/photo-curation.ts'
+import { handleIntegrationRoute, isIntegrationRoute } from './routes/integration.ts'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 // Only the isolated restore worker may use this read-only, restricted startup mode.
@@ -463,6 +464,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return
     }
     if (await servePanel(req, res, url, join(root, 'dist'))) return
+    if (isIntegrationRoute(url)) {
+      handleIntegrationRoute(req, res, url, { db, send, requestIdFor })
+      return
+    }
     if (await handleAuthRoute(req, res, url, undefined, authRouteDependencies)) return
     const auth = readToken(req)
     if (!auth) return send(res, 401, { error: 'Sessão inválida ou expirada.' })
