@@ -5,6 +5,7 @@ import { publicationMayExist, readPublicationReport } from '../services/publicat
 import { findBestAccountForVehicle } from '../services/session-manager.ts'
 import { calculateBackoff } from '../lib/retry.ts'
 import { dailyExecutionAttempts } from '../services/daily-capacity.ts'
+import { publicationPhotoPayload, PhotoCurationConflict } from '../services/photo-curation.ts'
 import { classifyExtensionFailure } from '../services/publication-policy.ts'
 import { sendCriticalAlert } from '../services/alerting.ts'
 import {
@@ -346,11 +347,14 @@ export async function handleExtensionRoute(
       )
       .get(job.vehicleId, auth.organizationId) as Record<string, unknown> | undefined
     if (!vehicle) return send(res, 404, { error: 'Veículo não encontrado.' })
-    const images = db
-      .prepare(
-        `SELECT ?||file_name url,original_name name,mime_type mimeType FROM vehicle_images WHERE vehicle_id=? AND organization_id=? ORDER BY position,id LIMIT 20`,
-      )
-      .all(imageBaseUrl, job.vehicleId, auth.organizationId)
+    let images: ReturnType<typeof publicationPhotoPayload>
+    try {
+      images = publicationPhotoPayload(db, auth.organizationId, job.vehicleId, imageBaseUrl)
+    } catch (error) {
+      if (error instanceof PhotoCurationConflict)
+        return send(res, 409, { error: error.message, photoCurationNeedsReview: true })
+      throw error
+    }
     const settings = db
       .prepare(
         `SELECT auto_advance autoAdvance,fill_groups fillGroups,target_groups targetGroups,auto_publish autoPublish
