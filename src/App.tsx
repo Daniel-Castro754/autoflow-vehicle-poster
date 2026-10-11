@@ -1064,9 +1064,7 @@ function TeamView({
                       <i />
                       {account.automationPaused ? 'Automação pausada' : 'Aguardando extensão'}
                     </span>
-                    {canManage && (
-                      <ProfileCapacityEditor api={api} accountId={account.id} />
-                    )}
+                    {canManage && <ProfileCapacityEditor api={api} accountId={account.id} />}
                     {account.automationPaused && canManage && (
                       <button
                         className="team-user-toggle"
