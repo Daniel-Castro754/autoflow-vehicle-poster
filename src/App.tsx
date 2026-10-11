@@ -795,6 +795,7 @@ export default function App() {
           />
         ) : (
           <VehiclesView
+            canManage={currentUser?.role === 'admin'}
             refreshVersion={inventoryVersion}
             api={api}
             vehicles={vehicles}
