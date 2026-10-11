@@ -1,4 +1,5 @@
 import sharp from 'sharp'
+import { createHmac } from 'node:crypto'
 
 export type CategorizedPhoto<T> = T & { category?: string }
 
@@ -54,5 +55,42 @@ export async function optimizeFaithfulPhoto(buffer: Buffer): Promise<Buffer> {
     .rotate()
     .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
     .jpeg({ quality: 86, mozjpeg: true })
+    .toBuffer()
+}
+
+// Signed links allow the extension to request a variant without exposing raw
+// sequential image identifiers to unauthenticated URL enumeration.
+export function signedPublicationPhotoToken(
+  secret: string,
+  organizationId: number,
+  jobId: number,
+  imageId: number,
+): string {
+  if (!secret || ![organizationId, jobId, imageId].every((id) => Number.isSafeInteger(id) && id > 0))
+    throw new Error('Referência inválida para imagem da publicação.')
+  return createHmac('sha256', secret)
+    .update(`${organizationId}:${jobId}:${imageId}`)
+    .digest('hex')
+}
+
+// The only changes are mild presentation corrections to the *same* approved
+// photo. Do not flip plates, crop damage, add content, or simulate new photos.
+export async function renderMildPhotoVariant(
+  buffer: Buffer,
+  jobId: number,
+  imageId: number,
+): Promise<Buffer> {
+  if (!Buffer.isBuffer(buffer) || !buffer.length)
+    throw new Error('Fotografia inválida.')
+  if (![jobId, imageId].every((value) => Number.isSafeInteger(value) && value > 0))
+    throw new Error('Identificador de fotografia inválido.')
+  const seed = (jobId * 31 + imageId * 17) % 5
+  const brightness = [0.99, 0.995, 1, 1.005, 1.01][seed]!
+  const saturation = [1.01, 1.005, 1, 0.995, 0.99][seed]!
+  return sharp(buffer, { limitInputPixels: 40_000_000 })
+    .rotate()
+    .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+    .modulate({ brightness, saturation })
+    .jpeg({ quality: 88, mozjpeg: true })
     .toBuffer()
 }
