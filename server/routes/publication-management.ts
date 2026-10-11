@@ -160,9 +160,9 @@ export async function handlePublicationManagementRoute(
     const duplicateRisk = publicationDuplicateRisk(auth.organizationId, vehicle.id)
     if (duplicateRisk)
       return send(res, 409, { error: duplicateRisk.message, duplicate: duplicateRisk })
-    const settings = db.prepare(
-      'SELECT max_retries maxRetries FROM organization_settings WHERE organization_id=?',
-    ).get(auth.organizationId) as { maxRetries?: number } | undefined
+    const settings = db
+      .prepare('SELECT max_retries maxRetries FROM organization_settings WHERE organization_id=?')
+      .get(auth.organizationId) as { maxRetries?: number } | undefined
     const capacity = profileCapacity(db, auth.organizationId, accountId)
     if (capacity.queuedToday >= capacity.dailyLimit)
       return send(res, 429, {
