@@ -13,7 +13,7 @@ export function canonicalMarketplaceListing(value: unknown) {
     const match = url.pathname.match(/\/marketplace\/item\/([A-Za-z0-9_-]+)/)
     if (!match) return { externalListingId: '', canonicalUrl: '' }
     return {
-      externalListingId: match[1],
+      externalListingId: match[1].slice(0, 200),
       canonicalUrl: 'https://www.facebook.com/marketplace/item/' + match[1],
     }
   } catch {
@@ -32,6 +32,9 @@ export function recordConfirmedListing(
   },
 ) {
   const listing = canonicalMarketplaceListing(input.resultUrl)
+  // A successful publish without a trustworthy listing URL is still evidence
+  // for this job/vehicle, but must not participate in the cross-job external-ID unique key.
+  const storedExternalId = listing.externalListingId || null
   db.prepare(
     `INSERT INTO publication_listing_ledger
       (organization_id,vehicle_id,publication_job_id,social_account_id,external_listing_id,canonical_url,status)
@@ -46,7 +49,7 @@ export function recordConfirmedListing(
     input.vehicleId,
     input.publicationJobId,
     input.socialAccountId,
-    listing.externalListingId,
+    storedExternalId,
     listing.canonicalUrl,
   )
   return listing
