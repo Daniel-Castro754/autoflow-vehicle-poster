@@ -1623,7 +1623,9 @@ function VehicleDrawer({
               <div className="image-grid">
                 {images.map((image, index) => (
                   <div key={image.id}>
-                    {index === 0 && <span className="cover-badge">Primeira da galeria</span>}
+                    {index === 0 && (
+                      <span className="cover-badge">Primeira da galeria</span>
+                    )}
                     <img src={image.url} alt={image.originalName} />
                     <button
                       type="button"
