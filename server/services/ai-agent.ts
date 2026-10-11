@@ -8,12 +8,18 @@ import {
 } from './description-generator.ts'
 import { generateVehicleHashtags } from './trending-hashtags.ts'
 import { calculateOptimalSchedule } from './smart-scheduler.ts'
-import { profileLimits, lastProfileActivityAt } from './profile-capacity.ts'
+import { profileCapacity, profileLimits, lastProfileActivityAt } from './profile-capacity.ts'
 import { organizationScheduleHistory } from './schedule-history.ts'
 import { findBestAccountForVehicle } from './session-manager.ts'
 import { coordinateAutopilot, skippedAutopilot } from './autopilot-coordinator.ts'
 import { previewGroupCuration } from './group-curation-worker.ts'
 import { publicationDuplicateRisk, publicationReadinessIssues } from './publication-policy.ts'
+import {
+  calculateListingHash,
+  findDuplicateListingHash,
+  listingSnapshotForVehicle,
+  reserveListingHash,
+} from './duplicate-checker.ts'
 
 export interface ParsedVehicle {
   year: number
@@ -615,12 +621,14 @@ async function planAutopilotJobs(
     }
     for (const account of accounts) {
       const lastActivity = lastProfileActivityAt(db, organizationId, account.id)
-      if (lastActivity == null) continue
-      const nextAllowed =
-        lastActivity + profileLimits(db, organizationId, account.id).intervalMinutes * 60000
+      const pacing = profileCapacity(db, organizationId, account.id)
+      const baseAllowed = lastActivity == null
+        ? 0
+        : lastActivity + pacing.intervalMinutes * 60000
+      const cooldownAllowed = pacing.nextAllowedAt ? Date.parse(pacing.nextAllowedAt) : 0
       accountNextAllowedAt.set(
         account.id,
-        Math.max(accountNextAllowedAt.get(account.id) || 0, nextAllowed),
+        Math.max(accountNextAllowedAt.get(account.id) || 0, baseAllowed, cooldownAllowed),
       )
     }
 
@@ -654,6 +662,10 @@ async function planAutopilotJobs(
       if (vehicle.description !== candidate.description) continue
       if (publicationReadinessIssues(vehicle, vehicle.imageCount).length) continue
       if (publicationDuplicateRisk(db, organizationId, vehicle.id)) continue
+      const listingContent = listingSnapshotForVehicle(db, organizationId, vehicle.id)
+      if (!listingContent) continue
+      const listingHash = calculateListingHash(listingContent)
+      if (findDuplicateListingHash(db, organizationId, listingHash)) continue
       const active = db
         .prepare(
           `SELECT 1 FROM publication_jobs WHERE organization_id=? AND vehicle_id=?
@@ -711,6 +723,7 @@ async function planAutopilotJobs(
         )
 
       const jobId = Number(insert.lastInsertRowid)
+      reserveListingHash(db, organizationId, vehicle.id, jobId, listingHash)
 
       // Record event
       db.prepare(
