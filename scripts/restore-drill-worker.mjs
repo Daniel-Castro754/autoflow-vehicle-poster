@@ -13,11 +13,11 @@ try {
   if (!directory || !sandboxParent || process.argv.length !== 4) throw new Error('INVALID_BACKUP')
   // Validate the input first, before allocating staging space or copying a file.
   const manifest = verifyBackup(directory)
-  const totalBytes = manifest.database.bytes +
+  const totalBytes =
+    manifest.database.bytes +
     manifest.uploads.reduce((sum, item) => sum + item.bytes, 0) +
     (manifest.vault?.bytes || 0)
-  if (!Number.isSafeInteger(totalBytes) || totalBytes > 8 * 1024 ** 3)
-    throw new Error('SIZE_LIMIT')
+  if (!Number.isSafeInteger(totalBytes) || totalBytes > 8 * 1024 ** 3) throw new Error('SIZE_LIMIT')
   const disk = statfsSync(tmpdir())
   if (disk.bavail * disk.bsize < totalBytes * 1.2 + 64 * 1024 ** 2)
     throw new Error('INSUFFICIENT_SPACE')
@@ -63,11 +63,12 @@ try {
   }
 } catch (error) {
   const code = error instanceof Error ? error.message : ''
-  const reason = code === 'SIZE_LIMIT'
-    ? 'A cópia excede o limite de 8 GB do teste isolado.'
-    : code === 'INSUFFICIENT_SPACE'
-      ? 'O disco temporário não possui espaço suficiente para a restauração isolada.'
-      : 'Não foi possível restaurar e validar a cópia em ambiente isolado.'
+  const reason =
+    code === 'SIZE_LIMIT'
+      ? 'A cópia excede o limite de 8 GB do teste isolado.'
+      : code === 'INSUFFICIENT_SPACE'
+        ? 'O disco temporário não possui espaço suficiente para a restauração isolada.'
+        : 'Não foi possível restaurar e validar a cópia em ambiente isolado.'
   response = { ok: false, error: reason }
 } finally {
   if (temporary) {
@@ -77,7 +78,8 @@ try {
       // Never claim success if sensitive restored bytes remain in the temp dir.
       response = {
         ok: false,
-        error: 'Falha ao remover os arquivos temporários. Solicite revisão da pasta temporária do sistema.',
+        error:
+          'Falha ao remover os arquivos temporários. Solicite revisão da pasta temporária do sistema.',
       }
     }
   }

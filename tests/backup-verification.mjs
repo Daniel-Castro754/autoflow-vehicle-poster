@@ -39,8 +39,10 @@ try {
       method: 'POST',
       body: JSON.stringify({ backupId: id, confirmation }),
     })
-  const sandboxFolders = () => readdirSync(tmpdir())
-    .filter((name) => name.startsWith('autoflow-restore-check-')).sort()
+  const sandboxFolders = () =>
+    readdirSync(tmpdir())
+      .filter((name) => name.startsWith('autoflow-restore-check-'))
+      .sort()
 
   await assert.rejects(anonymous('/health/backups'), (error) => error.status === 401)
   await assert.rejects(seller('/health/backups'), (error) => error.status === 403)

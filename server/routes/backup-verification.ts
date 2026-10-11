@@ -57,7 +57,10 @@ export async function handleBackupVerificationRoute(
       send(res, 400, { error: 'Identificador de cópia inválido.' })
       return true
     }
-    if (restoreDrill && (body as Record<string, unknown>).confirmation !== 'TESTAR_RESTAURACAO_ISOLADA') {
+    if (
+      restoreDrill &&
+      (body as Record<string, unknown>).confirmation !== 'TESTAR_RESTAURACAO_ISOLADA'
+    ) {
       send(res, 400, { error: 'É necessário confirmar o teste de restauração isolada.' })
       return true
     }

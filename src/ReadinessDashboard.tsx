@@ -179,11 +179,15 @@ export function ReadinessDashboard({
   }
 
   async function restoreTest(backupId: string) {
-    if (!window.confirm(
-      'Executar ENSAIO de restauração da cópia ' + backupId +
-        ' em pasta temporária? O AutoFlow não será iniciado nem os seus dados atuais alterados. ' +
-        'Os arquivos temporários serão eliminados depois da validação. Pode levar até três minutos.',
-    )) return
+    if (
+      !window.confirm(
+        'Executar ENSAIO de restauração da cópia ' +
+          backupId +
+          ' em pasta temporária? O AutoFlow não será iniciado nem os seus dados atuais alterados. ' +
+          'Os arquivos temporários serão eliminados depois da validação. Pode levar até três minutos.',
+      )
+    )
+      return
     setRestoring(backupId)
     setRestoredResult(null)
     setBackupListError('')
@@ -427,15 +431,17 @@ export function ReadinessDashboard({
                             <strong>Verificação e ensaio de restauração de backups</strong>
                             <p className="health-note">
                               Procura somente na pasta de backups do servidor. A verificação confere
-                              hashes, SQLite, fotos e cofre. O ensaio separado copia o backup
-                              para uma pasta temporária, abre o banco restaurado e apaga a cópia de
-                              teste. Não confirma que o servidor inicia, que a extensão funciona
-                              ou que o DPAPI pode ser aberto em outro usuário Windows.
+                              hashes, SQLite, fotos e cofre. O ensaio separado copia o backup para
+                              uma pasta temporária, abre o banco restaurado e apaga a cópia de
+                              teste. Não confirma que o servidor inicia, que a extensão funciona ou
+                              que o DPAPI pode ser aberto em outro usuário Windows.
                             </p>
                             <button
                               className="secondary"
                               type="button"
-                              disabled={backupLoading || Boolean(backupVerifying) || Boolean(restoring)}
+                              disabled={
+                                backupLoading || Boolean(backupVerifying) || Boolean(restoring)
+                              }
                               onClick={() => void listBackups()}
                             >
                               <RefreshCcw size={14} />
@@ -498,12 +504,12 @@ export function ReadinessDashboard({
                             {restoredResult && (
                               <p role="status" className="health-note" style={{ marginTop: 12 }}>
                                 Cópia restaurada em ambiente temporário em{' '}
-                                {displayMoment(restoredResult.testedAt)}. Banco SQLite aberto,
-                                {' '}{restoredResult.vehicleCount} veículo(s),
-                                {' '}{restoredResult.accountCount} usuário(s),
-                                {' '}{restoredResult.imageCount} imagem(ns).
-                                {' '}Arquivos temporários removidos.
-                                {' '}O servidor AutoFlow não foi iniciado e o DPAPI não foi testado.
+                                {displayMoment(restoredResult.testedAt)}. Banco SQLite aberto,{' '}
+                                {restoredResult.vehicleCount} veículo(s),{' '}
+                                {restoredResult.accountCount} usuário(s),{' '}
+                                {restoredResult.imageCount} imagem(ns). Arquivos temporários
+                                removidos. O servidor AutoFlow não foi iniciado e o DPAPI não foi
+                                testado.
                               </p>
                             )}
                             {backupResult && (

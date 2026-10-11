@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url'
 
 const nameFormat = /^autoflow-backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z$/
 const workerFile = fileURLToPath(new URL('../../scripts/verify-backup-worker.mjs', import.meta.url))
-const restoreWorker = fileURLToPath(new URL('../../scripts/restore-drill-worker.mjs', import.meta.url))
+const restoreWorker = fileURLToPath(
+  new URL('../../scripts/restore-drill-worker.mjs', import.meta.url),
+)
 let verificationBusy = false
 
 export type ListedBackup = {
@@ -209,8 +211,7 @@ export type RestoreDrill = {
 }
 
 export type RestoreDrillResult =
-  | { ok: true; result: RestoreDrill }
-  | { ok: false; status: number; error: string }
+  { ok: true; result: RestoreDrill } | { ok: false; status: number; error: string }
 
 /**
  * Always isolates restored bytes in an OS-generated sandbox, which is owned
@@ -257,7 +258,9 @@ export async function runIsolatedRestoreDrill(id: string): Promise<RestoreDrillR
           child.kill()
         }
       })
-      child.on('error', () => { launchError = true })
+      child.on('error', () => {
+        launchError = true
+      })
       child.on('close', (code) => {
         clearTimeout(timer)
         let cleaned = false
@@ -273,7 +276,11 @@ export async function runIsolatedRestoreDrill(id: string): Promise<RestoreDrillR
           return
         }
         if (timedOut) {
-          done({ ok: false, status: 504, error: 'Teste excedeu três minutos; diretório temporário removido.' })
+          done({
+            ok: false,
+            status: 504,
+            error: 'Teste excedeu três minutos; diretório temporário removido.',
+          })
           return
         }
         if (oversized || launchError) {
@@ -319,9 +326,10 @@ export async function runIsolatedRestoreDrill(id: string): Promise<RestoreDrillR
             done({
               ok: false,
               status: 422,
-              error: typeof payload.error === 'string'
-                ? payload.error.slice(0, 180)
-                : 'O ensaio isolado de restauração falhou.',
+              error:
+                typeof payload.error === 'string'
+                  ? payload.error.slice(0, 180)
+                  : 'O ensaio isolado de restauração falhou.',
             })
           }
         } catch {
