@@ -7,6 +7,8 @@ type Report = {
   stuckJobsCount: number
   slowJobsCount: number
   recoveredCount: number
+  exhaustedRecoveryCount: number
+  ambiguousRecoveryCount: number
   warningCount: number
   jobs: { pending: number; active: number; awaitingConfirmation: number }
   performance: { completed: number; errors: number; averageDurationSeconds: number | null }
@@ -129,6 +131,14 @@ export function OperationalHealth({ api }: { api: <T>(path: string) => Promise<T
             <div>
               <dt>Recuperações · 24h</dt>
               <dd>{report.recoveredCount}</dd>
+            </div>
+            <div>
+              <dt>Recuperações esgotadas · 24h</dt>
+              <dd>{report.exhaustedRecoveryCount}</dd>
+            </div>
+            <div>
+              <dt>Recuperações ambíguas · 24h</dt>
+              <dd>{report.ambiguousRecoveryCount}</dd>
             </div>
             <div>
               <dt>Avisos de demora · 24h</dt>
