@@ -111,8 +111,15 @@ export function profileCapacity(
     )
     .get(organizationId, accountId) as { queued: number }
   const lastActivityAt = lastProfileActivityAt(db, organizationId, accountId)
-  const nextAllowedTime =
+  const storedCooldown = db
+    .prepare(
+      'SELECT next_publication_allowed_at nextAllowedAt FROM social_accounts WHERE organization_id=? AND id=?',
+    )
+    .get(organizationId, accountId) as { nextAllowedAt: string | null } | undefined
+  const cooldownAt = parseSqliteTimestamp(storedCooldown?.nextAllowedAt)
+  const regularAt =
     lastActivityAt == null ? null : lastActivityAt + limits.intervalMinutes * 60000
+  const nextAllowedTime = Math.max(regularAt || 0, cooldownAt || 0) || null
   const retryAfterSeconds =
     nextAllowedTime != null && nextAllowedTime > now ? Math.ceil((nextAllowedTime - now) / 1000) : 0
   return {
