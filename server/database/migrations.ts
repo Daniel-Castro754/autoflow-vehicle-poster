@@ -385,7 +385,7 @@ const migrations: Migration[] = [
       CASE WHEN status='removed' THEN COALESCE(removed_at,updated_at) ELSE NULL END
     FROM publication_jobs
     WHERE status IN ('completed','removed') AND COALESCE(result_url,'')!='';`,
-  },,
+  },
   {
     version: 23,
     columns: [],

@@ -10,7 +10,7 @@ import {
 type Dependencies = {
   db: DatabaseSync
   send: (res: ServerResponse, status: number, data: unknown) => void
-  requestIdFor: (req: IncomingMessage) => string
+  requestIdFor?: (value: string | string[] | undefined) => string
 }
 
 function audit(
