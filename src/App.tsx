@@ -31,6 +31,7 @@ import { DrawerFocusGuard } from './DrawerFocusGuard'
 import VehiclesView, { type VehicleRecord } from './Vehicles'
 import { AiCenterView } from './AiCenterView'
 import { ReadinessDashboard } from './ReadinessDashboard'
+import { ProfileCapacityEditor } from './ProfileCapacityEditor'
 
 type Vehicle = VehicleRecord & { updated?: string }
 type TeamUser = {
@@ -776,6 +777,7 @@ export default function App() {
           <PublicationsView api={api} reload={loadVehicles} />
         ) : active === 'Equipe e contas' ? (
           <TeamView
+            api={api}
             team={team}
             accounts={accounts}
             canManage={currentUser?.role === 'admin'}
@@ -906,6 +908,7 @@ function NotificationCenter({
 }
 
 function TeamView({
+  api,
   team,
   accounts,
   canManage,
@@ -914,6 +917,7 @@ function TeamView({
   onAddAccount,
   onSetAccountAutomation,
 }: {
+  api: <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
   team: TeamUser[]
   accounts: SocialAccount[]
   canManage: boolean
@@ -1060,6 +1064,9 @@ function TeamView({
                       <i />
                       {account.automationPaused ? 'Automação pausada' : 'Aguardando extensão'}
                     </span>
+                    {canManage && (
+                      <ProfileCapacityEditor api={api} accountId={account.id} />
+                    )}
                     {account.automationPaused && canManage && (
                       <button
                         className="team-user-toggle"
