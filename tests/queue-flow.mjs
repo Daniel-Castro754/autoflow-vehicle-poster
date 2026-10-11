@@ -800,6 +800,7 @@ try {
       }),
     }),
   )
+  await approveCurrentPhotos(priorityVehicle.id, adminToken)
   const priorityPublication = await call('/publications', adminToken, {
     method: 'POST',
     body: JSON.stringify({ vehicleId: priorityVehicle.id, accountId: first.id }),
