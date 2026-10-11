@@ -36,6 +36,8 @@ const read = (file) => readFileSync(new URL('../' + file, import.meta.url), 'utf
 const view = read('src/Views.tsx')
 const app = read('src/App.tsx')
 const css = read('src/management-workspaces.css')
+const capacityEditor = read('src/ProfileCapacityEditor.tsx')
+const capacityCss = read('src/profile-capacity.css')
 const main = read('src/main.tsx')
 
 for (const token of [
@@ -85,6 +87,19 @@ assert(app.includes('calculateTeamSummary('))
 assert(app.includes('canManage &&'), 'Admin-only controls must remain gated')
 assert(app.includes('onSetAccountAutomation'), 'Existing automation pause controls must remain')
 assert(app.includes('onToggleUser'), 'Existing user activation controls must remain')
+
+// Keep account identity and its capacity editor in separate, responsive areas.
+// The dedicated stylesheet must be loaded by the component, not left orphaned.
+assert(app.includes('className="account-card-header"'))
+assert(app.includes('className="account-card-identity"'))
+assert(capacityEditor.includes("import './profile-capacity.css'"))
+assert(capacityEditor.includes('aria-label="Limites operacionais do perfil"'))
+assert(capacityEditor.includes('type="submit" className="secondary" disabled={loading}'))
+assert(capacityEditor.includes("'/social-accounts/' + accountId + '/capacity'"))
+assert(capacityCss.includes('.team-page .account-card > .account-card-header'))
+assert(capacityCss.includes('.team-page .account-card > .profile-capacity'))
+assert(capacityCss.includes('grid-template-columns: repeat(2, minmax(0, 1fr))'))
+assert(capacityCss.includes('@media (max-width: 720px)'))
 
 for (const selector of [
   '.reports-page .report-context',
