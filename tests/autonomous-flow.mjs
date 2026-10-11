@@ -522,6 +522,16 @@ try {
     }),
   })
 
+  const curation = await call(`/vehicles/${vehicleId}/photos/curation`, token)
+  assert(curation.recommendation?.length > 0, 'O veículo precisa de fotos para aprovar')
+  await call(`/vehicles/${vehicleId}/photos/selection`, token, {
+    method: 'POST',
+    body: JSON.stringify({
+      photoIds: curation.recommendation,
+      fingerprint: curation.fingerprint,
+    }),
+  })
+
   // 2.7 Criação de Publicação com Roteamento e Agendamento Inteligente
   const publicationRes = await call('/publications', token, {
     method: 'POST',
