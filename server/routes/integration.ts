@@ -1,3 +1,4 @@
+import { handleIntegrationMonthlyReport } from './integration-reports.ts'
 import { handleIntegrationPhotoUpload } from './integration-photos.ts'
 import { applyVehicleDefaults, validateVehicleBody } from '../services/vehicle-input.ts'
 import { findVehicleIdentifierConflict, normalizeInventoryIdentifier, validateInventoryIdentifiers } from '../services/vehicle-import.ts'
@@ -73,6 +74,7 @@ export async function handleIntegrationRoute(
     send(res, 401, { error: 'Credencial de integração inválida, expirada ou revogada.' })
     return true
   }
+  if (handleIntegrationMonthlyReport(req, res, url, auth, dependencies)) return true
   if (await handleIntegrationPhotoUpload(req, res, url, auth, dependencies)) return true
   if (url.pathname === '/api/integration/v1/vehicles' && req.method === 'POST') {
     if (!requireScope(db, req, res, send, auth, 'vehicles:create')) return true
