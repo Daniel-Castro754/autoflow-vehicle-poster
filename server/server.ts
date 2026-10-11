@@ -466,7 +466,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     }
     if (await servePanel(req, res, url, join(root, 'dist'))) return
     if (isIntegrationRoute(url)) {
-      handleIntegrationRoute(req, res, url, { db, send, requestIdFor })
+      await handleIntegrationRoute(req, res, url, { db, send, requestIdFor, jsonBody })
       return
     }
     if (await handleAuthRoute(req, res, url, undefined, authRouteDependencies)) return
