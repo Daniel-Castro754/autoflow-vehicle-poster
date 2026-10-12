@@ -329,6 +329,7 @@ async function consumeQueue() {
       active: true,
     })
     if (!tab.id) throw new Error('O navegador não retornou o identificador da aba do Marketplace.')
+    let reserved = false
     try {
       const status = await marketplaceReady(tab.id)
       if (!status.ready) {
@@ -367,28 +368,22 @@ async function consumeQueue() {
         throw new Error(prepared.error || `Falha ao reservar trabalho #${job.jobId}.`)
       }
       await chrome.storage.local.set({ pendingJob: prepared })
-      const sendTask = () =>
-        chrome.tabs.sendMessage(tab.id, { type: 'FILL_VEHICLE', task: prepared }, () => {
-          if (chrome.runtime.lastError)
-            console.warn(
-              'AutoFlow: a aba ainda não aceitou o trabalho',
-              chrome.runtime.lastError.message,
-            )
-        })
-      chrome.tabs.get(tab.id, (currentTab) => {
-        if (currentTab?.status === 'complete') {
-          sendTask()
-          return
-        }
-        const waitForDocument = (tabId, changeInfo) => {
-          if (tabId !== tab.id || changeInfo.status !== 'complete') return
-          chrome.tabs.onUpdated.removeListener(waitForDocument)
-          sendTask()
-        }
-        chrome.tabs.onUpdated.addListener(waitForDocument)
-      })
+      reserved = true
+      // The automatic consumer must also wait for an acknowledged dispatch.
+      await sendManualFill(tab.id, prepared)
     } catch (error) {
-      await chrome.tabs.remove(tab.id).catch(() => {})
+      if (!reserved) await chrome.tabs.remove(tab.id).catch(() => {})
+      else
+        await chrome.storage.local.set({
+          autoRun: false,
+          lastManualLaunchError: {
+            jobId: job.jobId,
+            message: error instanceof Error ? error.message : String(error),
+            at: Date.now(),
+          },
+        })
+      // Keep the tab and reservation after a failed delivery; never silently
+      // retry a possibly started task or lose publication evidence.
       throw error
     }
   } catch (error) {
