@@ -8,6 +8,7 @@ import { Readable } from 'node:stream'
 import sharp from 'sharp'
 import { parseVehiclePackage, readSafeZip } from '../server/services/vehicle-import-package.ts'
 import { handleVehicleMutationRoute } from '../server/routes/vehicles.ts'
+import { publicationPhotoPayload, readPhotoCuration } from '../server/services/photo-curation.ts'
 import { initializeBaseSchema } from '../server/database/schema.ts'
 import { applyMigrations } from '../server/database/migrations.ts'
 
@@ -192,6 +193,15 @@ try {
     .get()
   assert.equal(saveiro.status, 'Rascunho')
   assert.equal(saveiro.description, 'Saveiro impecável; IPVA pago')
+  const readyPhotos = readPhotoCuration(db, 1, saveiro.id, 'http://localhost/uploads/')
+  assert.equal(readyPhotos.automatic, true)
+  assert.equal(readyPhotos.approved, false, 'No human approval should be required for ZIP photos')
+  assert.equal(readyPhotos.selectedIds.length, 2)
+  const photoPayload = publicationPhotoPayload(db, 1, saveiro.id, 'http://localhost/uploads/')
+  assert.equal(photoPayload.length, 2)
+  assert.equal(photoPayload[0].name, '01.png')
+  const fastback = db.prepare("SELECT id FROM vehicles WHERE stock_code='FASTBACK-24'").get()
+  assert.equal(publicationPhotoPayload(db, 1, fastback.id, 'http://localhost/uploads/').length, 1)
   const duplicatePreview = await importer({ zipBase64, mode: 'skip', dryRun: true })
   assert.equal(duplicatePreview.skipped, 2)
   assert.equal(duplicatePreview.photos, 0)
