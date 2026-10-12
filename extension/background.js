@@ -576,6 +576,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .catch(() => sendResponse({ ok: false }))
     return true
   }
+  if (message.type === 'AUTOFLOW_GET_RELOAD_JOB') {
+    // A content script must never start another tab's pending job.
+    void chrome.storage.local
+      .get('pendingJob')
+      .then(({ pendingJob }) => {
+        const authorized = Boolean(
+          pendingJob?.leaseToken && senderMatchesExecution(_sender, pendingJob, false),
+        )
+        sendResponse({ ok: true, task: authorized ? pendingJob : null })
+      })
+      .catch(() => sendResponse({ ok: true, task: null }))
+    return true
+  }
   if (message.type === 'AUTOFLOW_START_MANUAL_JOB') {
     void launchManualJob(Number(message.jobId), Number(message.accountId), String(message.instanceId || ''))
       .then(sendResponse)
