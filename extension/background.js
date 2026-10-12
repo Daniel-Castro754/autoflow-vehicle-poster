@@ -2,6 +2,7 @@ const API_ORIGIN = 'http://127.0.0.1:3333'
 const API = `${API_ORIGIN}/api`
 const HEARTBEAT_ALARM = 'autoflow-heartbeat'
 let queueConsumerRunning = false
+let manualLaunchRunning = false
 let refreshInFlight = null
 
 // Only the extension process uses the refresh secret; content scripts never receive it.
@@ -90,6 +91,95 @@ async function marketplaceReady(tabId, attempts = 50) {
     await new Promise((resolve) => setTimeout(resolve, 300))
   }
   return { ready: false, reason: 'O formulário do Marketplace não ficou disponível.' }
+}
+
+// A manual launch must outlive the popup: Brave closes its popup as soon as
+// the Facebook tab takes focus. Keep creation, reservation and delivery in
+// the background service worker, and only acknowledge an accepted fill task.
+async function sendManualFill(tabId, task) {
+  let lastFailure = 'A aba ainda não recebeu o comando de preenchimento.'
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null)
+    if (!tab) throw new Error('A aba do Marketplace foi fechada antes do preenchimento.')
+    if (tab.status === 'complete') {
+      const result = await new Promise((resolve) => {
+        chrome.tabs.sendMessage(tabId, { type: 'FILL_VEHICLE', task }, (response) => {
+          const error = chrome.runtime.lastError
+          resolve(error ? { ok: false, transportError: true, error: error.message } : response)
+        })
+      })
+      if (result?.ok && result.accepted) return
+      if (result?.ok === false && !result.transportError)
+        throw new Error(result.error || 'O formulário rejeitou o comando de preenchimento.')
+      lastFailure = result?.error || lastFailure
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400))
+  }
+  throw new Error(lastFailure + ' Recarregue a extensão e abra novamente a fila.')
+}
+
+async function launchManualJob(jobId, accountId, instanceId) {
+  if (manualLaunchRunning || queueConsumerRunning)
+    return { ok: false, error: 'A extensão já está iniciando outra execução.' }
+  manualLaunchRunning = true
+  let tab
+  let reserved = false
+  try {
+    if (!Number.isSafeInteger(jobId) || jobId < 1 || !Number.isSafeInteger(accountId) || accountId < 1)
+      throw new Error('Trabalho ou perfil inválido.')
+    if (!/^[a-zA-Z0-9_-]{12,100}$/.test(instanceId))
+      throw new Error('Identificação local da extensão inválida. Reabra a extensão.')
+    const { pendingJob } = await chrome.storage.local.get('pendingJob')
+    if (pendingJob?.jobId)
+      throw new Error(`O trabalho #${pendingJob.jobId} já está ativo. Conclua-o ou feche a aba anterior.`)
+    tab = await chrome.tabs.create({
+      url: 'https://www.facebook.com/marketplace/create/vehicle',
+      active: true,
+    })
+    if (!tab?.id) throw new Error('O Brave não retornou o identificador da aba.')
+    const status = await marketplaceReady(tab.id)
+    if (!status.ready) {
+      await chrome.storage.local.set({
+        facebookSession: {
+          accountId,
+          ready: false,
+          reason: status.reason,
+          checkedAt: Date.now(),
+        },
+      })
+      // Keep the tab for the person to log in or complete any challenge.
+      throw new Error(status.reason || 'Confirme seu acesso ao Facebook.')
+    }
+    const response = await authorizedFetch(`${API}/extension/jobs/${jobId}/prepare`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accountId,
+        instanceId,
+        tabId: tab.id,
+        document: '/marketplace/create/vehicle',
+      }),
+    })
+    const result = await response.json().catch(() => ({}))
+    if (!response.ok)
+      throw new Error(result.error || `Não foi possível preparar o trabalho #${jobId} (HTTP ${response.status}).`)
+    await chrome.storage.local.set({ pendingJob: result })
+    reserved = true
+    await sendManualFill(tab.id, result)
+    await chrome.storage.local.remove('lastManualLaunchError')
+    return { ok: true, jobId, tabId: tab.id }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    await chrome.storage.local.set({
+      lastManualLaunchError: { jobId, message, at: Date.now() },
+    })
+    // An open tab is retained so a person can review login, session or
+    // delivery errors. Never silently erase a server-side publication lease.
+    console.warn('AutoFlow: abertura manual interrompida', message)
+    return { ok: false, error: message, tabId: tab?.id || null, reserved }
+  } finally {
+    manualLaunchRunning = false
+  }
 }
 
 // Backoff para o reenvio de um resultado pendente: evita bater no servidor a cada
@@ -191,7 +281,7 @@ function scheduleConsumer(nextAt) {
   })
 }
 async function consumeQueue() {
-  if (queueConsumerRunning) return
+  if (queueConsumerRunning || manualLaunchRunning) return
   queueConsumerRunning = true
   try {
     const state = await chrome.storage.local.get([
@@ -484,6 +574,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     void refreshSession()
       .then((token) => sendResponse(token ? { ok: true, token } : { ok: false }))
       .catch(() => sendResponse({ ok: false }))
+    return true
+  }
+  if (message.type === 'AUTOFLOW_START_MANUAL_JOB') {
+    void launchManualJob(Number(message.jobId), Number(message.accountId), String(message.instanceId || ''))
+      .then(sendResponse)
+      .catch((error) =>
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+      )
     return true
   }
   if (message.type === 'AUTOFLOW_CHECK_MARKETPLACE') {
