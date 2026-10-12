@@ -178,16 +178,17 @@ try {
   assert.equal(publicationPhotoPayload(db, org, id, '/uploads/').length, 8)
   // A corrupted persisted *current* selection remains a hard error.
   db.prepare(
-    "INSERT INTO vehicle_photo_selections(organization_id,vehicle_id,photo_ids,inventory_fingerprint) VALUES(?,?,?,?)",
+    'INSERT INTO vehicle_photo_selections(organization_id,vehicle_id,photo_ids,inventory_fingerprint) VALUES(?,?,?,?)',
   ).run(org, id, '[99999999]', automaticAgain.fingerprint)
   assert.equal((await api(root + '/curation')).needsReview, true)
   assert.throws(
     () => publicationPhotoPayload(db, org, id, '/uploads/'),
     /Seleção de fotografias inconsistente/,
   )
-  db.prepare(
-    'DELETE FROM vehicle_photo_selections WHERE organization_id=? AND vehicle_id=?',
-  ).run(org, id)
+  db.prepare('DELETE FROM vehicle_photo_selections WHERE organization_id=? AND vehicle_id=?').run(
+    org,
+    id,
+  )
 
   console.log(
     '✓ Photo curation: automatic real-photo selection, optional custom cover, tenant isolation and stale fallback',
