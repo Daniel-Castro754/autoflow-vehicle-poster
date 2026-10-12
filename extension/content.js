@@ -1364,7 +1364,9 @@
     title.textContent = 'AutoFlow: preenchimento não iniciado'
     title.style.cssText = 'display:block;margin-bottom:5px'
     const description = document.createElement('span')
-    description.textContent = String(error?.message || error || 'Verifique a extensão e tente novamente.')
+    description.textContent = String(
+      error?.message || error || 'Verifique a extensão e tente novamente.',
+    )
     const dismiss = document.createElement('button')
     dismiss.textContent = 'Fechar'
     dismiss.style.cssText =
