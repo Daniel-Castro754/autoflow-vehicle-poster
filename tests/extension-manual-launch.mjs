@@ -122,7 +122,7 @@ async function fixture({ ready = true, fillAccepted = true, apiError = '' } = {}
         resolve,
       ),
     )
-  return { start, tabs, requests, deliveries, data }
+  return { start, tabs, requests, deliveries, data, listeners }
 }
 
 {
@@ -134,6 +134,23 @@ async function fixture({ ready = true, fillAccepted = true, apiError = '' } = {}
   assert.equal(f.deliveries.filter((m) => m.type === 'FILL_VEHICLE').length, 1)
   assert.equal(f.data.pendingJob?.leaseToken, 'lease-for-42')
   assert.equal(f.data.lastManualLaunchError, undefined)
+  const originalTab = {
+    tab: { id: 1 },
+    frameId: 0,
+    url: 'https://www.facebook.com/marketplace/create/vehicle',
+  }
+  const allowed = await new Promise((resolve) =>
+    f.listeners.message({ type: 'AUTOFLOW_GET_RELOAD_JOB' }, originalTab, resolve),
+  )
+  assert.equal(allowed.task?.jobId, 42)
+  const denied = await new Promise((resolve) =>
+    f.listeners.message(
+      { type: 'AUTOFLOW_GET_RELOAD_JOB' },
+      { ...originalTab, tab: { id: 99 } },
+      resolve,
+    ),
+  )
+  assert.equal(denied.task, null, 'Other Facebook tabs must not resume this publication')
   const again = await f.start()
   assert.equal(again.ok, false, 'Do not start another tab while the lease is reserved')
   assert.equal(f.tabs.length, 1)
