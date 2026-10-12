@@ -55,12 +55,15 @@ async function runConsumer(queue, network = {}) {
         createdTabs.push(tab)
         return tab
       },
-      get: (id, callback) =>
-        callback({
+      get: (id, callback) => {
+        const tab = {
           id,
           status: 'complete',
           url: `https://www.facebook.com${stored.pendingJob?.document || ''}`,
-        }),
+        }
+        callback?.(tab)
+        return Promise.resolve(tab)
+      },
       sendMessage: (_id, message, options, callback) => {
         const reply = typeof options === 'function' ? options : callback
         reply?.(
@@ -69,7 +72,9 @@ async function runConsumer(queue, network = {}) {
                 ready: network.marketplaceReady !== false,
                 blocked: network.marketplaceBlocked === true,
               }
-            : { active: network.contentActive !== false },
+            : message.type === 'FILL_VEHICLE'
+              ? { ok: true, accepted: true }
+              : { active: network.contentActive !== false },
         )
       },
       onUpdated: { addListener: () => {}, removeListener: () => {} },
