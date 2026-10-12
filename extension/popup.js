@@ -86,6 +86,7 @@ async function loadAccounts() {
     await chrome.storage.local.set({ activeAccountId })
     if (seq !== loadAccountsSeq) return
     updateAutoRunButton()
+    showManualLaunchError()
     loadQueue()
   } catch (error) {
     if (seq === loadAccountsSeq)
@@ -168,54 +169,38 @@ function prepare(jobId) {
     openJob(jobId)
   })
 }
-async function sendWhenReady(tabId, message) {
-  const deadline = Date.now() + 45000
-  while (Date.now() < deadline) {
-    const tab = await chrome.tabs.get(tabId)
-    if (tab.status === 'complete') {
-      const sent = await new Promise((resolve) =>
-        chrome.tabs.sendMessage(tabId, message, () => resolve(!chrome.runtime.lastError)),
-      )
-      if (sent) return
-    }
-    await new Promise((resolve) => setTimeout(resolve, 300))
-  }
-  throw new Error('A aba do Marketplace não carregou a extensão a tempo.')
-}
 async function openJob(jobId) {
   if (openingJob) return
   openingJob = true
-  let tab
-  let prepared = false
   try {
-    const accountId = activeAccountId
-    tab = await chrome.tabs.create({ url: 'https://www.facebook.com/marketplace/create/vehicle' })
-    const status = await chrome.runtime.sendMessage({
-      type: 'AUTOFLOW_CHECK_MARKETPLACE',
-      tabId: tab.id,
+    // The popup can disappear as soon as a new tab becomes active.
+    // The background worker owns the entire launch and reservation.
+    const result = await chrome.runtime.sendMessage({
+      type: 'AUTOFLOW_START_MANUAL_JOB',
+      jobId,
+      accountId: activeAccountId,
+      instanceId,
     })
-    if (!status?.ready) {
-      prepared = true // Leave the tab open for a human to log in or solve a challenge.
-      throw new Error(status?.reason || 'Confirme o acesso ao Marketplace no Brave.')
-    }
-    const task = await request('/extension/jobs/' + jobId + '/prepare', {
-      method: 'POST',
-      body: JSON.stringify({
-        accountId,
-        instanceId,
-        tabId: tab.id,
-        document: '/marketplace/create/vehicle',
-      }),
-    })
-    await chrome.storage.local.set({ pendingJob: task })
-    prepared = true
-    await sendWhenReady(tab.id, { type: 'FILL_VEHICLE', task })
+    if (!result?.ok)
+      throw new Error(result?.error || 'A extensão não confirmou o início do preenchimento.')
   } catch (error) {
-    if (tab?.id && !prepared) await chrome.tabs.remove(tab.id).catch(() => {})
     alert(error.message)
   } finally {
     openingJob = false
   }
+}
+function showManualLaunchError() {
+  chrome.storage.local.get('lastManualLaunchError', ({ lastManualLaunchError }) => {
+    const notice = $('dispatchError')
+    if (!notice) return
+    if (!lastManualLaunchError || Date.now() - lastManualLaunchError.at > 30 * 60_000) {
+      notice.hidden = true
+      notice.textContent = ''
+      return
+    }
+    notice.hidden = false
+    notice.textContent = `Trabalho #${Number(lastManualLaunchError.jobId)}: ${String(lastManualLaunchError.message || 'Falha ao abrir o formulário.')}`
+  })
 }
 function updateAutoRunButton() {
   chrome.storage.local.get('autoRun', ({ autoRun }) => {
