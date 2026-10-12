@@ -73,12 +73,13 @@ try {
   assert.equal(loaded.images.length, 10)
   assert.equal(loaded.preferredCount, 8)
   assert.equal(loaded.approved, false)
+  assert.equal(loaded.automatic, true)
+  assert.equal(loaded.needsReview, false)
   assert.equal(loaded.recommendation.length, 8)
-  assert.throws(
-    () => publicationPhotoPayload(db, org, id, '/uploads/'),
-    /exige uma seleção de fotos revisada e aprovada/,
-    'Publication must remain blocked until photo selection is explicitly approved',
-  )
+  assert.deepEqual(loaded.selectedIds, loaded.recommendation)
+  const autoPayload = publicationPhotoPayload(db, org, id, '/uploads/')
+  assert.equal(autoPayload.length, 8, 'Unreviewed real photos should publish automatically')
+  assert.equal(autoPayload[0].name, 'photo-1.jpg')
   await fail(() => anonymous(root + '/curation'), 401)
   await fail(
     () => send(root + '/' + images[0].id + '/category', { category: 'secret' }, 'PATCH'),
@@ -118,8 +119,10 @@ try {
 
   await upload('new-photo')
   const stale = await api(root + '/curation')
-  assert.equal(stale.needsReview, true)
-  assert.throws(() => publicationPhotoPayload(db, org, id, '/uploads/'), /Revise a curadoria/)
+  assert.equal(stale.needsReview, false)
+  assert.equal(stale.automatic, true)
+  assert.equal(stale.selectionOutdated, true)
+  assert.equal(publicationPhotoPayload(db, org, id, '/uploads/').length, 8)
   await fail(
     () =>
       send(root + '/selection', {
@@ -169,14 +172,25 @@ try {
   db.prepare('DELETE FROM publication_jobs WHERE id=?').run(pending)
 
   await api(root + '/selection', { method: 'DELETE' })
-  assert.equal((await api(root + '/curation')).enabled, false)
+  const automaticAgain = await api(root + '/curation')
+  assert.equal(automaticAgain.enabled, false)
+  assert.equal(automaticAgain.automatic, true)
+  assert.equal(publicationPhotoPayload(db, org, id, '/uploads/').length, 8)
+  // A corrupted persisted *current* selection remains a hard error.
+  db.prepare(
+    "INSERT INTO vehicle_photo_selections(organization_id,vehicle_id,photo_ids,inventory_fingerprint) VALUES(?,?,?,?)",
+  ).run(org, id, '[99999999]', automaticAgain.fingerprint)
+  assert.equal((await api(root + '/curation')).needsReview, true)
   assert.throws(
     () => publicationPhotoPayload(db, org, id, '/uploads/'),
-    /exige uma seleção de fotos revisada e aprovada/,
+    /Seleção de fotografias inconsistente/,
   )
+  db.prepare(
+    'DELETE FROM vehicle_photo_selections WHERE organization_id=? AND vehicle_id=?',
+  ).run(org, id)
 
   console.log(
-    '✓ Photo curation: mandatory approval, eight-photo proposals, cover, tenant isolation and stale safety',
+    '✓ Photo curation: automatic real-photo selection, optional custom cover, tenant isolation and stale fallback',
   )
 } finally {
   db.close()
