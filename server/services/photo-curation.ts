@@ -116,15 +116,21 @@ export function readPhotoCuration(
   const photos = inventory(db, org, vehicleId)
   const saved = selection(db, org, vehicleId)
   const fingerprint = photoInventoryFingerprint(photos)
-  const approved = Boolean(saved && saved.inventoryFingerprint === fingerprint)
-  let selectedIds: number[] = []
-  if (saved) {
+  const outdated = Boolean(saved && saved.inventoryFingerprint !== fingerprint)
+  const automatic = Boolean(photos.length && (!saved || outdated))
+  let selectedIds = automatic ? recommendPhotos(photos) : []
+  let invalid = false
+  if (saved && !outdated) {
     try {
       selectedIds = parseIds(saved.photoIds)
+      const owned = new Set(photos.map((photo) => photo.id))
+      if (selectedIds.some((id) => !owned.has(id))) invalid = true
     } catch {
-      // Surface the stale/invalid plan to the reviewer.
+      // Persisted invalid selections are not silently accepted as approved.
+      invalid = true
     }
   }
+  const approved = Boolean(saved && !outdated && !invalid)
   return {
     images: photos.map(({ id, originalName, mimeType, position, category, fileName }) => ({
       id,
@@ -139,7 +145,9 @@ export function readPhotoCuration(
     fingerprint,
     enabled: Boolean(saved),
     approved,
-    needsReview: Boolean(saved && !approved),
+    automatic,
+    selectionOutdated: outdated,
+    needsReview: invalid,
     selectedIds,
   }
 }
@@ -255,16 +263,19 @@ export function publicationPhotoPayload(
   baseUrl: string,
 ) {
   const photos = inventory(db, org, vehicleId)
+  if (!photos.length)
+    throw new PhotoCurationConflict(
+      'Este veículo ainda não possui fotos. Importe fotos reais antes de publicar.',
+    )
   const saved = selection(db, org, vehicleId)
-  if (!saved)
-    throw new PhotoCurationConflict(
-      'A publicação exige uma seleção de fotos revisada e aprovada. Revise a curadoria antes de publicar.',
-    )
-  if (saved.inventoryFingerprint !== photoInventoryFingerprint(photos))
-    throw new PhotoCurationConflict(
-      'A seleção aprovada não corresponde mais às fotos atuais. Revise a curadoria antes de publicar.',
-    )
-  const ids = parseIds(saved.photoIds)
+  const fingerprint = photoInventoryFingerprint(photos)
+  // Preserve valid manual covers/orders. For new inventories and selections
+  // outdated by photo edits/imports, safely pick real available photos again.
+  // A corrupted selection for the *current* inventory still fails closed.
+  const ids =
+    saved && saved.inventoryFingerprint === fingerprint
+      ? parseIds(saved.photoIds)
+      : recommendPhotos(photos)
   const byId = new Map(photos.map((photo) => [photo.id, photo]))
   if (ids.some((id) => !byId.has(id)))
     throw new PhotoCurationConflict('Seleção de fotografias inconsistente.')
