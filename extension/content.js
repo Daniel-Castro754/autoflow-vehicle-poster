@@ -1352,6 +1352,27 @@
   }
 
   const runningJobs = new Set()
+  function showExecutionError(error) {
+    if (!document.body) return
+    document.getElementById('autoflow-start-error')?.remove()
+    const box = document.createElement('div')
+    box.id = 'autoflow-start-error'
+    box.setAttribute('role', 'alert')
+    box.style.cssText =
+      'position:fixed;right:20px;bottom:20px;z-index:2147483647;background:#4c2020;color:#fff;padding:14px 16px;border-radius:10px;box-shadow:0 8px 30px #0005;font:13px Arial;max-width:380px'
+    const title = document.createElement('strong')
+    title.textContent = 'AutoFlow: preenchimento não iniciado'
+    title.style.cssText = 'display:block;margin-bottom:5px'
+    const description = document.createElement('span')
+    description.textContent = String(error?.message || error || 'Verifique a extensão e tente novamente.')
+    const dismiss = document.createElement('button')
+    dismiss.textContent = 'Fechar'
+    dismiss.style.cssText =
+      'display:block;margin-top:10px;padding:6px 9px;border:0;border-radius:5px;background:#fff;color:#4c2020;cursor:pointer'
+    dismiss.onclick = () => box.remove()
+    box.append(title, description, dismiss)
+    document.body.appendChild(box)
+  }
   async function run(task) {
     if (task?.jobId && runningJobs.has(task.jobId)) return
     if (task?.jobId) runningJobs.add(task.jobId)
@@ -1377,6 +1398,7 @@
     } catch (error) {
       if (contextError(error)?.code === 'CONTEXT_INVALIDATED') return false
       console.error('AutoFlow: falha no preenchimento', error)
+      showExecutionError(error)
       if (boundTask?.jobId && boundTask.documentId)
         return await reportResult({
           type: 'AUTOFLOW_FILL_ERROR',
@@ -1390,9 +1412,9 @@
               ? 'marketplace_form_timeout'
               : ''),
         })
-      if (task?.jobId && !boundTask?.documentId) runningJobs.delete(task.jobId)
     } finally {
       stopActivity()
+      if (task?.jobId) runningJobs.delete(task.jobId)
     }
   }
   chrome.storage.local.get(['pendingJob', 'pendingVehicle'], (data) => {
@@ -1425,6 +1447,23 @@
       sendResponse({ active: runningJobs.has(message.jobId) })
       return
     }
-    if (message.type === 'FILL_VEHICLE') run(message.task || message.vehicle)
+    if (message.type === 'FILL_VEHICLE') {
+      const task = message.task || message.vehicle
+      if (!task?.jobId || !task?.leaseToken) {
+        sendResponse({ ok: false, error: 'O trabalho não possui uma reserva válida.' })
+        return
+      }
+      if (location.pathname.replace(/\/$/, '') !== '/marketplace/create/vehicle') {
+        sendResponse({ ok: false, error: 'Abra o formulário de veículo do Marketplace.' })
+        return
+      }
+      if (runningJobs.has(task.jobId)) {
+        sendResponse({ ok: true, accepted: true, alreadyRunning: true })
+        return
+      }
+      // Explicit acknowledgement makes dispatch failures visible to the popup.
+      sendResponse({ ok: true, accepted: true })
+      void run(task).catch((error) => console.warn('AutoFlow: preenchimento interrompido', error))
+    }
   })
 })()
