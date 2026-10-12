@@ -1417,15 +1417,14 @@
       if (task?.jobId) runningJobs.delete(task.jobId)
     }
   }
-  chrome.storage.local.get(['pendingJob', 'pendingVehicle'], (data) => {
-    const task = data.pendingJob || data.pendingVehicle
-    if (!task) return
+  function resumeWhenReady(task, legacy = false) {
     let attempts = 0
     const timer = setInterval(() => {
       attempts++
       if (document.querySelector('input,textarea,[role="combobox"],[contenteditable="true"]')) {
         clearInterval(timer)
-        run(task).finally(() => {
+        void run(task).finally(() => {
+          if (!legacy) return
           try {
             return chrome.storage.local.remove('pendingVehicle').catch(() => {})
           } catch {
@@ -1434,9 +1433,22 @@
         })
       } else if (attempts > 40) {
         clearInterval(timer)
-        run({ ...task, startupError: 'O formulário do Marketplace não ficou disponível.' })
+        void run({ ...task, startupError: 'O formulário do Marketplace não ficou disponível.' })
       }
     }, 500)
+  }
+  chrome.storage.local.get(['pendingJob', 'pendingVehicle'], (data) => {
+    if (data.pendingJob) {
+      // The background checks the sender's tab ID and URL before returning
+      // its reserved job. Never replay a different tab's pending execution.
+      void runtimeMessage({ type: 'AUTOFLOW_GET_RELOAD_JOB' })
+        .then(({ task }) => {
+          if (task) resumeWhenReady(task)
+        })
+        .catch((error) => console.warn('AutoFlow: retomada da aba não autorizada', error))
+      return
+    }
+    if (data.pendingVehicle) resumeWhenReady(data.pendingVehicle, true)
   })
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === 'AUTOFLOW_MARKETPLACE_SESSION_STATUS') {
