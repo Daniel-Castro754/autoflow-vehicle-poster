@@ -318,6 +318,140 @@
   border-color: var(--af-border);
   background: var(--af-surface-muted);
 }
+
+/* Marketplace group actions: a consistent toolbar, independent of global button styles. */
+.app-shell .settings-page .group-manager-head {
+  align-items: center;
+  gap: 18px;
+}
+.app-shell .settings-page .group-manager-head > .group-manager-copy {
+  display: grid;
+  flex: 0 1 230px;
+  min-width: 170px;
+  gap: 5px;
+}
+.app-shell .settings-page .group-manager-copy > small {
+  color: var(--af-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.app-shell .settings-page .group-manager-head > .group-manager-actions {
+  display: flex;
+  flex: 1 1 620px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 9px;
+  min-width: 0;
+}
+.app-shell .settings-page .group-manager-actions .group-action {
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  margin: 0;
+  padding: 10px 13px;
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius-sm);
+  background: var(--af-surface);
+  color: var(--af-text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+.app-shell .settings-page .group-manager-actions .group-action svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.app-shell .settings-page .group-manager-actions .group-action-primary {
+  color: var(--af-primary-text);
+  background: var(--af-primary);
+  border-color: var(--af-primary);
+}
+.app-shell .settings-page .group-manager-actions .group-action-primary:hover:not(:disabled) {
+  background: var(--af-primary-hover);
+  border-color: var(--af-primary-hover);
+}
+.app-shell .settings-page .group-manager-actions .group-action-secondary:hover:not(:disabled),
+.app-shell .settings-page .group-manager-actions .group-import-action:hover {
+  background: var(--af-surface-muted);
+  border-color: var(--af-primary);
+}
+.app-shell .settings-page .group-manager-actions .group-action-quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--af-muted);
+}
+.app-shell .settings-page .group-manager-actions .group-action-quiet:hover:not(:disabled) {
+  color: var(--af-text);
+  background: var(--af-surface);
+}
+.app-shell .settings-page .group-manager-actions .group-action:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+.app-shell .settings-page .group-manager-actions .group-import-action {
+  cursor: pointer;
+}
+.app-shell .settings-page .group-manager-actions .group-import-action:focus-visible {
+  outline: 3px solid var(--af-focus);
+  outline-offset: 3px;
+}
+.app-shell .settings-page .group-manager-actions .group-actions-divider {
+  flex: 0 0 1px;
+  align-self: stretch;
+  min-height: 27px;
+  background: var(--af-border);
+}
+@media (max-width: 1120px) {
+  .app-shell .settings-page .group-manager-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .app-shell .settings-page .group-manager-head > .group-manager-copy {
+    flex: 0 1 auto;
+  }
+  .app-shell .settings-page .group-manager-head > .group-manager-actions {
+    flex: 0 1 auto;
+    justify-content: flex-start;
+  }
+}
+@media (max-width: 680px) {
+  .app-shell .settings-page .group-manager-head > .group-manager-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .app-shell .settings-page .group-manager-actions .group-action {
+    width: 100%;
+    min-width: 0;
+    white-space: normal;
+  }
+  .app-shell .settings-page .group-manager-actions .group-actions-divider {
+    display: none;
+  }
+}
+@media (max-width: 420px) {
+  .app-shell .settings-page .group-manager-head > .group-manager-actions {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .settings-page .group-manager-actions .group-action {
+    transition: none;
+  }
+}
 .settings-page .settings-save {
   display: flex;
   align-items: center;
