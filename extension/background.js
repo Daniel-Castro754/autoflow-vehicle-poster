@@ -125,13 +125,20 @@ async function launchManualJob(jobId, accountId, instanceId) {
   let tab
   let reserved = false
   try {
-    if (!Number.isSafeInteger(jobId) || jobId < 1 || !Number.isSafeInteger(accountId) || accountId < 1)
+    if (
+      !Number.isSafeInteger(jobId) ||
+      jobId < 1 ||
+      !Number.isSafeInteger(accountId) ||
+      accountId < 1
+    )
       throw new Error('Trabalho ou perfil inválido.')
     if (!/^[a-zA-Z0-9_-]{12,100}$/.test(instanceId))
       throw new Error('Identificação local da extensão inválida. Reabra a extensão.')
     const { pendingJob } = await chrome.storage.local.get('pendingJob')
     if (pendingJob?.jobId)
-      throw new Error(`O trabalho #${pendingJob.jobId} já está ativo. Conclua-o ou feche a aba anterior.`)
+      throw new Error(
+        `O trabalho #${pendingJob.jobId} já está ativo. Conclua-o ou feche a aba anterior.`,
+      )
     tab = await chrome.tabs.create({
       url: 'https://www.facebook.com/marketplace/create/vehicle',
       active: true,
@@ -162,7 +169,9 @@ async function launchManualJob(jobId, accountId, instanceId) {
     })
     const result = await response.json().catch(() => ({}))
     if (!response.ok)
-      throw new Error(result.error || `Não foi possível preparar o trabalho #${jobId} (HTTP ${response.status}).`)
+      throw new Error(
+        result.error || `Não foi possível preparar o trabalho #${jobId} (HTTP ${response.status}).`,
+      )
     await chrome.storage.local.set({ pendingJob: result })
     reserved = true
     await sendManualFill(tab.id, result)
@@ -590,7 +599,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
   if (message.type === 'AUTOFLOW_START_MANUAL_JOB') {
-    void launchManualJob(Number(message.jobId), Number(message.accountId), String(message.instanceId || ''))
+    void launchManualJob(
+      Number(message.jobId),
+      Number(message.accountId),
+      String(message.instanceId || ''),
+    )
       .then(sendResponse)
       .catch((error) =>
         sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
