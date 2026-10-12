@@ -13,6 +13,16 @@ O AutoFlow importa dados por **Importar CSV** e fotos por **Importar fotos**, na
 
 Os sufixos numéricos determinam a ordem de importação. A primeira foto de um veículo sem fotos anteriores é sua capa. O programa respeita o limite de 20 imagens por veículo e mantém as já cadastradas.
 
+**A seleção para publicação é automática:** assim que as fotos reais são
+importadas, o AutoFlow recomenda até 8 imagens por veículo. Não é preciso
+aprovar manualmente a curadoria. Se quiser, é possível personalizar a capa,
+a quantidade e a ordem sem afetar os demais veículos. Quando fotos são
+adicionadas ou removidas, a sugestão automática se atualiza.
+
+Para importar dados e fotos em uma única operação, use o **ZIP com CSV e pasta
+`fotos/`**. Um arquivo CSV isolado não contém binários de fotos; se o veículo
+não possuir imagens, continua sem condições de publicação até recebê-las.
+
 ## Limitações e segurança
 
 - O CSV **não transporta binários de imagem**. As fotos devem ser escolhidas localmente na segunda etapa.
