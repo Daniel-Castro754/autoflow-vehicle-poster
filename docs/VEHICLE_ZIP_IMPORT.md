@@ -44,8 +44,13 @@ entradas ZIP também têm limite.
 3. Aguarde a prévia: veículos novos, atualizações, fotos associadas e linhas
    com erros. **Nenhum dado é gravado nesse momento**.
 4. Revise os dados; clique em **Confirmar importação**.
-5. Abra um veículo importado e confira a descrição e a galeria de fotos.
-   O AutoFlow não publica anúncios por causa de uma importação.
+5. O AutoFlow seleciona automaticamente até **8 fotos reais** para a publicação,
+   priorizando a capa/ângulos por categorias existentes. **Não é necessário abrir
+   a curadoria nem aprovar a seleção**. A capa e a ordem podem ser personalizadas
+   opcionalmente na ficha do veículo.
+   O AutoFlow não cria anúncios automaticamente somente por importar o ZIP;
+   para entrar na fila, o veículo deve estar com status **Pronto**, cadastro
+   completo, fotos e perfil elegível, respeitando o agendamento configurado.
 
 ## Segurança e reimportação
 
