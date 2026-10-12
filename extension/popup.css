@@ -108,6 +108,17 @@ button:disabled {
   color: #b64e45;
   margin-top: 9px;
 }
+.dispatch-error:not([hidden]) {
+  padding: 11px 12px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  border: 1px solid #d59082;
+  background: #fff0ec;
+  color: #8f352d;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
 .userbar,
 .heading {
   display: flex;

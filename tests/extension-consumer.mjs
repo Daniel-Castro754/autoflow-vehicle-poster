@@ -55,12 +55,15 @@ async function runConsumer(queue, network = {}) {
         createdTabs.push(tab)
         return tab
       },
-      get: (id, callback) =>
-        callback({
+      get: (id, callback) => {
+        const tab = {
           id,
           status: 'complete',
           url: `https://www.facebook.com${stored.pendingJob?.document || ''}`,
-        }),
+        }
+        callback?.(tab)
+        return Promise.resolve(tab)
+      },
       sendMessage: (_id, message, options, callback) => {
         const reply = typeof options === 'function' ? options : callback
         reply?.(
@@ -69,7 +72,11 @@ async function runConsumer(queue, network = {}) {
                 ready: network.marketplaceReady !== false,
                 blocked: network.marketplaceBlocked === true,
               }
-            : { active: network.contentActive !== false },
+            : message.type === 'FILL_VEHICLE'
+              ? network.fillAccepted === false
+                ? { ok: false, error: 'Content script unavailable' }
+                : { ok: true, accepted: true }
+              : { active: network.contentActive !== false },
         )
       },
       onUpdated: { addListener: () => {}, removeListener: () => {} },
@@ -142,6 +149,16 @@ async function runConsumer(queue, network = {}) {
   })
   await new Promise((resolve) => listeners.message({ type: 'AUTOFLOW_RUN_QUEUE' }, {}, resolve))
   return { requests, createdTabs, listeners, stored }
+}
+
+{
+  const failed = await runConsumer(
+    { jobs: [{ jobId: 22, jobStatus: 'pending', locked: false, publishUncertain: false }] },
+    { fillAccepted: false },
+  )
+  assert.equal(failed.stored.autoRun, false, 'The consumer must pause after a rejected dispatch')
+  assert.equal(failed.stored.pendingJob?.jobId, 22, 'A reserved job must not be discarded')
+  assert.match(failed.stored.lastManualLaunchError?.message || '', /Content script unavailable/)
 }
 
 {
