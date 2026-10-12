@@ -16,6 +16,8 @@ type Curation = {
   fingerprint: string
   enabled: boolean
   approved: boolean
+  automatic: boolean
+  selectionOutdated: boolean
   needsReview: boolean
   selectedIds: number[]
 }
@@ -48,7 +50,7 @@ export function PhotoCurationPanel({
   async function refresh() {
     const state = await api<Curation>('/vehicles/' + vehicleId + '/photos/curation')
     setData(state)
-    setSelectedIds(state.approved ? state.selectedIds : state.recommendation)
+    setSelectedIds(state.selectedIds.length ? state.selectedIds : state.recommendation)
   }
 
   useEffect(() => {
@@ -57,7 +59,7 @@ export function PhotoCurationPanel({
       .then((state) => {
         if (!live) return
         setData(state)
-        setSelectedIds(state.approved ? state.selectedIds : state.recommendation)
+        setSelectedIds(state.selectedIds.length ? state.selectedIds : state.recommendation)
       })
       .catch((cause) => {
         if (live) setError(cause instanceof Error ? cause.message : 'Erro ao carregar fotos.')
@@ -103,18 +105,25 @@ export function PhotoCurationPanel({
         <span>{selectedIds.length} selecionadas</span>
       </div>
       <p>
-        Sugestão de até 8 fotos reais, priorizando diferentes ângulos quando categorizados.
-        Selecione a capa e confirme antes de alterar as fotos enviadas.
+        O AutoFlow seleciona automaticamente até 8 fotos reais para publicar. Se quiser, personalize
+        a capa, a ordem e as categorias abaixo e salve sua seleção.
       </p>
       {data.approved && !data.needsReview && (
         <p className="photo-curation-status">
           <ShieldCheck size={15} />
-          Seleção aprovada para a publicação.
+          Seleção personalizada salva e pronta para publicação.
+        </p>
+      )}
+      {data.automatic && (
+        <p className="photo-curation-status" role="status">
+          <ShieldCheck size={15} />
+          Seleção automática ativa. Nenhuma aprovação manual necessária.
+          {data.selectionOutdated ? ' As imagens mudaram; a sugestão foi atualizada.' : ''}
         </p>
       )}
       {data.needsReview && (
         <p className="photo-curation-warning" role="status">
-          As imagens ou categorias mudaram. A publicação ficará bloqueada até nova aprovação.
+          A seleção personalizada está inválida. Salve outra seleção ou volte ao modo automático.
         </p>
       )}
       <div className="photo-curation-actions">
@@ -170,7 +179,7 @@ export function PhotoCurationPanel({
                       body: JSON.stringify({ category: event.target.value }),
                     })
                     await refresh()
-                    setMessage('Categoria atualizada. Revise a seleção antes de aprovar.')
+                    setMessage('Categoria atualizada. A seleção automática continua disponível.')
                   })
                 }
               >
@@ -215,11 +224,11 @@ export function PhotoCurationPanel({
                 body: JSON.stringify({ photoIds: selectedIds, fingerprint: data.fingerprint }),
               })
               await refresh()
-              setMessage('Seleção de fotos aprovada.')
+              setMessage('Seleção personalizada salva.')
             })
           }
         >
-          <Check size={15} /> Aprovar seleção
+          <Check size={15} /> Salvar seleção personalizada
         </button>
         {data.enabled && (
           <button
@@ -230,11 +239,11 @@ export function PhotoCurationPanel({
               void run(async () => {
                 await api('/vehicles/' + vehicleId + '/photos/selection', { method: 'DELETE' })
                 await refresh()
-                setMessage('Curadoria desativada. O fluxo anterior envia as fotos cadastradas.')
+                setMessage('Seleção automática reativada.')
               })
             }
           >
-            Usar todas (modo anterior)
+            Voltar à seleção automática
           </button>
         )}
       </div>
