@@ -73,7 +73,9 @@ async function runConsumer(queue, network = {}) {
                 blocked: network.marketplaceBlocked === true,
               }
             : message.type === 'FILL_VEHICLE'
-              ? { ok: true, accepted: true }
+              ? network.fillAccepted === false
+                ? { ok: false, error: 'Content script unavailable' }
+                : { ok: true, accepted: true }
               : { active: network.contentActive !== false },
         )
       },
@@ -147,6 +149,16 @@ async function runConsumer(queue, network = {}) {
   })
   await new Promise((resolve) => listeners.message({ type: 'AUTOFLOW_RUN_QUEUE' }, {}, resolve))
   return { requests, createdTabs, listeners, stored }
+}
+
+{
+  const failed = await runConsumer(
+    { jobs: [{ jobId: 22, jobStatus: 'pending', locked: false, publishUncertain: false }] },
+    { fillAccepted: false },
+  )
+  assert.equal(failed.stored.autoRun, false, 'The consumer must pause after a rejected dispatch')
+  assert.equal(failed.stored.pendingJob?.jobId, 22, 'A reserved job must not be discarded')
+  assert.match(failed.stored.lastManualLaunchError?.message || '', /Content script unavailable/)
 }
 
 {
