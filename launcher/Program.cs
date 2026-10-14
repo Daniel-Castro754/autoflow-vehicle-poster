@@ -165,6 +165,64 @@ internal sealed class LauncherForm : Form
         };
     }
 
+    private readonly List<double> _previousStartupTimes = new();
+
+    private static string StartupHistoryPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "AutoFlow", "startup-times.json");
+
+    private void LoadStartupHistory()
+    {
+        try
+        {
+            if (!File.Exists(StartupHistoryPath)) return;
+            var times = JsonSerializer.Deserialize<List<double>>(File.ReadAllText(StartupHistoryPath));
+            if (times is not null)
+                _previousStartupTimes.AddRange(times.Where(n => double.IsFinite(n) && n > 0 && n < 3600).TakeLast(8));
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        catch (JsonException) { }
+    }
+
+    private static string Clock(TimeSpan span) =>
+        $"{(int)span.TotalMinutes:00}:{span.Seconds:00}";
+
+    private void RefreshElapsedCaption()
+    {
+        if (IsDisposed || Disposing) return;
+        string history = _previousStartupTimes.Count == 0
+            ? "Previsão inicial: 1–4 min (primeira instalação pode levar mais)"
+            : $"Média neste PC: {Clock(TimeSpan.FromSeconds(_previousStartupTimes.Average()))} " +
+              $"({_previousStartupTimes.Count} início(s))";
+        _elapsedCaption.Text = $"Decorrido: {Clock(_startupWatch.Elapsed)}  ·  {history}";
+    }
+
+    private void SetProgress(int percentage, string phase)
+    {
+        _progress.Value = Math.Clamp(percentage, _progress.Value, 100);
+        _progressCaption.Text = $"{_progress.Value}%  ·  {phase}";
+        Status(phase);
+        RefreshElapsedCaption();
+    }
+
+    private void FinishStartup()
+    {
+        _startupWatch.Stop();
+        _elapsedTimer.Stop();
+        SetProgress(100, "AutoFlow pronto — painel e API ativos");
+        try
+        {
+            _previousStartupTimes.Add(_startupWatch.Elapsed.TotalSeconds);
+            var folder = Path.GetDirectoryName(StartupHistoryPath)!;
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(StartupHistoryPath,
+                JsonSerializer.Serialize(_previousStartupTimes.TakeLast(8)));
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
     private void Report(string message)
     {
         if (IsDisposed || Disposing) return;
@@ -227,18 +285,46 @@ internal sealed class LauncherForm : Form
         return null;
     }
 
+    // Vite may bind localhost to ::1 on Windows while the API uses 127.0.0.1.
+    // Checking only IPv4 incorrectly reported both servers as unavailable.
     private static async Task<bool> PortUsedAsync(int port)
     {
-        using var client = new TcpClient();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(450));
+        foreach (var address in new[] { IPAddress.Loopback, IPAddress.IPv6Loopback })
+        {
+            using var client = new TcpClient(address.AddressFamily);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(400));
+            try
+            {
+                await client.ConnectAsync(address, port, timeout.Token);
+                return true;
+            }
+            catch (SocketException) { }
+            catch (OperationCanceledException) { }
+            catch (NotSupportedException) { }
+        }
+        return false;
+    }
+
+    private static readonly HttpClient HealthClient = new(
+        new HttpClientHandler { UseProxy = false })
+    {
+        Timeout = TimeSpan.FromSeconds(2)
+    };
+
+    private static async Task<bool> HttpReadyAsync(string url)
+    {
         try
         {
-            await client.ConnectAsync(IPAddress.Loopback, port, timeout.Token);
-            return true;
+            using var response = await HealthClient.GetAsync(url);
+            return response.IsSuccessStatusCode;
         }
-        catch (SocketException) { return false; }
-        catch (OperationCanceledException) { return false; }
+        catch (HttpRequestException) { return false; }
+        catch (TaskCanceledException) { return false; }
     }
+
+    private static async Task<bool> PanelReadyAsync() =>
+        await HttpReadyAsync("http://localhost:5173/") ||
+        await HttpReadyAsync("http://127.0.0.1:5173/");
 
     private sealed record CommandResult(int ExitCode, string Output, string Error)
     {
