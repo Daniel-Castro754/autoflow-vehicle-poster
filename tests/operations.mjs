@@ -269,6 +269,24 @@ try {
     'The batch limit must leave remaining stock for the next round',
   )
 
+  // Recurring planning must not leave otherwise complete CSV stock waiting
+  // for a separate human description approval. Only documented fields are
+  // included, and existing seller descriptions stay unchanged.
+  seedOrg(9)
+  vehicle(90, 9, '')
+  const descriptionResult = await runAutopilotPipeline(db, 9, null, { automatic: true })
+  assert.equal(descriptionResult.jobsCreated, 1)
+  assert.equal(descriptionResult.descriptionsOptimized, 1)
+  const factualText = db.prepare('SELECT description FROM vehicles WHERE id=90').get().description
+  assert.match(factualText, /Toyota Corolla 90/)
+  assert.match(factualText, /90000|90.000|R\\$\\s*90/)
+  assert(!/revisado|garantia|único dono|impecável/i.test(factualText))
+  assert.equal(
+    (await runAutopilotPipeline(db, 9, null, { automatic: true })).jobsCreated,
+    0,
+    'Already scheduled stock must never be created again.',
+  )
+
   const accountJobs = db
     .prepare(
       'SELECT id FROM publication_jobs WHERE organization_id=1 AND social_account_id=1 ORDER BY id',
