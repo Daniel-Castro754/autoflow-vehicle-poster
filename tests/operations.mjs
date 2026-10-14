@@ -269,6 +269,24 @@ try {
     'The batch limit must leave remaining stock for the next round',
   )
 
+  // Recurring planning must not leave otherwise complete CSV stock waiting
+  // for a separate human description approval. Only documented fields are
+  // included, and existing seller descriptions stay unchanged.
+  seedOrg(9)
+  vehicle(90, 9, '')
+  const descriptionResult = await runAutopilotPipeline(db, 9, null, { automatic: true })
+  assert.equal(descriptionResult.jobsCreated, 1)
+  assert.equal(descriptionResult.descriptionsOptimized, 1)
+  const factualText = db.prepare('SELECT description FROM vehicles WHERE id=90').get().description
+  assert.match(factualText, /Toyota Corolla 90/)
+  assert.match(factualText, /Preço:/)
+  assert(!/revisado|garantia|único dono|impecável/i.test(factualText))
+  assert.equal(
+    (await runAutopilotPipeline(db, 9, null, { automatic: true })).jobsCreated,
+    0,
+    'Already scheduled stock must never be created again.',
+  )
+
   const accountJobs = db
     .prepare(
       'SELECT id FROM publication_jobs WHERE organization_id=1 AND social_account_id=1 ORDER BY id',
@@ -375,6 +393,31 @@ try {
   })
   const client = createApiClient(server.base, login.token)
   const user = (await client('/me')).user
+  const autonomousAccountId = Number(
+    sql
+      .prepare(
+        "INSERT INTO social_accounts(organization_id,user_id,label,status) VALUES(?,?,?,'connected')",
+      )
+      .run(user.organizationId, user.id, 'Test autonomous switch').lastInsertRowid,
+  )
+  const initialQueue = await client(`/extension/queue?accountId=${autonomousAccountId}`)
+  assert.equal(initialQueue.automation.autonomousMode, false)
+  sql
+    .prepare(
+      'UPDATE organization_settings SET autopilot_enabled=1,auto_advance=1,auto_publish=1 WHERE organization_id=?',
+    )
+    .run(user.organizationId)
+  const autonomousQueue = await client(`/extension/queue?accountId=${autonomousAccountId}`)
+  assert.equal(autonomousQueue.automation.autonomousMode, true)
+  sql
+    .prepare(
+      'UPDATE organization_settings SET auto_publish=0,autopilot_enabled=0 WHERE organization_id=?',
+    )
+    .run(user.organizationId)
+  assert.equal(
+    (await client(`/extension/queue?accountId=${autonomousAccountId}`)).automation.autonomousMode,
+    false,
+  )
   sql.prepare("INSERT INTO organizations(id,name) VALUES(99,'Other tenant')").run()
   sql.exec(`INSERT INTO organization_settings(organization_id) VALUES(99);
     INSERT INTO users(organization_id,name,email,password_hash,role) SELECT 99,'Other','other@test.local',password_hash,'admin' FROM users LIMIT 1;

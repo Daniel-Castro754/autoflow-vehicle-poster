@@ -3,6 +3,7 @@ import { getAiCredentials } from './credential-vault.ts'
 import type { DatabaseSync } from 'node:sqlite'
 import {
   generateVehicleDescription,
+  generateProceduralDescription,
   resolveAIProviderSettings,
   type VehicleInput,
   type CopyTone,
@@ -585,11 +586,26 @@ async function planAutopilotJobs(
     }
   }
 
-  const assignments: AutopilotResult['assignments'] = []
-  const descriptionsOptimized = 0
+  // Missing descriptions are proposed before taking the write lock. This
+  // asynchronous boundary lets concurrent stock changes be observed by the
+  // mandatory fresh read/revalidation inside the transaction below.
+  const factualDescriptions = new Map<number, string>()
+  if (automatic) {
+    for (const vehicle of eligibleVehicles) {
+      if (!String(vehicle.description || '').trim())
+        factualDescriptions.set(
+          vehicle.id,
+          await Promise.resolve().then(() => generateProceduralDescription(vehicle)),
+        )
+    }
+  }
 
-  // Autopilot may schedule approved inventory, but it must never rewrite listing copy.
-  // Generated copy is applied only through the explicit preview/approval flows.
+  const assignments: AutopilotResult['assignments'] = []
+  let descriptionsOptimized = 0
+
+  // Existing seller text is immutable. For recurring autonomous runs only,
+  // missing descriptions may be filled with a factual procedural template,
+  // never speculative details or an unreviewed AI-generated claim.
 
   if (!ownsLease())
     return skippedAutopilot('Rodada interrompida: configuração alterada ou execução expirada.')
@@ -659,8 +675,23 @@ async function planAutopilotJobs(
       ] as const
       if (descriptionFields.some((field) => vehicle[field] !== candidate[field])) continue
       if (vehicle.description !== candidate.description) continue
-      if (publicationReadinessIssues(vehicle, vehicle.imageCount).length) continue
+      if (publicationReadinessIssues(vehicle, vehicle.imageCount, !automatic).length) continue
       if (publicationDuplicateRisk(db, organizationId, vehicle.id)) continue
+      if (automatic && !String(vehicle.description || '').trim()) {
+        const generated = factualDescriptions.get(vehicle.id)
+        if (!generated) continue
+        const updated = db
+          .prepare(
+            `UPDATE vehicles SET description=?,updated_at=CURRENT_TIMESTAMP
+            WHERE id=? AND organization_id=? AND status='Pronto' AND sold_at IS NULL
+            AND TRIM(COALESCE(description,''))=''`,
+          )
+          .run(generated, vehicle.id, organizationId)
+        if (!updated.changes) continue
+        vehicle.description = generated
+        descriptionsOptimized++
+      }
+      if (publicationReadinessIssues(vehicle, vehicle.imageCount).length) continue
       // Keep automated jobs consistent with manually created publications:
       // their editorial snapshot and reserved hash use the same persisted seed.
       const variantSeed = randomInt(1, 2_147_483_646)

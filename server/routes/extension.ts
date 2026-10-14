@@ -171,7 +171,8 @@ export async function handleExtensionRoute(
     }
     const settings = db
       .prepare(
-        `SELECT auto_advance autoAdvance,fill_groups fillGroups,target_groups targetGroups,auto_publish autoPublish
+        `SELECT auto_advance autoAdvance,fill_groups fillGroups,target_groups targetGroups,auto_publish autoPublish,
+        autopilot_enabled autopilotEnabled
         FROM organization_settings WHERE organization_id=?`,
       )
       .get(auth.organizationId) as Record<string, unknown> | undefined
@@ -203,6 +204,10 @@ export async function handleExtensionRoute(
         fillGroups: Boolean(settings?.fillGroups),
         targetGroups,
         autoPublish: Boolean(settings?.autoPublish),
+        // Scheduling alone does not consent to automatic publication.
+        autonomousMode: Boolean(
+          settings?.autopilotEnabled && settings?.autoAdvance && settings?.autoPublish,
+        ),
       },
     })
   }
