@@ -586,6 +586,20 @@ async function planAutopilotJobs(
     }
   }
 
+  // Missing descriptions are proposed before taking the write lock. This
+  // asynchronous boundary lets concurrent stock changes be observed by the
+  // mandatory fresh read/revalidation inside the transaction below.
+  const factualDescriptions = new Map<number, string>()
+  if (automatic) {
+    for (const vehicle of eligibleVehicles) {
+      if (!String(vehicle.description || '').trim())
+        factualDescriptions.set(
+          vehicle.id,
+          await Promise.resolve().then(() => generateProceduralDescription(vehicle)),
+        )
+    }
+  }
+
   const assignments: AutopilotResult['assignments'] = []
   let descriptionsOptimized = 0
 
@@ -664,7 +678,8 @@ async function planAutopilotJobs(
       if (publicationReadinessIssues(vehicle, vehicle.imageCount, !automatic).length) continue
       if (publicationDuplicateRisk(db, organizationId, vehicle.id)) continue
       if (automatic && !String(vehicle.description || '').trim()) {
-        const generated = generateProceduralDescription(vehicle)
+        const generated = factualDescriptions.get(vehicle.id)
+        if (!generated) continue
         const updated = db
           .prepare(
             `UPDATE vehicles SET description=?,updated_at=CURRENT_TIMESTAMP
