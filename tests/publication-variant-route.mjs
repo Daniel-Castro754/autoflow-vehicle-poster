@@ -68,13 +68,10 @@ try {
       }),
     })
     const curation = await api(`/vehicles/${vehicle.id}/photos/curation`)
-    await api(`/vehicles/${vehicle.id}/photos/selection`, {
-      method: 'POST',
-      body: JSON.stringify({
-        photoIds: curation.recommendation,
-        fingerprint: curation.fingerprint,
-      }),
-    })
+    assert.equal(curation.automatic, true)
+    assert.equal(curation.approved, false)
+    assert.equal(curation.selectedIds.length, 1)
+    // End-to-end preparation must work with real photos but no manual approval.
     return vehicle
   }
 
@@ -137,7 +134,7 @@ try {
   const invalid = image.url.replace(/[a-f0-9]{64}\.jpg$/, '0'.repeat(64) + '.jpg')
   assert.equal((await fetch(invalid)).status, 403)
   console.log(
-    '✓ Signed images are faithful, stable and limited to approved photos; distinct stock units can be listed.',
+    '✓ Signed images are faithful, stable and limited to selected real photos without manual approval.',
   )
 } finally {
   db.close()

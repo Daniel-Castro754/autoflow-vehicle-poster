@@ -116,15 +116,21 @@ export function readPhotoCuration(
   const photos = inventory(db, org, vehicleId)
   const saved = selection(db, org, vehicleId)
   const fingerprint = photoInventoryFingerprint(photos)
-  const approved = Boolean(saved && saved.inventoryFingerprint === fingerprint)
-  let selectedIds: number[] = []
-  if (saved) {
+  const outdated = Boolean(saved && saved.inventoryFingerprint !== fingerprint)
+  const automatic = Boolean(photos.length && (!saved || outdated))
+  let selectedIds = automatic ? recommendPhotos(photos) : []
+  let invalid = false
+  if (saved && !outdated) {
     try {
       selectedIds = parseIds(saved.photoIds)
+      const owned = new Set(photos.map((photo) => photo.id))
+      if (selectedIds.some((id) => !owned.has(id))) invalid = true
     } catch {
-      // Surface the stale/invalid plan to the reviewer.
+      // Persisted invalid selections are not silently accepted as approved.
+      invalid = true
     }
   }
+  const approved = Boolean(saved && !outdated && !invalid)
   return {
     images: photos.map(({ id, originalName, mimeType, position, category, fileName }) => ({
       id,
@@ -139,7 +145,9 @@ export function readPhotoCuration(
     fingerprint,
     enabled: Boolean(saved),
     approved,
-    needsReview: Boolean(saved && !approved),
+    automatic,
+    selectionOutdated: outdated,
+    needsReview: invalid,
     selectedIds,
   }
 }
@@ -248,6 +256,30 @@ export function disablePhotoSelection(db: DatabaseSync, org: number, vehicleId: 
   }
 }
 
+function photoIdsForInventory(photos: PhotoRow[], saved: PhotoSelection | undefined) {
+  if (!photos.length)
+    throw new PhotoCurationConflict(
+      'Este veículo ainda não possui fotos. Importe fotos reais antes de publicar.',
+    )
+  const fingerprint = photoInventoryFingerprint(photos)
+  // Preserve current manual covers/orders. New or outdated selections fall
+  // back to real inventory photos; invalid current selections fail closed.
+  const ids =
+    saved && saved.inventoryFingerprint === fingerprint
+      ? parseIds(saved.photoIds)
+      : recommendPhotos(photos)
+  const owned = new Set(photos.map((photo) => photo.id))
+  if (ids.some((id) => !owned.has(id)))
+    throw new PhotoCurationConflict('Seleção de fotografias inconsistente.')
+  return ids
+}
+
+// Used by the signed photo route as well as the publication payload.
+// Both endpoints must agree on exactly the same authorized photo set.
+export function selectedPublicationPhotoIds(db: DatabaseSync, org: number, vehicleId: number) {
+  return photoIdsForInventory(inventory(db, org, vehicleId), selection(db, org, vehicleId))
+}
+
 export function publicationPhotoPayload(
   db: DatabaseSync,
   org: number,
@@ -255,19 +287,8 @@ export function publicationPhotoPayload(
   baseUrl: string,
 ) {
   const photos = inventory(db, org, vehicleId)
-  const saved = selection(db, org, vehicleId)
-  if (!saved)
-    throw new PhotoCurationConflict(
-      'A publicação exige uma seleção de fotos revisada e aprovada. Revise a curadoria antes de publicar.',
-    )
-  if (saved.inventoryFingerprint !== photoInventoryFingerprint(photos))
-    throw new PhotoCurationConflict(
-      'A seleção aprovada não corresponde mais às fotos atuais. Revise a curadoria antes de publicar.',
-    )
-  const ids = parseIds(saved.photoIds)
+  const ids = photoIdsForInventory(photos, selection(db, org, vehicleId))
   const byId = new Map(photos.map((photo) => [photo.id, photo]))
-  if (ids.some((id) => !byId.has(id)))
-    throw new PhotoCurationConflict('Seleção de fotografias inconsistente.')
   const ordered = ids.map((id) => byId.get(id)!)
   return ordered.map((photo) => ({
     url: baseUrl + photo.fileName,
