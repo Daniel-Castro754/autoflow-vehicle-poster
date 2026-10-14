@@ -2,6 +2,10 @@
 
 Painel inicial para estoque, atribuição de vendedores e acompanhamento da fila de publicação de veículos.
 
+## Inicializador AutoFlow.exe para Windows
+
+Quem usa o AutoFlow no Windows pode abrir o [inicializador gráfico com atualização automática](launcher/README.md). Ele verifica novas versões da branch `main`, atualiza somente com segurança e inicia o painel e a API sem digitar comandos. O executável independente é compilado no GitHub Actions, na rotina **Windows launcher EXE**.
+
 ## Rodar localmente
 
 Requer Node.js 22.18.0 ou superior; Node.js 24 LTS é a versão recomendada (`nvm use`).
