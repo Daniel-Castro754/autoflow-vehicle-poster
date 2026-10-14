@@ -1,0 +1,41 @@
+name: Windows launcher EXE
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'launcher/**'
+      - '.github/workflows/windows-launcher.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'launcher/**'
+      - '.github/workflows/windows-launcher.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Publish standalone Windows x64 EXE
+        shell: pwsh
+        run: |
+          dotnet publish launcher/AutoFlow.Launcher.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:IncludeNativeLibrariesForSelfExtract=true -o launcher-output
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path 'launcher-output/AutoFlow.exe')) { throw 'AutoFlow.exe not found' }
+          $file = Get-Item 'launcher-output/AutoFlow.exe'
+          if ($file.Length -lt 1000000) { throw 'Unexpectedly small standalone EXE' }
+          Get-FileHash -Algorithm SHA256 'launcher-output/AutoFlow.exe' | Format-List
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AutoFlow-Windows-x64
+          path: launcher-output/AutoFlow.exe
+          if-no-files-found: error
+          retention-days: 90
