@@ -25,6 +25,11 @@ internal static class LauncherNetworkSmoke
         var port = ((IPEndPoint)vite.LocalEndpoint).Port;
         if (!await InvokeAsync("PortUsedAsync", port))
             throw new Exception("IPv6-only localhost listener was not detected.");
+        // The TCP probe connects and closes without sending an HTTP request.
+        // Drain that connection before serving the readiness HTTP request.
+        using (var probe = await vite.AcceptTcpClientAsync())
+        {
+        }
 
         // The launcher now relies on HTTP instead of an open TCP port to
         // establish readiness. Exercise the very method used at startup.
@@ -33,7 +38,7 @@ internal static class LauncherNetworkSmoke
             using var connection = await vite.AcceptTcpClientAsync();
             using var stream = connection.GetStream();
             var request = new byte[2048];
-            await stream.ReadAsync(request);
+            await stream.ReadAtLeastAsync(request.AsMemory(), 1, throwOnEndOfStream: true);
             var bytes = Encoding.ASCII.GetBytes(
                 "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK");
             await stream.WriteAsync(bytes);
