@@ -20,7 +20,7 @@ internal static class LauncherNetworkSmoke
     {
         // This reproduces the actual Windows issue: Vite binds only ::1,
         // so a probe against 127.0.0.1 alone returns a false negative.
-        using var vite = new TcpListener(IPAddress.IPv6Loopback, 0);
+        var vite = new TcpListener(IPAddress.IPv6Loopback, 0);
         vite.Start();
         var port = ((IPEndPoint)vite.LocalEndpoint).Port;
         if (!await InvokeAsync("PortUsedAsync", port))
