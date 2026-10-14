@@ -22,13 +22,28 @@ launcher (o link do artefato é temporário, não uma instalação permanente).
 
 ## O que acontece ao iniciar
 
-1. Localiza o repositório e verifica se as portas 3333 ou 5173 já estão em uso.
+1. Localiza o repositório e verifica se as portas 3333 ou 5173 já estão em uso (IPv4 e IPv6).
 2. Confirma Git e Node.js >=22.18.0.
 3. Se estiver na `main` com arquivos rastreados limpos, faz `git fetch origin main`.
 4. Atualiza **somente por fast-forward**, sem `git reset`, `git clean` ou `git stash`.
 5. Se houver atualização ou `node_modules` estiver faltando, executa `npm ci`.
 6. Se o código da extensão mudou, executa `npm run build:extension`.
-7. Executa `npm run dev` e abre `http://localhost:5173` quando API e painel responderem.
+7. Executa `npm run dev`, espera a API responder em `http://127.0.0.1:3333/health/ready`
+   e o painel em `http://localhost:5173` (com suporte a localhost IPv6/IPv4).
+   O primeiro carregamento pode levar até cinco minutos devido à otimização de dependências.
+
+A interface mostra **barra de progresso por etapas**, percentuais, tempo decorrido e,
+a partir de uma execução concluída, a **média real de inicialização medida no próprio PC**.
+Antes de haver histórico, exibe uma estimativa geral de 1–4 minutos; a primeira
+instalação pode ser mais lenta. O histórico, sem senhas nem dados do negócio,
+fica em `%LOCALAPPDATA%\AutoFlow\startup-times.json`. Os percentuais são por
+etapa concluída, não uma previsão exata do tempo restante.
+
+Se aparecer `A task was canceled` em uma versão antiga mesmo com o Vite e
+API abertos, substitua o EXE pelo artefato desta correção: a versão anterior
+checa apenas IPv4 e tinha um limite de 90 segundos que podia encerrar a
+verificação em máquinas cujo Vite escutasse no endereço IPv6 `::1`.
+O novo launcher usa **respostas HTTP reais**, prazo maior e erros explicativos.
 
 Se o GitHub estiver inacessível, mantém o código local e tenta iniciar. Se houver alterações
 locais, ou a branch atual não for `main`, **não atualiza**. Caso o AutoFlow já esteja
