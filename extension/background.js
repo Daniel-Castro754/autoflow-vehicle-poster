@@ -289,6 +289,44 @@ function scheduleConsumer(nextAt) {
     periodInMinutes: 1,
   })
 }
+// After a one-time administrator opt-in (autopilot + auto-advance +
+// auto-publish), the extension starts consuming its own queue again after
+// a Brave restart. A user-initiated pause always takes precedence.
+async function synchronizeAutonomousConsumption() {
+  const state = await chrome.storage.local.get([
+    'activeAccountId',
+    'token',
+    'refreshToken',
+    'autoRun',
+    'autoRunManaged',
+    'autoRunManuallyPaused',
+  ])
+  if (!state.activeAccountId || (!state.token && !state.refreshToken)) return false
+  let response
+  try {
+    response = await authorizedFetch(
+      `${API}/extension/queue?accountId=${encodeURIComponent(state.activeAccountId)}`,
+    )
+  } catch {
+    // Temporary outages must not alter the user's running/paused choice.
+    return Boolean(state.autoRun)
+  }
+  if (!response.ok) return Boolean(state.autoRun)
+  const queue = await response.json().catch(() => null)
+  if (queue?.automation?.autonomousMode === true) {
+    if (!state.autoRun && !state.autoRunManuallyPaused) {
+      await chrome.storage.local.set({ autoRun: true, autoRunManaged: true })
+      return true
+    }
+  } else if (state.autoRunManaged) {
+    // Don't continue automatic consumption after an administrator disables
+    // any part of the full-cycle opt-in.
+    await chrome.storage.local.set({ autoRun: false, autoRunManaged: false })
+    return false
+  }
+  return Boolean(state.autoRun)
+}
+
 async function consumeQueue() {
   if (queueConsumerRunning || manualLaunchRunning) return
   queueConsumerRunning = true
@@ -446,13 +484,22 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.runtime.onInstalled.addListener(() => {
   console.info('AutoFlow instalado no Brave')
   ensureHeartbeatAlarm()
+  void synchronizeAutonomousConsumption().catch(() => {})
 })
-chrome.runtime.onStartup.addListener(ensureHeartbeatAlarm)
+chrome.runtime.onStartup.addListener(() => {
+  ensureHeartbeatAlarm()
+  void synchronizeAutonomousConsumption()
+    .then((enabled) => {
+      if (enabled) return consumeQueue()
+    })
+    .catch((error) => console.warn('AutoFlow: falha ao retomar piloto automático', error))
+})
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== HEARTBEAT_ALARM) return
   void (async () => {
     await validatePendingTab()
     await flushPendingResults()
+    await synchronizeAutonomousConsumption()
     await consumeQueue()
   })().catch((error) => console.warn('AutoFlow: falha na verificação da fila', error))
 })
@@ -631,6 +678,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse(status)
       })
       .catch(() => sendResponse({ ready: false, reason: 'A aba do Facebook não está acessível.' }))
+    return true
+  }
+  if (message.type === 'AUTOFLOW_SYNC_AUTONOMY') {
+    void synchronizeAutonomousConsumption()
+      .then(async (enabled) => {
+        if (enabled) await consumeQueue()
+        sendResponse({ ok: true, autoRun: enabled })
+      })
+      .catch((error) =>
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+      )
     return true
   }
   if (message.type === 'AUTOFLOW_RUN_QUEUE') {
