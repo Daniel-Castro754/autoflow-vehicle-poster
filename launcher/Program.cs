@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Net;
 using System.Net.Sockets;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 namespace AutoFlowLauncher;
@@ -21,6 +23,11 @@ internal sealed class LauncherForm : Form
     private readonly Label _status = new();
     private readonly TextBox _log = new();
     private readonly Button _open = new();
+    private readonly ProgressBar _progress = new();
+    private readonly Label _progressCaption = new();
+    private readonly Label _elapsedCaption = new();
+    private readonly Stopwatch _startupWatch = new();
+    private readonly System.Windows.Forms.Timer _elapsedTimer = new() { Interval = 1000 };
     private readonly CancellationTokenSource _lifetime = new();
     private Process? _server;
     private bool _serverOwned;
@@ -28,8 +35,8 @@ internal sealed class LauncherForm : Form
     public LauncherForm()
     {
         Text = "AutoFlow | Atualizar e iniciar";
-        Size = new Size(720, 490);
-        MinimumSize = new Size(570, 400);
+        Size = new Size(760, 560);
+        MinimumSize = new Size(590, 480);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Color.FromArgb(13, 25, 24);
         ForeColor = Color.White;
@@ -39,12 +46,15 @@ internal sealed class LauncherForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 7,
             Padding = new Padding(22),
             BackColor = BackColor
         };
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 21));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 37));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));
 
@@ -60,6 +70,26 @@ internal sealed class LauncherForm : Form
         _status.ForeColor = Color.FromArgb(212, 226, 225);
         _status.TextAlign = ContentAlignment.MiddleLeft;
         _status.Dock = DockStyle.Fill;
+
+        _progressCaption.Text = "0%  ·  Verificação inicial";
+        _progressCaption.ForeColor = Color.FromArgb(211, 229, 223);
+        _progressCaption.Dock = DockStyle.Fill;
+        _progressCaption.TextAlign = ContentAlignment.MiddleLeft;
+        _progressCaption.Font = new Font("Segoe UI", 9, FontStyle.Bold);
+
+        _progress.Dock = DockStyle.Fill;
+        _progress.Maximum = 100;
+        _progress.Minimum = 0;
+        _progress.Value = 0;
+        _progress.Style = ProgressBarStyle.Continuous;
+
+        _elapsedCaption.Dock = DockStyle.Fill;
+        _elapsedCaption.TextAlign = ContentAlignment.MiddleLeft;
+        _elapsedCaption.ForeColor = Color.FromArgb(157, 193, 184);
+        _elapsedCaption.Font = new Font("Segoe UI", 9);
+        _elapsedCaption.Text = "Decorrido: 00:00  ·  Previsão inicial: 1–4 min (varia por computador)";
+
+        _elapsedTimer.Tick += (_, _) => RefreshElapsedCaption();
 
         _log.Multiline = true;
         _log.ReadOnly = true;
@@ -105,14 +135,23 @@ internal sealed class LauncherForm : Form
         actions.Controls.Add(_open);
         layout.Controls.Add(header, 0, 0);
         layout.Controls.Add(_status, 0, 1);
-        layout.Controls.Add(_log, 0, 2);
-        layout.Controls.Add(actions, 0, 3);
+        layout.Controls.Add(_progressCaption, 0, 2);
+        layout.Controls.Add(_progress, 0, 3);
+        layout.Controls.Add(_elapsedCaption, 0, 4);
+        layout.Controls.Add(_log, 0, 5);
+        layout.Controls.Add(actions, 0, 6);
         Controls.Add(layout);
 
-        Shown += async (_, _) => await InitializeAsync();
+        Shown += async (_, _) =>
+        {
+            _startupWatch.Start();
+            _elapsedTimer.Start();
+            await InitializeAsync();
+        };
         FormClosing += (_, _) =>
         {
             _lifetime.Cancel();
+            _elapsedTimer.Stop();
             if (_serverOwned)
             {
                 try
@@ -136,6 +175,8 @@ internal sealed class LauncherForm : Form
             return;
         }
 
+        // Vite emits ANSI cursor/color sequences which are unreadable in WinForms.
+        message = Regex.Replace(message, @"\x1B\[[0-?]*[ -/]*[@-~]", "");
         string line = $"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}";
         _log.AppendText(line);
         if (_log.TextLength > 28000)
