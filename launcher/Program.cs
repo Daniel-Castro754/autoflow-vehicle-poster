@@ -356,6 +356,13 @@ internal sealed class LauncherForm : Form
             await process.WaitForExitAsync(cancellation.Token);
             return new CommandResult(process.ExitCode, await output, await error);
         }
+        catch (OperationCanceledException) when (!_lifetime.IsCancellationRequested)
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { }
+            throw new TimeoutException(
+                $"O comando '{command}' excedeu {timeout.TotalMinutes:0.#} minuto(s). Verifique a conexão e tente novamente.");
+        }
         catch
         {
             try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
@@ -374,6 +381,8 @@ internal sealed class LauncherForm : Form
     {
         try
         {
+            LoadStartupHistory();
+            SetProgress(5, "Localizando instalação do AutoFlow...");
             var repository = FindRepository();
             if (repository is null)
             {
@@ -383,16 +392,21 @@ internal sealed class LauncherForm : Form
                 return;
             }
             Report("Projeto: " + repository);
+            SetProgress(12, "Conferindo se a API e o painel já estão ativos...");
 
             // Do not overwrite or race an existing running server or its database.
             var apiUsed = await PortUsedAsync(3333);
             var panelUsed = await PortUsedAsync(5173);
             if (apiUsed || panelUsed)
             {
-                if (apiUsed && panelUsed)
+                if (apiUsed && panelUsed &&
+                    await HttpReadyAsync("http://127.0.0.1:3333/health/ready") &&
+                    await PanelReadyAsync())
                 {
-                    Status("AutoFlow já está em execução");
+                    SetProgress(100, "AutoFlow já está em execução");
                     Report("Feche a execução anterior antes de atualizar o código.");
+                    _elapsedTimer.Stop();
+                    _startupWatch.Stop();
                     _open.Enabled = true;
                 }
                 else
@@ -403,7 +417,7 @@ internal sealed class LauncherForm : Form
                 return;
             }
 
-            Status("Verificando Git, Node.js e arquivos locais...");
+            SetProgress(20, "Verificando Git, Node.js e arquivos locais...");
             var gitVersion = await GitAsync(repository, "--version");
             if (!gitVersion.Ok)
                 throw new InvalidOperationException("O Git não está disponível no PATH.");
@@ -433,7 +447,7 @@ internal sealed class LauncherForm : Form
             }
             else
             {
-                Status("Consultando atualizações no GitHub...");
+                SetProgress(35, "Consultando atualizações no GitHub...");
                 var fetched = await GitAsync(repository, "fetch", "origin", "main");
                 if (!fetched.Ok)
                 {
@@ -454,7 +468,7 @@ internal sealed class LauncherForm : Form
                         }
                         else
                         {
-                            Status("Aplicando atualização de código (fast-forward)...");
+                            SetProgress(47, "Aplicando atualização segura do GitHub...");
                             var merge = await GitAsync(repository, "merge", "--ff-only", "FETCH_HEAD");
                             if (!merge.Ok)
                             {
@@ -479,9 +493,11 @@ internal sealed class LauncherForm : Form
                 }
             }
 
+            SetProgress(55, "Verificando dependências do projeto...");
             if (updated || !Directory.Exists(Path.Combine(repository, "node_modules")))
             {
-                Status("Instalando dependências do projeto...");
+                SetProgress(60, "Instalando dependências (npm ci)...");
+                Report("A instalação de dependências pode levar alguns minutos. Aguarde.");
                 Report("Executando npm ci sem modificar banco, fotos ou .env...");
                 var install = await NpmAsync(repository, "npm ci --no-audit --no-fund");
                 if (!install.Ok)
@@ -489,9 +505,10 @@ internal sealed class LauncherForm : Form
                 Report("Dependências instaladas.");
             }
 
+            SetProgress(76, "Verificando extensão do Brave...");
             if (updated || !File.Exists(Path.Combine(repository, "dist", "extension", "manifest.json")))
             {
-                Status("Preparando extensão do Brave...");
+                SetProgress(79, "Preparando extensão do Brave...");
                 var extension = await NpmAsync(repository, "npm run build:extension");
                 if (!extension.Ok)
                     throw new InvalidOperationException(
@@ -499,7 +516,7 @@ internal sealed class LauncherForm : Form
                 Report("Extensão atualizada. Recarregue-a em brave://extensions se já estava instalada.");
             }
 
-            Status("Iniciando API e painel...");
+            SetProgress(87, "Iniciando API e painel...");
             _server = new Process
             {
                 StartInfo = new ProcessStartInfo("cmd.exe")
@@ -527,30 +544,42 @@ internal sealed class LauncherForm : Form
             _server.BeginOutputReadLine();
             _server.BeginErrorReadLine();
 
-            using var timer = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-            timer.CancelAfter(TimeSpan.FromSeconds(90));
-            while (!timer.IsCancellationRequested)
+            SetProgress(93, "Aguardando API e painel ficarem prontos...");
+            Report("A primeira otimização das dependências pelo Vite pode demorar.");
+            // Do not use a single IPv4-only TCP probe: Vite often listens
+            // on IPv6 localhost (::1) on Windows. Require real HTTP responses.
+            // A 5-minute deadline gives first-run dependency optimization time.
+            var deadline = Stopwatch.StartNew();
+            while (deadline.Elapsed < TimeSpan.FromMinutes(5))
             {
+                _lifetime.Token.ThrowIfCancellationRequested();
                 if (_server.HasExited)
                     throw new InvalidOperationException(
                         "O servidor encerrou durante a inicialização. Consulte o registro abaixo.");
-                if (await PortUsedAsync(3333) && await PortUsedAsync(5173))
+                var apiReady = await HttpReadyAsync("http://127.0.0.1:3333/health/ready");
+                var panelReady = await PanelReadyAsync();
+                if (apiReady && panelReady)
                 {
-                    Status("AutoFlow pronto — painel e API ativos");
+                    FinishStartup();
                     Report("Iniciado com sucesso. Mantenha esta janela aberta.");
                     _open.Enabled = true;
                     OpenPanel();
                     return;
                 }
-                await Task.Delay(600, timer.Token);
+                await Task.Delay(750, _lifetime.Token);
             }
             throw new TimeoutException(
-                "A API ou o painel não iniciaram em 90 segundos. Verifique o registro de execução.");
+                "O AutoFlow não respondeu nas verificações HTTP após 5 minutos. " +
+                "Verifique se o painel abre em http://localhost:5173 e se a API responde " +
+                "em http://127.0.0.1:3333/health/ready. Confira o log para detalhes.");
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception error)
         {
+            _elapsedTimer.Stop();
+            _startupWatch.Stop();
             Status("Não foi possível iniciar o AutoFlow");
+            _progressCaption.Text = $"{_progress.Value}%  ·  Inicialização interrompida";
             Report(error.Message);
         }
     }
