@@ -4,10 +4,12 @@ import vm from 'node:vm'
 
 const source = await readFile(new URL('../extension/background.js', import.meta.url), 'utf8')
 
-async function runConsumer(queue, network = {}) {
+async function runConsumer(queue, network = {}, settings = {}) {
   const listeners = { alarms: [] }
   const stored = {
-    autoRun: true,
+    autoRun: settings.autoRun ?? true,
+    autoRunManuallyPaused: settings.autoRunManuallyPaused ?? false,
+    autoRunManaged: settings.autoRunManaged ?? false,
     activeAccountId: 4,
     token: 'extension-token',
     instanceId: 'worker-1',
@@ -147,8 +149,64 @@ async function runConsumer(queue, network = {}) {
     setTimeout,
     clearTimeout,
   })
-  await new Promise((resolve) => listeners.message({ type: 'AUTOFLOW_RUN_QUEUE' }, {}, resolve))
+  await new Promise((resolve) =>
+    listeners.message(
+      { type: settings.sync ? 'AUTOFLOW_SYNC_AUTONOMY' : 'AUTOFLOW_RUN_QUEUE' },
+      {},
+      resolve,
+    ),
+  )
   return { requests, createdTabs, listeners, stored }
+}
+
+{
+  const ready = await runConsumer(
+    {
+      automation: { autonomousMode: true },
+      jobs: [{ jobId: 22, jobStatus: 'pending', locked: false, publishUncertain: false }],
+    },
+    {},
+    { autoRun: false, sync: true },
+  )
+  assert.equal(ready.stored.autoRun, true, 'Full-cycle opt-in should start without popup clicks')
+  assert.equal(ready.stored.autoRunManaged, true)
+  assert.equal(ready.createdTabs.length, 1)
+}
+{
+  const paused = await runConsumer(
+    {
+      automation: { autonomousMode: true },
+      jobs: [{ jobId: 22, jobStatus: 'pending', locked: false, publishUncertain: false }],
+    },
+    {},
+    { autoRun: false, autoRunManuallyPaused: true, sync: true },
+  )
+  assert.equal(paused.stored.autoRun, false, 'Manual pause must prevent autonomous reactivation')
+  assert.equal(paused.createdTabs.length, 0)
+}
+{
+  const inactive = await runConsumer(
+    {
+      automation: { autonomousMode: false },
+      jobs: [{ jobId: 22, jobStatus: 'pending', locked: false, publishUncertain: false }],
+    },
+    {},
+    { autoRun: false, sync: true },
+  )
+  assert.equal(inactive.stored.autoRun, false, 'No opt-in means no auto-consumption')
+  assert.equal(inactive.createdTabs.length, 0)
+}
+{
+  const stopped = await runConsumer(
+    {
+      automation: { autonomousMode: false },
+      jobs: [{ jobId: 22, jobStatus: 'pending', locked: false, publishUncertain: false }],
+    },
+    {},
+    { autoRun: true, autoRunManaged: true, sync: true },
+  )
+  assert.equal(stopped.stored.autoRun, false, 'Disabling the opt-in must stop managed consumption')
+  assert.equal(stopped.createdTabs.length, 0)
 }
 
 {
