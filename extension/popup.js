@@ -88,6 +88,9 @@ async function loadAccounts() {
     updateAutoRunButton()
     showManualLaunchError()
     loadQueue()
+    // The background worker independently checks the admin's full-cycle
+    // opt-in, even when this popup closes after a profile is selected.
+    void chrome.runtime.sendMessage({ type: 'AUTOFLOW_SYNC_AUTONOMY' })
   } catch (error) {
     if (seq === loadAccountsSeq)
       $('queue').innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`
@@ -262,6 +265,8 @@ $('logout').onclick = async () => {
       'activeAccountId',
       'pendingJob',
       'autoRun',
+      'autoRunManaged',
+      'autoRunManuallyPaused',
       'facebookSession',
     ],
     () => {
@@ -276,19 +281,31 @@ $('refresh').onclick = loadQueue
 $('autoRun').onclick = () =>
   chrome.storage.local.get('autoRun', ({ autoRun }) => {
     const next = !autoRun
-    chrome.storage.local.set({ autoRun: next }, () => {
+    chrome.storage.local.set(
+      { autoRun: next, autoRunManuallyPaused: !next, autoRunManaged: false },
+      () => {
       updateAutoRunButton()
-      if (next) chrome.runtime.sendMessage({ type: 'AUTOFLOW_RUN_QUEUE' })
-    })
+        if (next) chrome.runtime.sendMessage({ type: 'AUTOFLOW_RUN_QUEUE' })
+      },
+    )
   })
 $('accountSelect').onchange = () => {
   activeAccountId = Number($('accountSelect').value)
   const account = availableAccounts.find((item) => item.id === activeAccountId)
   if (account) updateProfileMeta(account)
-  chrome.storage.local.set({ activeAccountId, autoRun: false }, () => {
-    updateAutoRunButton()
-    loadQueue()
-  })
+  chrome.storage.local.set(
+    {
+      activeAccountId,
+      autoRun: false,
+      autoRunManaged: false,
+      autoRunManuallyPaused: false,
+    },
+    () => {
+      updateAutoRunButton()
+      loadQueue()
+      void chrome.runtime.sendMessage({ type: 'AUTOFLOW_SYNC_AUTONOMY' })
+    },
+  )
 }
 chrome.storage.local.get(['token', 'refreshToken', 'user', 'instanceId'], (data) => {
   instanceId =
