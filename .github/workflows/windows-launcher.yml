@@ -4,11 +4,13 @@ on:
     branches: [main]
     paths:
       - 'launcher/**'
+      - 'launcher-smoke/**'
       - '.github/workflows/windows-launcher.yml'
   pull_request:
     branches: [main]
     paths:
       - 'launcher/**'
+      - 'launcher-smoke/**'
       - '.github/workflows/windows-launcher.yml'
   workflow_dispatch:
 
@@ -33,6 +35,11 @@ jobs:
           $file = Get-Item 'launcher-output/AutoFlow.exe'
           if ($file.Length -lt 1000000) { throw 'Unexpectedly small standalone EXE' }
           Get-FileHash -Algorithm SHA256 'launcher-output/AutoFlow.exe' | Format-List
+      - name: Regression test for IPv6 Vite and HTTP readiness
+        shell: pwsh
+        run: |
+          dotnet run --project launcher-smoke/AutoFlow.Launcher.Smoke.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
           name: AutoFlow-Windows-x64
