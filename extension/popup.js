@@ -284,7 +284,7 @@ $('autoRun').onclick = () =>
     chrome.storage.local.set(
       { autoRun: next, autoRunManuallyPaused: !next, autoRunManaged: false },
       () => {
-      updateAutoRunButton()
+        updateAutoRunButton()
         if (next) chrome.runtime.sendMessage({ type: 'AUTOFLOW_RUN_QUEUE' })
       },
     )
