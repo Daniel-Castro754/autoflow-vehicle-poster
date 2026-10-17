@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Net;
 using System.Net.Sockets;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 namespace AutoFlowLauncher;
@@ -21,6 +23,11 @@ internal sealed class LauncherForm : Form
     private readonly Label _status = new();
     private readonly TextBox _log = new();
     private readonly Button _open = new();
+    private readonly ProgressBar _progress = new();
+    private readonly Label _progressCaption = new();
+    private readonly Label _elapsedCaption = new();
+    private readonly Stopwatch _startupWatch = new();
+    private readonly System.Windows.Forms.Timer _elapsedTimer = new() { Interval = 1000 };
     private readonly CancellationTokenSource _lifetime = new();
     private Process? _server;
     private bool _serverOwned;
@@ -28,8 +35,8 @@ internal sealed class LauncherForm : Form
     public LauncherForm()
     {
         Text = "AutoFlow | Atualizar e iniciar";
-        Size = new Size(720, 490);
-        MinimumSize = new Size(570, 400);
+        Size = new Size(760, 560);
+        MinimumSize = new Size(590, 480);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Color.FromArgb(13, 25, 24);
         ForeColor = Color.White;
@@ -39,12 +46,15 @@ internal sealed class LauncherForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 7,
             Padding = new Padding(22),
             BackColor = BackColor
         };
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 21));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 37));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));
 
@@ -60,6 +70,26 @@ internal sealed class LauncherForm : Form
         _status.ForeColor = Color.FromArgb(212, 226, 225);
         _status.TextAlign = ContentAlignment.MiddleLeft;
         _status.Dock = DockStyle.Fill;
+
+        _progressCaption.Text = "0%  ·  Verificação inicial";
+        _progressCaption.ForeColor = Color.FromArgb(211, 229, 223);
+        _progressCaption.Dock = DockStyle.Fill;
+        _progressCaption.TextAlign = ContentAlignment.MiddleLeft;
+        _progressCaption.Font = new Font("Segoe UI", 9, FontStyle.Bold);
+
+        _progress.Dock = DockStyle.Fill;
+        _progress.Maximum = 100;
+        _progress.Minimum = 0;
+        _progress.Value = 0;
+        _progress.Style = ProgressBarStyle.Continuous;
+
+        _elapsedCaption.Dock = DockStyle.Fill;
+        _elapsedCaption.TextAlign = ContentAlignment.MiddleLeft;
+        _elapsedCaption.ForeColor = Color.FromArgb(157, 193, 184);
+        _elapsedCaption.Font = new Font("Segoe UI", 9);
+        _elapsedCaption.Text = "Decorrido: 00:00  ·  Previsão inicial: 1–4 min (varia por computador)";
+
+        _elapsedTimer.Tick += (_, _) => RefreshElapsedCaption();
 
         _log.Multiline = true;
         _log.ReadOnly = true;
@@ -105,14 +135,23 @@ internal sealed class LauncherForm : Form
         actions.Controls.Add(_open);
         layout.Controls.Add(header, 0, 0);
         layout.Controls.Add(_status, 0, 1);
-        layout.Controls.Add(_log, 0, 2);
-        layout.Controls.Add(actions, 0, 3);
+        layout.Controls.Add(_progressCaption, 0, 2);
+        layout.Controls.Add(_progress, 0, 3);
+        layout.Controls.Add(_elapsedCaption, 0, 4);
+        layout.Controls.Add(_log, 0, 5);
+        layout.Controls.Add(actions, 0, 6);
         Controls.Add(layout);
 
-        Shown += async (_, _) => await InitializeAsync();
+        Shown += async (_, _) =>
+        {
+            _startupWatch.Start();
+            _elapsedTimer.Start();
+            await InitializeAsync();
+        };
         FormClosing += (_, _) =>
         {
             _lifetime.Cancel();
+            _elapsedTimer.Stop();
             if (_serverOwned)
             {
                 try
@@ -126,6 +165,64 @@ internal sealed class LauncherForm : Form
         };
     }
 
+    private readonly List<double> _previousStartupTimes = new();
+
+    private static string StartupHistoryPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "AutoFlow", "startup-times.json");
+
+    private void LoadStartupHistory()
+    {
+        try
+        {
+            if (!File.Exists(StartupHistoryPath)) return;
+            var times = JsonSerializer.Deserialize<List<double>>(File.ReadAllText(StartupHistoryPath));
+            if (times is not null)
+                _previousStartupTimes.AddRange(times.Where(n => double.IsFinite(n) && n > 0 && n < 3600).TakeLast(8));
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        catch (JsonException) { }
+    }
+
+    private static string Clock(TimeSpan span) =>
+        $"{(int)span.TotalMinutes:00}:{span.Seconds:00}";
+
+    private void RefreshElapsedCaption()
+    {
+        if (IsDisposed || Disposing) return;
+        string history = _previousStartupTimes.Count == 0
+            ? "Previsão inicial: 1–4 min (primeira instalação pode levar mais)"
+            : $"Média neste PC: {Clock(TimeSpan.FromSeconds(_previousStartupTimes.Average()))} " +
+              $"({_previousStartupTimes.Count} início(s))";
+        _elapsedCaption.Text = $"Decorrido: {Clock(_startupWatch.Elapsed)}  ·  {history}";
+    }
+
+    private void SetProgress(int percentage, string phase)
+    {
+        _progress.Value = Math.Clamp(percentage, _progress.Value, 100);
+        _progressCaption.Text = $"{_progress.Value}%  ·  {phase}";
+        Status(phase);
+        RefreshElapsedCaption();
+    }
+
+    private void FinishStartup()
+    {
+        _startupWatch.Stop();
+        _elapsedTimer.Stop();
+        SetProgress(100, "AutoFlow pronto — painel e API ativos");
+        try
+        {
+            _previousStartupTimes.Add(_startupWatch.Elapsed.TotalSeconds);
+            var folder = Path.GetDirectoryName(StartupHistoryPath)!;
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(StartupHistoryPath,
+                JsonSerializer.Serialize(_previousStartupTimes.TakeLast(8)));
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
     private void Report(string message)
     {
         if (IsDisposed || Disposing) return;
@@ -136,6 +233,8 @@ internal sealed class LauncherForm : Form
             return;
         }
 
+        // Vite emits ANSI cursor/color sequences which are unreadable in WinForms.
+        message = Regex.Replace(message, @"\x1B\[[0-?]*[ -/]*[@-~]", "");
         string line = $"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}";
         _log.AppendText(line);
         if (_log.TextLength > 28000)
@@ -186,18 +285,46 @@ internal sealed class LauncherForm : Form
         return null;
     }
 
+    // Vite may bind localhost to ::1 on Windows while the API uses 127.0.0.1.
+    // Checking only IPv4 incorrectly reported both servers as unavailable.
     private static async Task<bool> PortUsedAsync(int port)
     {
-        using var client = new TcpClient();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(450));
+        foreach (var address in new[] { IPAddress.Loopback, IPAddress.IPv6Loopback })
+        {
+            using var client = new TcpClient(address.AddressFamily);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(400));
+            try
+            {
+                await client.ConnectAsync(address, port, timeout.Token);
+                return true;
+            }
+            catch (SocketException) { }
+            catch (OperationCanceledException) { }
+            catch (NotSupportedException) { }
+        }
+        return false;
+    }
+
+    private static readonly HttpClient HealthClient = new(
+        new HttpClientHandler { UseProxy = false })
+    {
+        Timeout = TimeSpan.FromSeconds(2)
+    };
+
+    private static async Task<bool> HttpReadyAsync(string url)
+    {
         try
         {
-            await client.ConnectAsync(IPAddress.Loopback, port, timeout.Token);
-            return true;
+            using var response = await HealthClient.GetAsync(url);
+            return response.IsSuccessStatusCode;
         }
-        catch (SocketException) { return false; }
-        catch (OperationCanceledException) { return false; }
+        catch (HttpRequestException) { return false; }
+        catch (TaskCanceledException) { return false; }
     }
+
+    private static async Task<bool> PanelReadyAsync() =>
+        await HttpReadyAsync("http://localhost:5173/") ||
+        await HttpReadyAsync("http://127.0.0.1:5173/");
 
     private sealed record CommandResult(int ExitCode, string Output, string Error)
     {
@@ -229,6 +356,13 @@ internal sealed class LauncherForm : Form
             await process.WaitForExitAsync(cancellation.Token);
             return new CommandResult(process.ExitCode, await output, await error);
         }
+        catch (OperationCanceledException) when (!_lifetime.IsCancellationRequested)
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { }
+            throw new TimeoutException(
+                $"O comando '{command}' excedeu {timeout.TotalMinutes:0.#} minuto(s). Verifique a conexão e tente novamente.");
+        }
         catch
         {
             try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
@@ -247,6 +381,8 @@ internal sealed class LauncherForm : Form
     {
         try
         {
+            LoadStartupHistory();
+            SetProgress(5, "Localizando instalação do AutoFlow...");
             var repository = FindRepository();
             if (repository is null)
             {
@@ -256,16 +392,21 @@ internal sealed class LauncherForm : Form
                 return;
             }
             Report("Projeto: " + repository);
+            SetProgress(12, "Conferindo se a API e o painel já estão ativos...");
 
             // Do not overwrite or race an existing running server or its database.
             var apiUsed = await PortUsedAsync(3333);
             var panelUsed = await PortUsedAsync(5173);
             if (apiUsed || panelUsed)
             {
-                if (apiUsed && panelUsed)
+                if (apiUsed && panelUsed &&
+                    await HttpReadyAsync("http://127.0.0.1:3333/health/ready") &&
+                    await PanelReadyAsync())
                 {
-                    Status("AutoFlow já está em execução");
+                    SetProgress(100, "AutoFlow já está em execução");
                     Report("Feche a execução anterior antes de atualizar o código.");
+                    _elapsedTimer.Stop();
+                    _startupWatch.Stop();
                     _open.Enabled = true;
                 }
                 else
@@ -276,7 +417,7 @@ internal sealed class LauncherForm : Form
                 return;
             }
 
-            Status("Verificando Git, Node.js e arquivos locais...");
+            SetProgress(20, "Verificando Git, Node.js e arquivos locais...");
             var gitVersion = await GitAsync(repository, "--version");
             if (!gitVersion.Ok)
                 throw new InvalidOperationException("O Git não está disponível no PATH.");
@@ -306,7 +447,7 @@ internal sealed class LauncherForm : Form
             }
             else
             {
-                Status("Consultando atualizações no GitHub...");
+                SetProgress(35, "Consultando atualizações no GitHub...");
                 var fetched = await GitAsync(repository, "fetch", "origin", "main");
                 if (!fetched.Ok)
                 {
@@ -327,7 +468,7 @@ internal sealed class LauncherForm : Form
                         }
                         else
                         {
-                            Status("Aplicando atualização de código (fast-forward)...");
+                            SetProgress(47, "Aplicando atualização segura do GitHub...");
                             var merge = await GitAsync(repository, "merge", "--ff-only", "FETCH_HEAD");
                             if (!merge.Ok)
                             {
@@ -352,9 +493,11 @@ internal sealed class LauncherForm : Form
                 }
             }
 
+            SetProgress(55, "Verificando dependências do projeto...");
             if (updated || !Directory.Exists(Path.Combine(repository, "node_modules")))
             {
-                Status("Instalando dependências do projeto...");
+                SetProgress(60, "Instalando dependências (npm ci)...");
+                Report("A instalação de dependências pode levar alguns minutos. Aguarde.");
                 Report("Executando npm ci sem modificar banco, fotos ou .env...");
                 var install = await NpmAsync(repository, "npm ci --no-audit --no-fund");
                 if (!install.Ok)
@@ -362,9 +505,10 @@ internal sealed class LauncherForm : Form
                 Report("Dependências instaladas.");
             }
 
+            SetProgress(76, "Verificando extensão do Brave...");
             if (updated || !File.Exists(Path.Combine(repository, "dist", "extension", "manifest.json")))
             {
-                Status("Preparando extensão do Brave...");
+                SetProgress(79, "Preparando extensão do Brave...");
                 var extension = await NpmAsync(repository, "npm run build:extension");
                 if (!extension.Ok)
                     throw new InvalidOperationException(
@@ -372,7 +516,7 @@ internal sealed class LauncherForm : Form
                 Report("Extensão atualizada. Recarregue-a em brave://extensions se já estava instalada.");
             }
 
-            Status("Iniciando API e painel...");
+            SetProgress(87, "Iniciando API e painel...");
             _server = new Process
             {
                 StartInfo = new ProcessStartInfo("cmd.exe")
@@ -400,30 +544,42 @@ internal sealed class LauncherForm : Form
             _server.BeginOutputReadLine();
             _server.BeginErrorReadLine();
 
-            using var timer = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-            timer.CancelAfter(TimeSpan.FromSeconds(90));
-            while (!timer.IsCancellationRequested)
+            SetProgress(93, "Aguardando API e painel ficarem prontos...");
+            Report("A primeira otimização das dependências pelo Vite pode demorar.");
+            // Do not use a single IPv4-only TCP probe: Vite often listens
+            // on IPv6 localhost (::1) on Windows. Require real HTTP responses.
+            // A 5-minute deadline gives first-run dependency optimization time.
+            var deadline = Stopwatch.StartNew();
+            while (deadline.Elapsed < TimeSpan.FromMinutes(5))
             {
+                _lifetime.Token.ThrowIfCancellationRequested();
                 if (_server.HasExited)
                     throw new InvalidOperationException(
                         "O servidor encerrou durante a inicialização. Consulte o registro abaixo.");
-                if (await PortUsedAsync(3333) && await PortUsedAsync(5173))
+                var apiReady = await HttpReadyAsync("http://127.0.0.1:3333/health/ready");
+                var panelReady = await PanelReadyAsync();
+                if (apiReady && panelReady)
                 {
-                    Status("AutoFlow pronto — painel e API ativos");
+                    FinishStartup();
                     Report("Iniciado com sucesso. Mantenha esta janela aberta.");
                     _open.Enabled = true;
                     OpenPanel();
                     return;
                 }
-                await Task.Delay(600, timer.Token);
+                await Task.Delay(750, _lifetime.Token);
             }
             throw new TimeoutException(
-                "A API ou o painel não iniciaram em 90 segundos. Verifique o registro de execução.");
+                "O AutoFlow não respondeu nas verificações HTTP após 5 minutos. " +
+                "Verifique se o painel abre em http://localhost:5173 e se a API responde " +
+                "em http://127.0.0.1:3333/health/ready. Confira o log para detalhes.");
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception error)
         {
+            _elapsedTimer.Stop();
+            _startupWatch.Stop();
             Status("Não foi possível iniciar o AutoFlow");
+            _progressCaption.Text = $"{_progress.Value}%  ·  Inicialização interrompida";
             Report(error.Message);
         }
     }
