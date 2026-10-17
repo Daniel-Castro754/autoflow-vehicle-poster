@@ -51,7 +51,10 @@ assert(view.includes('Sem trabalhos no período'))
 assert(view.includes('return'), 'Report load states should return meaningful UI')
 assert(view.includes("setReportError("), 'Successful refresh must clear stale warning')
 assert(view.includes('Promise.allSettled(['), 'Reports must retain partial results on API errors')
-assert(app.includes('Promise.allSettled(['), 'Initial dashboard must retain independent loaded resources')
+assert(
+  app.includes('Promise.allSettled(['),
+  'Initial dashboard must retain independent loaded resources',
+)
 assert(app.includes('AbortSignal.timeout(20_000)'), 'API requests must not hang indefinitely')
 
 const sections = [
