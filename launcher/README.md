@@ -88,7 +88,7 @@ mais tratado como totalmente pronto: se o proxy falhar, a atualização/reinicia
 será recomendada. A aplicação web continua exibindo os dados que conseguir carregar,
 mesmo quando um dos relatórios estiver indisponível.
 
-Na janela, confira `Inicializador v1.2` e a barra de progresso. Se
+Na janela, confira `Inicializador v1.3` e a barra de progresso. Se
 eles não aparecerem, o atalho ainda aponta para o `AutoFlow.exe` antigo:
 extraia novamente o executável mais recente do ZIP e substitua o anterior.
 
