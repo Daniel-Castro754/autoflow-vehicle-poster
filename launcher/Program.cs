@@ -36,7 +36,7 @@ internal sealed class LauncherForm : Form
 
     public LauncherForm()
     {
-        Text = "AutoFlow | Atualizar e iniciar · v1.2";
+        Text = "AutoFlow | Atualizar e iniciar · v1.3";
         Size = new Size(760, 560);
         MinimumSize = new Size(590, 480);
         StartPosition = FormStartPosition.CenterScreen;
@@ -62,7 +62,7 @@ internal sealed class LauncherForm : Form
 
         var header = new Label
         {
-            Text = "AutoFlow  |  Inicializador v1.2",
+            Text = "AutoFlow  |  Inicializador v1.3",
             Font = new Font("Segoe UI", 18, FontStyle.Bold),
             ForeColor = Color.FromArgb(50, 209, 165),
             TextAlign = ContentAlignment.MiddleLeft,
