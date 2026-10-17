@@ -2397,26 +2397,31 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
   const [reportNow] = useState(() => Date.now())
   const loadReports = useCallback(
     () =>
-      Promise.all([
+      Promise.allSettled([
         api<IssuePage>('/reports/issues?limit=50'),
         api<InventoryStats>('/vehicles/summary'),
         api<ReportPerformance>(
           `/reports/performance?period=${period}&seller=${encodeURIComponent(seller)}`,
         ),
-      ])
-        .then(([issueReport, inventory, reportPerformance]) => {
-          setIssues(issueReport.issues)
-          setIssueCursor(issueReport.page.nextCursor)
-          setIssuesHaveMore(issueReport.page.hasMore)
-          setInventorySummary(inventory)
-          setPerformance(reportPerformance)
-          setReportError('')
-        })
-        .catch((error) => {
-          setReportError(
-            error instanceof Error ? error.message : 'Não foi possível atualizar os relatórios.',
-          )
-        }),
+      ]).then(([issuesResult, inventoryResult, performanceResult]) => {
+        if (issuesResult.status === 'fulfilled') {
+          setIssues(issuesResult.value.issues)
+          setIssueCursor(issuesResult.value.page.nextCursor)
+          setIssuesHaveMore(issuesResult.value.page.hasMore)
+        }
+        if (inventoryResult.status === 'fulfilled') setInventorySummary(inventoryResult.value)
+        if (performanceResult.status === 'fulfilled') setPerformance(performanceResult.value)
+        const failed = [
+          ['ocorrências', issuesResult],
+          ['estoque', inventoryResult],
+          ['desempenho', performanceResult],
+        ].filter((entry) => (entry[1] as PromiseSettledResult<unknown>).status === 'rejected')
+        setReportError(
+          failed.length
+            ? `Falha ao carregar ${failed.map((entry) => entry[0]).join(', ')}. Confira a conexão com a API e tente novamente.`
+            : '',
+        )
+      }),
     [api, period, seller],
   )
   async function loadMoreIssues() {
