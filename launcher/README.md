@@ -67,6 +67,27 @@ Confira o PID com `Get-CimInstance Win32_Process -Filter "ProcessId=PID"`
 e feche **somente** o processo que você confirmou pertencer a uma
 instância antiga do AutoFlow.
 
+## Atualizar sem fechar os serviços manualmente
+
+Com o AutoFlow já em execução, clique em **Atualizar e reiniciar**. O launcher:
+
+1. Inspeciona as portas 3333/5173 e a árvore de processos via Windows.
+2. Só aceita encerrar processos `node.exe` vinculados à pasta deste projeto.
+3. Pede confirmação, alertando que anúncios em andamento podem ser interrompidos.
+4. Verifica novamente os PIDs antes de encerrá-los, sem terminar processos desconhecidos.
+5. Atualiza a `main` por fast-forward (sem apagar modificações locais), recompila a
+   extensão quando necessário e reinicia API e painel.
+
+Se algum processo não puder ser identificado com segurança, **nenhum processo será
+encerrado automaticamente**. O programa exibirá um diagnóstico e pedirá que você
+verifique manualmente. Não use essa função durante uma publicação em andamento.
+
+O launcher também verifica a API **através do proxy do painel** em
+`http://localhost:5173/api/health/ready`. Um painel que apenas mostra HTML não é
+mais tratado como totalmente pronto: se o proxy falhar, a atualização/reinicialização
+será recomendada. A aplicação web continua exibindo os dados que conseguir carregar,
+mesmo quando um dos relatórios estiver indisponível.
+
 Na janela, confira `Inicializador v1.2` e a barra de progresso. Se
 eles não aparecerem, o atalho ainda aponta para o `AutoFlow.exe` antigo:
 extraia novamente o executável mais recente do ZIP e substitua o anterior.
