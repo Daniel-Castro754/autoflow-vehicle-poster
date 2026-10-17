@@ -352,6 +352,28 @@ internal sealed class LauncherForm : Form
     private static async Task<bool> PanelReadyAsync() =>
         await PanelHttpReadyAsync("http://localhost:5173/") ||
         await PanelHttpReadyAsync("http://127.0.0.1:5173/");
+    private static async Task<bool> BrowserApiReadyAsync()
+    {
+        foreach (var url in new[]
+        {
+            "http://localhost:5173/api/health/ready",
+            "http://127.0.0.1:5173/api/health/ready"
+        })
+        {
+            try
+            {
+                using var response = await HealthClient.GetAsync(url);
+                if (!response.IsSuccessStatusCode) continue;
+                using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+                if (json.RootElement.TryGetProperty("status", out var state) &&
+                    state.GetString() == "ready") return true;
+            }
+            catch (HttpRequestException) { }
+            catch (TaskCanceledException) { }
+            catch (JsonException) { }
+        }
+        return false;
+    }
 
     // A healthy leftover half-instance may be reused safely. Never take over
     // a port which answers but does not match the AutoFlow app.
@@ -441,10 +463,17 @@ internal sealed class LauncherForm : Form
             var apiReady = apiPortUsed &&
                 await HttpReadyAsync("http://127.0.0.1:3333/health/ready");
             var panelReady = panelPortUsed && await PanelReadyAsync();
+            var browserApiReady = apiReady && panelReady && await BrowserApiReadyAsync();
             var startCommand = SelectStartCommand(
                 apiPortUsed, panelPortUsed, apiReady, panelReady);
+            if (startCommand == "already-running" && !browserApiReady)
+                startCommand = "blocked";
             Report($"API 3333: {(apiReady ? "AutoFlow saudável" : apiPortUsed ? "ocupada, sem resposta saudável" : "livre")}");
             Report($"Painel 5173: {(panelReady ? "AutoFlow saudável" : panelPortUsed ? "ocupada, sem painel válido" : "livre")}");
+            if (apiReady && panelReady)
+                Report(browserApiReady
+                    ? "Proxy /api: funcionando."
+                    : "Proxy /api: o navegador não consegue acessar a API pelo painel. Atualize/reinicie os serviços.");
 
             if (apiPortUsed || panelPortUsed) _update.Enabled = true;
             if (startCommand == "already-running")
@@ -641,7 +670,8 @@ internal sealed class LauncherForm : Form
                     "O servidor encerrou durante a inicialização. Consulte o registro abaixo.");
             var apiReady = await HttpReadyAsync("http://127.0.0.1:3333/health/ready");
             var panelReady = await PanelReadyAsync();
-            if (apiReady && panelReady)
+            var browserApiReady = apiReady && panelReady && await BrowserApiReadyAsync();
+            if (apiReady && panelReady && browserApiReady)
             {
                 FinishStartup();
                 Report("Iniciado com sucesso. Mantenha esta janela aberta.");
