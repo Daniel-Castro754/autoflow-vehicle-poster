@@ -47,6 +47,28 @@ internal static class LauncherNetworkSmoke
             throw new Exception("HTTP readiness check failed for an IPv6-only service.");
         await serverTask.WaitAsync(TimeSpan.FromSeconds(5));
         vite.Stop();
-        Console.WriteLine("OK: IPv6 localhost port and HTTP readiness detected.");
+
+        // Safe boot decisions: reuse a healthy half-instance but never take
+        // over an unrelated listener, or silently change code under a server.
+        var resolver = typeof(LauncherForm).GetMethod(
+            "SelectStartCommand", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new Exception("Missing startup resolution logic.");
+        string Resolve(bool apiPort, bool webPort, bool apiOk, bool webOk) =>
+            (string)resolver.Invoke(null, [apiPort, webPort, apiOk, webOk])!;
+        if (Resolve(false, false, false, false) != "npm run dev")
+            throw new Exception("Clean startup incorrectly resolved.");
+        if (Resolve(true, false, true, false) != "npm run dev:web")
+            throw new Exception("API-only recovery failed.");
+        if (Resolve(false, true, false, true) != "npm run dev:api")
+            throw new Exception("Panel-only recovery failed.");
+        if (Resolve(true, true, true, true) != "already-running")
+            throw new Exception("Two active services must be reused, not duplicated.");
+        if (Resolve(true, false, false, false) != "blocked" ||
+            Resolve(false, true, false, false) != "blocked" ||
+            Resolve(true, true, true, false) != "blocked" ||
+            Resolve(true, true, false, true) != "blocked")
+            throw new Exception("Unknown or unresponsive port cannot be replaced.");
+
+        Console.WriteLine("OK: IPv6 HTTP and safe partial AutoFlow recovery decisions.");
     }
 }
