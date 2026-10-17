@@ -23,6 +23,8 @@ internal sealed class LauncherForm : Form
     private readonly Label _status = new();
     private readonly TextBox _log = new();
     private readonly Button _open = new();
+    private readonly Button _update = new();
+    private bool _updating;
     private readonly ProgressBar _progress = new();
     private readonly Label _progressCaption = new();
     private readonly Label _elapsedCaption = new();
@@ -34,7 +36,7 @@ internal sealed class LauncherForm : Form
 
     public LauncherForm()
     {
-        Text = "AutoFlow | Atualizar e iniciar · v1.2";
+        Text = "AutoFlow | Atualizar e iniciar · v1.3";
         Size = new Size(760, 560);
         MinimumSize = new Size(590, 480);
         StartPosition = FormStartPosition.CenterScreen;
@@ -60,7 +62,7 @@ internal sealed class LauncherForm : Form
 
         var header = new Label
         {
-            Text = "AutoFlow  |  Inicializador v1.2",
+            Text = "AutoFlow  |  Inicializador v1.3",
             Font = new Font("Segoe UI", 18, FontStyle.Bold),
             ForeColor = Color.FromArgb(50, 209, 165),
             TextAlign = ContentAlignment.MiddleLeft,
@@ -131,7 +133,18 @@ internal sealed class LauncherForm : Form
         _open.Enabled = false;
         _open.Click += (_, _) => OpenPanel();
 
+        _update.Text = "Atualizar e reiniciar";
+        _update.AutoSize = true;
+        _update.Height = 35;
+        _update.BackColor = Color.FromArgb(44, 110, 96);
+        _update.ForeColor = Color.White;
+        _update.FlatStyle = FlatStyle.Flat;
+        _update.FlatAppearance.BorderSize = 0;
+        _update.Enabled = false;
+        _update.Click += async (_, _) => await UpdateAndRestartAsync();
+
         actions.Controls.Add(stop);
+        actions.Controls.Add(_update);
         actions.Controls.Add(_open);
         layout.Controls.Add(header, 0, 0);
         layout.Controls.Add(_status, 0, 1);
@@ -339,6 +352,28 @@ internal sealed class LauncherForm : Form
     private static async Task<bool> PanelReadyAsync() =>
         await PanelHttpReadyAsync("http://localhost:5173/") ||
         await PanelHttpReadyAsync("http://127.0.0.1:5173/");
+    private static async Task<bool> BrowserApiReadyAsync()
+    {
+        foreach (var url in new[]
+        {
+            "http://localhost:5173/api/health/ready",
+            "http://127.0.0.1:5173/api/health/ready"
+        })
+        {
+            try
+            {
+                using var response = await HealthClient.GetAsync(url);
+                if (!response.IsSuccessStatusCode) continue;
+                using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+                if (json.RootElement.TryGetProperty("status", out var state) &&
+                    state.GetString() == "ready") return true;
+            }
+            catch (HttpRequestException) { }
+            catch (TaskCanceledException) { }
+            catch (JsonException) { }
+        }
+        return false;
+    }
 
     // A healthy leftover half-instance may be reused safely. Never take over
     // a port which answers but does not match the AutoFlow app.
@@ -428,11 +463,19 @@ internal sealed class LauncherForm : Form
             var apiReady = apiPortUsed &&
                 await HttpReadyAsync("http://127.0.0.1:3333/health/ready");
             var panelReady = panelPortUsed && await PanelReadyAsync();
+            var browserApiReady = apiReady && panelReady && await BrowserApiReadyAsync();
             var startCommand = SelectStartCommand(
                 apiPortUsed, panelPortUsed, apiReady, panelReady);
+            if (startCommand == "already-running" && !browserApiReady)
+                startCommand = "blocked";
             Report($"API 3333: {(apiReady ? "AutoFlow saudável" : apiPortUsed ? "ocupada, sem resposta saudável" : "livre")}");
             Report($"Painel 5173: {(panelReady ? "AutoFlow saudável" : panelPortUsed ? "ocupada, sem painel válido" : "livre")}");
+            if (apiReady && panelReady)
+                Report(browserApiReady
+                    ? "Proxy /api: funcionando."
+                    : "Proxy /api: o navegador não consegue acessar a API pelo painel. Atualize/reinicie os serviços.");
 
+            if (apiPortUsed || panelPortUsed) _update.Enabled = true;
             if (startCommand == "already-running")
             {
                 SetProgress(100, "AutoFlow já está em execução");
@@ -441,6 +484,7 @@ internal sealed class LauncherForm : Form
                 _elapsedTimer.Stop();
                 _startupWatch.Stop();
                 _open.Enabled = true;
+                _update.Enabled = true;
                 return;
             }
             if (startCommand == "blocked")
@@ -603,7 +647,10 @@ internal sealed class LauncherForm : Form
         {
             if (!string.IsNullOrWhiteSpace(line.Data)) Report(line.Data);
         };
-        _server.Exited += (_, _) => Status("A execução do AutoFlow foi encerrada.");
+        _server.Exited += (_, _) =>
+        {
+            if (!_updating) Status("A execução do AutoFlow foi encerrada.");
+        };
         if (!_server.Start()) throw new InvalidOperationException("npm run dev não iniciou.");
         _serverOwned = true;
         _server.BeginOutputReadLine();
@@ -623,11 +670,13 @@ internal sealed class LauncherForm : Form
                     "O servidor encerrou durante a inicialização. Consulte o registro abaixo.");
             var apiReady = await HttpReadyAsync("http://127.0.0.1:3333/health/ready");
             var panelReady = await PanelReadyAsync();
-            if (apiReady && panelReady)
+            var browserApiReady = apiReady && panelReady && await BrowserApiReadyAsync();
+            if (apiReady && panelReady && browserApiReady)
             {
                 FinishStartup();
                 Report("Iniciado com sucesso. Mantenha esta janela aberta.");
                 _open.Enabled = true;
+                _update.Enabled = true;
                 OpenPanel();
                 return;
             }
@@ -637,6 +686,88 @@ internal sealed class LauncherForm : Form
             "O AutoFlow não respondeu nas verificações HTTP após 5 minutos. " +
             "Verifique se o painel abre em http://localhost:5173 e se a API responde " +
             "em http://127.0.0.1:3333/health/ready. Confira o log para detalhes.");
+    }
+
+    private async Task UpdateAndRestartAsync()
+    {
+        if (_updating) return;
+        var repository = FindRepository();
+        if (repository is null)
+        {
+            Report("Não encontrei a pasta de instalação para atualizar.");
+            return;
+        }
+        _updating = true;
+        _update.Enabled = false;
+        try
+        {
+            Status("Identificando processos do AutoFlow...");
+            Report("Verificando os responsáveis pelas portas antes de encerrar qualquer processo.");
+            var inspection = await AutoFlowProcessManager.InspectAsync(repository);
+            if (!inspection.Safe)
+            {
+                Report(inspection.Reason);
+                Status("Atualização pausada: processo não identificado");
+                MessageBox.Show(this,
+                    inspection.Reason + "\n\nNenhum processo foi encerrado. " +
+                    "Confira o processo ou envie o log para diagnóstico.",
+                    "AutoFlow | Proteção de processos", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (inspection.HasListeners)
+            {
+                var ports = string.Join(", ", inspection.Servers.Select(item => item.Port).Distinct());
+                var confirmation = MessageBox.Show(this,
+                    $"Os serviços AutoFlow nas portas {ports} serão encerrados para atualizar e reiniciar.\n\n" +
+                    "A operação pode interromper um anúncio sendo preenchido ou publicado. " +
+                    "Confirme que não há publicação em andamento.\n\n" +
+                    "Banco, fotos e configurações serão preservados. Deseja continuar?",
+                    "AutoFlow | Atualizar e reiniciar",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+                if (confirmation != DialogResult.Yes)
+                {
+                    Report("Atualização cancelada. Processos mantidos.");
+                    return;
+                }
+                SetProgress(Math.Max(_progress.Value, 14), "Encerrando instâncias verificadas...");
+                var stopped = await AutoFlowProcessManager.StopVerifiedAsync(repository, inspection);
+                if (!stopped.Success)
+                {
+                    Report(stopped.Message);
+                    Status("Não foi possível encerrar com segurança");
+                    return;
+                }
+                Report("Instâncias AutoFlow identificadas foram encerradas.");
+                if (_serverOwned)
+                {
+                    try
+                    {
+                        if (_server is { HasExited: false })
+                            _server.Kill(entireProcessTree: true);
+                    }
+                    catch (InvalidOperationException) { }
+                    catch (System.ComponentModel.Win32Exception) { }
+                }
+                _serverOwned = false;
+            }
+            _open.Enabled = false;
+            _progress.Value = 0;
+            _progressCaption.Text = "0%  ·  Preparando atualização";
+            _startupWatch.Restart();
+            _elapsedTimer.Start();
+            Report("Verificando GitHub e reiniciando o AutoFlow...");
+            await InitializeAsync();
+        }
+        catch (Exception error)
+        {
+            Status("Falha ao atualizar o AutoFlow");
+            Report(error.Message);
+        }
+        finally
+        {
+            _updating = false;
+            _update.Enabled = true;
+        }
     }
 
     private static string Tail(string value) =>

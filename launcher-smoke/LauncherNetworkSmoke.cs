@@ -69,6 +69,25 @@ internal static class LauncherNetworkSmoke
             Resolve(true, true, false, true) != "blocked")
             throw new Exception("Unknown or unresponsive port cannot be replaced.");
 
-        Console.WriteLine("OK: IPv6 HTTP and safe partial AutoFlow recovery decisions.");
+        // A process from another application must never be terminated simply
+        // because it listens on the same port as our development server.
+        var scanBefore = await AutoFlowProcessManager.InspectAsync(Environment.CurrentDirectory);
+        if (!scanBefore.HasListeners)
+        {
+            var foreign = new TcpListener(IPAddress.Loopback, 3333);
+            try
+            {
+                foreign.Start();
+                var scan = await AutoFlowProcessManager.InspectAsync(Environment.CurrentDirectory);
+                if (scan.Safe || !scan.Servers.Any(entry => entry.Port == 3333))
+                    throw new Exception("Foreign process on 3333 was not blocked.");
+            }
+            finally
+            {
+                foreign.Stop();
+            }
+        }
+
+        Console.WriteLine("OK: IPv6 HTTP, startup decisions and foreign-process protection.");
     }
 }

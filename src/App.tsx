@@ -148,14 +148,28 @@ class ApiError extends Error {
   }
 }
 async function request<T>(token: string, path: string, options: RequestInit = {}) {
-  const response = await fetch(`${API}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      ...options.headers,
-    },
-  })
+  let response: Response
+  try {
+    response = await fetch(`${API}${path}`, {
+      ...options,
+      signal: options.signal
+        ? AbortSignal.any([options.signal, AbortSignal.timeout(20_000)])
+        : AbortSignal.timeout(20_000),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        ...options.headers,
+      },
+    })
+  } catch (error) {
+    const timedOut = error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name)
+    throw new ApiError(
+      timedOut
+        ? 'A API demorou para responder. Verifique se o AutoFlow está em execução e tente novamente.'
+        : 'Não foi possível conectar à API. Confira os serviços 3333/5173 e a conexão do painel.',
+      0,
+    )
+  }
   const data = (await response.json().catch(() => ({}))) as { error?: string; missing?: unknown }
   if (!response.ok)
     throw new ApiError(
@@ -329,7 +343,9 @@ export default function App() {
   useEffect(() => {
     if (!token) return
     let active = true
-    void Promise.all([
+    // Independent resources must not hide a successfully loaded account when
+    // inventory, reports or team endpoints fail. Always leave loading state.
+    void Promise.allSettled([
       request<{ vehicles: Vehicle[] }>(token, '/vehicles/paged?page=1&limit=25'),
       request<OperationalStats>(token, '/stats/global'),
       request<{ organization: { name: string } }>(token, '/settings'),
@@ -338,23 +354,28 @@ export default function App() {
     ])
       .then(([stock, stats, settings, teamData, me]) => {
         if (!active) return
-        setVehicles(stock.vehicles)
-        setOperationalStats(stats)
-        setOrganizationName(settings.organization.name)
-        setTeam(teamData.users)
-        setAccounts(teamData.accounts)
-        setCurrentUser(me.user)
-      })
-      .catch((error) => {
-        if (!active) return
-        if (error instanceof ApiError && error.status === 401)
-          clearSession('Sua sessão expirou. Entre novamente.')
-        else
-          setToast(
-            error instanceof Error
-              ? error.message
-              : 'Não foi possível carregar os dados do painel.',
+        if (stock.status === 'fulfilled') setVehicles(stock.value.vehicles)
+        if (stats.status === 'fulfilled') setOperationalStats(stats.value)
+        if (settings.status === 'fulfilled') setOrganizationName(settings.value.organization.name)
+        if (teamData.status === 'fulfilled') {
+          setTeam(teamData.value.users)
+          setAccounts(teamData.value.accounts)
+        }
+        if (me.status === 'fulfilled') setCurrentUser(me.value.user)
+        const failures = [stock, stats, settings, teamData, me].filter(
+          (result) => result.status === 'rejected',
+        ) as PromiseRejectedResult[]
+        if (
+          failures.some(
+            (result) => result.reason instanceof ApiError && result.reason.status === 401,
           )
+        ) {
+          clearSession('Sua sessão expirou. Entre novamente.')
+        } else if (failures.length) {
+          const reason: unknown = failures[0]?.reason
+          const detail = reason instanceof Error ? reason.message : 'Verifique a conexão da API.'
+          setToast(`Alguns dados não foram carregados (${failures.length}/5). ${detail}`)
+        }
       })
       .finally(() => {
         if (active) setLoading(false)
@@ -675,7 +696,7 @@ export default function App() {
                 : ''}
             </span>
             <div>
-              <strong>{currentUser?.name || 'Carregando...'}</strong>
+              <strong>{currentUser?.name || 'Conta indisponível — tente recarregar'}</strong>
               <small>
                 {currentUser?.role === 'admin'
                   ? 'Administrador'
