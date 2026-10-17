@@ -109,6 +109,9 @@ async function expectMissingSecretFailure() {
 
 try {
   await waitForServer()
+  const browserHealth = await fetch(base + '/health/ready')
+  assert.equal(browserHealth.status, 200, 'Vite /api proxy needs a public readiness route')
+  assert.equal((await browserHealth.json()).status, 'ready')
   const migrationDb = new DatabaseSync(join(dataDir, 'autoflow.db'), { readOnly: true })
   const migrations = migrationDb
     .prepare('SELECT version,checksum FROM schema_migrations ORDER BY version')
