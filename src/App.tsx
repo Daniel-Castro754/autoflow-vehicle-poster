@@ -692,7 +692,7 @@ export default function App() {
                 : ''}
             </span>
             <div>
-              <strong>{currentUser?.name || 'Carregando...'}</strong>
+              <strong>{currentUser?.name || 'Conta indisponível — tente recarregar'}</strong>
               <small>
                 {currentUser?.role === 'admin'
                   ? 'Administrador'
