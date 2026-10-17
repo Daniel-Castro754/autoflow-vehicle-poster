@@ -434,7 +434,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     const url = new URL(req.url || '/', 'http://localhost')
     if (req.method === 'GET' && url.pathname === '/health/live')
       return send(res, 200, { status: 'alive', timestamp: new Date().toISOString() })
-    if (req.method === 'GET' && url.pathname === '/health/ready') {
+    // Served both directly and through the Vite /api proxy. The launcher
+    // checks the browser-to-API path, not just two occupied TCP ports.
+    if (
+      req.method === 'GET' &&
+      (url.pathname === '/health/ready' || url.pathname === '/api/health/ready')
+    ) {
       try {
         db.prepare('SELECT 1 value').get()
         return send(res, 200, { status: 'ready', timestamp: new Date().toISOString() })
