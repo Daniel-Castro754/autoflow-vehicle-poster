@@ -46,8 +46,30 @@ verificação em máquinas cujo Vite escutasse no endereço IPv6 `::1`.
 O novo launcher usa **respostas HTTP reais**, prazo maior e erros explicativos.
 
 Se o GitHub estiver inacessível, mantém o código local e tenta iniciar. Se houver alterações
-locais, ou a branch atual não for `main`, **não atualiza**. Caso o AutoFlow já esteja
-rodando, não mexe em arquivos nem inicia uma segunda instância.
+locais, ou a branch atual não for `main`, **não atualiza**. Caso a API e o painel já estejam
+rodando e saudáveis, não mexe em arquivos nem inicia uma segunda instância.
+Quando só a API estiver saudável, inicia apenas `npm run dev:web`; quando
+só o painel estiver saudável, inicia apenas `npm run dev:api`. Nesses
+casos, pula a atualização dos arquivos para não modificar o código de uma
+instância ativa.
+
+Se a porta 3333 ou 5173 estiver ocupada mas não responder como AutoFlow,
+o launcher **não encerra processos às cegas**: ele informa qual serviço
+falhou e mostra comandos para identificar o processo. Se necessário, abra
+PowerShell e execute:
+
+```powershell
+Get-NetTCPConnection -State Listen -LocalPort 3333,5173 -ErrorAction SilentlyContinue |
+  Select-Object LocalPort, OwningProcess
+```
+
+Confira o PID com `Get-CimInstance Win32_Process -Filter "ProcessId=PID"`
+e feche **somente** o processo que você confirmou pertencer a uma
+instância antiga do AutoFlow.
+
+Na janela, confira `Inicializador v1.2` e a barra de progresso. Se
+eles não aparecerem, o atalho ainda aponta para o `AutoFlow.exe` antigo:
+extraia novamente o executável mais recente do ZIP e substitua o anterior.
 
 O banco SQLite, as fotos, os backups, `.env` e as credenciais locais **não são apagados
 nem substituídos pelo inicializador**. Atualizações normais do backend ainda podem aplicar
