@@ -365,12 +365,16 @@ export default function App() {
         const failures = [stock, stats, settings, teamData, me].filter(
           (result) => result.status === 'rejected',
         ) as PromiseRejectedResult[]
-        if (failures.some((result) => result.reason instanceof ApiError && result.reason.status === 401)) {
+        if (
+          failures.some(
+            (result) => result.reason instanceof ApiError && result.reason.status === 401,
+          )
+        ) {
           clearSession('Sua sessão expirou. Entre novamente.')
         } else if (failures.length) {
-          setToast(
-            `Alguns dados não foram carregados (${failures.length}/5). ${failures[0].reason instanceof Error ? failures[0].reason.message : 'Verifique a conexão da API.'}`,
-          )
+          const reason: unknown = failures[0]?.reason
+          const detail = reason instanceof Error ? reason.message : 'Verifique a conexão da API.'
+          setToast(`Alguns dados não foram carregados (${failures.length}/5). ${detail}`)
         }
       })
       .finally(() => {
