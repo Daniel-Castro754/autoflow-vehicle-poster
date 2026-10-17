@@ -34,7 +34,7 @@ internal sealed class LauncherForm : Form
 
     public LauncherForm()
     {
-        Text = "AutoFlow | Atualizar e iniciar";
+        Text = "AutoFlow | Atualizar e iniciar · v1.2";
         Size = new Size(760, 560);
         MinimumSize = new Size(590, 480);
         StartPosition = FormStartPosition.CenterScreen;
@@ -60,7 +60,7 @@ internal sealed class LauncherForm : Form
 
         var header = new Label
         {
-            Text = "AutoFlow  |  Inicializador",
+            Text = "AutoFlow  |  Inicializador v1.2",
             Font = new Font("Segoe UI", 18, FontStyle.Bold),
             ForeColor = Color.FromArgb(50, 209, 165),
             TextAlign = ContentAlignment.MiddleLeft,
@@ -322,9 +322,36 @@ internal sealed class LauncherForm : Form
         catch (TaskCanceledException) { return false; }
     }
 
+    private static async Task<bool> PanelHttpReadyAsync(string url)
+    {
+        try
+        {
+            using var response = await HealthClient.GetAsync(url);
+            if (!response.IsSuccessStatusCode) return false;
+            var html = await response.Content.ReadAsStringAsync();
+            return html.Contains("AutoFlow", StringComparison.OrdinalIgnoreCase) &&
+                html.Contains("id=\"root\"", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (HttpRequestException) { return false; }
+        catch (TaskCanceledException) { return false; }
+    }
+
     private static async Task<bool> PanelReadyAsync() =>
-        await HttpReadyAsync("http://localhost:5173/") ||
-        await HttpReadyAsync("http://127.0.0.1:5173/");
+        await PanelHttpReadyAsync("http://localhost:5173/") ||
+        await PanelHttpReadyAsync("http://127.0.0.1:5173/");
+
+    // A healthy leftover half-instance may be reused safely. Never take over
+    // a port which answers but does not match the AutoFlow app.
+    private static string SelectStartCommand(
+        bool apiPortUsed, bool panelPortUsed, bool apiReady, bool panelReady)
+    {
+        if (apiReady && panelReady) return "already-running";
+        if ((apiPortUsed && !apiReady) || (panelPortUsed && !panelReady))
+            return "blocked";
+        if (apiReady && !panelPortUsed) return "npm run dev:web";
+        if (panelReady && !apiPortUsed) return "npm run dev:api";
+        return "npm run dev";
+    }
 
     private sealed record CommandResult(int ExitCode, string Output, string Error)
     {
@@ -394,26 +421,45 @@ internal sealed class LauncherForm : Form
             Report("Projeto: " + repository);
             SetProgress(12, "Conferindo se a API e o painel já estão ativos...");
 
-            // Do not overwrite or race an existing running server or its database.
-            var apiUsed = await PortUsedAsync(3333);
-            var panelUsed = await PortUsedAsync(5173);
-            if (apiUsed || panelUsed)
+            // No automatic code or dependency updates while either service is
+            // running, since this could replace files used by a live process.
+            var apiPortUsed = await PortUsedAsync(3333);
+            var panelPortUsed = await PortUsedAsync(5173);
+            var apiReady = apiPortUsed &&
+                await HttpReadyAsync("http://127.0.0.1:3333/health/ready");
+            var panelReady = panelPortUsed && await PanelReadyAsync();
+            var startCommand = SelectStartCommand(
+                apiPortUsed, panelPortUsed, apiReady, panelReady);
+            Report($"API 3333: {(apiReady ? "AutoFlow saudável" : apiPortUsed ? "ocupada, sem resposta saudável" : "livre")}");
+            Report($"Painel 5173: {(panelReady ? "AutoFlow saudável" : panelPortUsed ? "ocupada, sem painel válido" : "livre")}");
+
+            if (startCommand == "already-running")
             {
-                if (apiUsed && panelUsed &&
-                    await HttpReadyAsync("http://127.0.0.1:3333/health/ready") &&
-                    await PanelReadyAsync())
-                {
-                    SetProgress(100, "AutoFlow já está em execução");
-                    Report("Feche a execução anterior antes de atualizar o código.");
-                    _elapsedTimer.Stop();
-                    _startupWatch.Stop();
-                    _open.Enabled = true;
-                }
-                else
-                {
-                    Status("Uma porta está ocupada; inicialização pausada");
-                    Report("Verifique os programas usando 3333 ou 5173 e tente novamente.");
-                }
+                SetProgress(100, "AutoFlow já está em execução");
+                Report("API e painel estão disponíveis. Nenhuma segunda instância foi iniciada.");
+                Report("Para atualizar o código, feche primeiro os processos em execução.");
+                _elapsedTimer.Stop();
+                _startupWatch.Stop();
+                _open.Enabled = true;
+                return;
+            }
+            if (startCommand == "blocked")
+            {
+                _elapsedTimer.Stop();
+                _startupWatch.Stop();
+                SetProgress(12, "Uma porta ocupada não respondeu como AutoFlow");
+                Report("Por segurança não encerrei nem substituí processos existentes.");
+                Report("No PowerShell, descubra o processo: Get-NetTCPConnection -State Listen -LocalPort 3333,5173 -ErrorAction SilentlyContinue | Select-Object LocalPort,OwningProcess");
+                Report("Depois verifique cada PID: Get-CimInstance Win32_Process -Filter \"ProcessId=PID\" | Select-Object ProcessId,Name,CommandLine");
+                Report("Feche apenas processos identificados como AutoFlow e abra este EXE novamente.");
+                return;
+            }
+            if (startCommand != "npm run dev")
+            {
+                Report(startCommand == "npm run dev:web"
+                    ? "API já está saudável. Recuperando apenas o painel, sem alterar banco ou dependências."
+                    : "Painel já está saudável. Recuperando apenas a API, sem alterar banco ou dependências.");
+                await StartServerAndWaitAsync(repository, startCommand);
                 return;
             }
 
@@ -516,62 +562,7 @@ internal sealed class LauncherForm : Form
                 Report("Extensão atualizada. Recarregue-a em brave://extensions se já estava instalada.");
             }
 
-            SetProgress(87, "Iniciando API e painel...");
-            _server = new Process
-            {
-                StartInfo = new ProcessStartInfo("cmd.exe")
-                {
-                    Arguments = "/d /c npm run dev",
-                    WorkingDirectory = repository,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true
-                },
-                EnableRaisingEvents = true
-            };
-            _server.OutputDataReceived += (_, line) =>
-            {
-                if (!string.IsNullOrWhiteSpace(line.Data)) Report(line.Data);
-            };
-            _server.ErrorDataReceived += (_, line) =>
-            {
-                if (!string.IsNullOrWhiteSpace(line.Data)) Report(line.Data);
-            };
-            _server.Exited += (_, _) => Status("A execução do AutoFlow foi encerrada.");
-            if (!_server.Start()) throw new InvalidOperationException("npm run dev não iniciou.");
-            _serverOwned = true;
-            _server.BeginOutputReadLine();
-            _server.BeginErrorReadLine();
-
-            SetProgress(93, "Aguardando API e painel ficarem prontos...");
-            Report("A primeira otimização das dependências pelo Vite pode demorar.");
-            // Do not use a single IPv4-only TCP probe: Vite often listens
-            // on IPv6 localhost (::1) on Windows. Require real HTTP responses.
-            // A 5-minute deadline gives first-run dependency optimization time.
-            var deadline = Stopwatch.StartNew();
-            while (deadline.Elapsed < TimeSpan.FromMinutes(5))
-            {
-                _lifetime.Token.ThrowIfCancellationRequested();
-                if (_server.HasExited)
-                    throw new InvalidOperationException(
-                        "O servidor encerrou durante a inicialização. Consulte o registro abaixo.");
-                var apiReady = await HttpReadyAsync("http://127.0.0.1:3333/health/ready");
-                var panelReady = await PanelReadyAsync();
-                if (apiReady && panelReady)
-                {
-                    FinishStartup();
-                    Report("Iniciado com sucesso. Mantenha esta janela aberta.");
-                    _open.Enabled = true;
-                    OpenPanel();
-                    return;
-                }
-                await Task.Delay(750, _lifetime.Token);
-            }
-            throw new TimeoutException(
-                "O AutoFlow não respondeu nas verificações HTTP após 5 minutos. " +
-                "Verifique se o painel abre em http://localhost:5173 e se a API responde " +
-                "em http://127.0.0.1:3333/health/ready. Confira o log para detalhes.");
+            await StartServerAndWaitAsync(repository, "npm run dev");
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception error)
@@ -582,6 +573,70 @@ internal sealed class LauncherForm : Form
             _progressCaption.Text = $"{_progress.Value}%  ·  Inicialização interrompida";
             Report(error.Message);
         }
+    }
+
+    private async Task StartServerAndWaitAsync(string repository, string startupCommand)
+    {
+        SetProgress(87, startupCommand == "npm run dev"
+            ? "Iniciando API e painel..."
+            : startupCommand == "npm run dev:web"
+                ? "Recuperando painel..."
+                : "Recuperando API...");
+        _server = new Process
+        {
+            StartInfo = new ProcessStartInfo("cmd.exe")
+            {
+                Arguments = "/d /c " + startupCommand,
+                WorkingDirectory = repository,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            },
+            EnableRaisingEvents = true
+        };
+        _server.OutputDataReceived += (_, line) =>
+        {
+            if (!string.IsNullOrWhiteSpace(line.Data)) Report(line.Data);
+        };
+        _server.ErrorDataReceived += (_, line) =>
+        {
+            if (!string.IsNullOrWhiteSpace(line.Data)) Report(line.Data);
+        };
+        _server.Exited += (_, _) => Status("A execução do AutoFlow foi encerrada.");
+        if (!_server.Start()) throw new InvalidOperationException("npm run dev não iniciou.");
+        _serverOwned = true;
+        _server.BeginOutputReadLine();
+        _server.BeginErrorReadLine();
+
+        SetProgress(93, "Aguardando API e painel ficarem prontos...");
+        Report("A primeira otimização das dependências pelo Vite pode demorar.");
+        // Do not use a single IPv4-only TCP probe: Vite often listens
+        // on IPv6 localhost (::1) on Windows. Require real HTTP responses.
+        // A 5-minute deadline gives first-run dependency optimization time.
+        var deadline = Stopwatch.StartNew();
+        while (deadline.Elapsed < TimeSpan.FromMinutes(5))
+        {
+            _lifetime.Token.ThrowIfCancellationRequested();
+            if (_server.HasExited)
+                throw new InvalidOperationException(
+                    "O servidor encerrou durante a inicialização. Consulte o registro abaixo.");
+            var apiReady = await HttpReadyAsync("http://127.0.0.1:3333/health/ready");
+            var panelReady = await PanelReadyAsync();
+            if (apiReady && panelReady)
+            {
+                FinishStartup();
+                Report("Iniciado com sucesso. Mantenha esta janela aberta.");
+                _open.Enabled = true;
+                OpenPanel();
+                return;
+            }
+            await Task.Delay(750, _lifetime.Token);
+        }
+        throw new TimeoutException(
+            "O AutoFlow não respondeu nas verificações HTTP após 5 minutos. " +
+            "Verifique se o painel abre em http://localhost:5173 e se a API responde " +
+            "em http://127.0.0.1:3333/health/ready. Confira o log para detalhes.");
     }
 
     private static string Tail(string value) =>
