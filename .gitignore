@@ -25,3 +25,6 @@ data-*/
 
 # Exportação criptografada de recuperação (guardar fora do repositório)
 *.autoflow-recovery
+
+# Temporary launcher dependency staging/rollback (never commit local dependencies)
+.autoflow-launcher-recovery/

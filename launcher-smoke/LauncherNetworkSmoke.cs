@@ -133,6 +133,55 @@ internal static class LauncherNetworkSmoke
                 Directory.Delete(logFolder, recursive: true);
         }
 
-        Console.WriteLine("OK: IPv6 HTTP, startup decisions, foreign-process protection, single instance and log rotation.");
+        // Dependency installation must not clobber a working node_modules
+        // when staged npm ci fails. Recover a crash between atomic moves.
+        var dependencyRoot = Path.Combine(Path.GetTempPath(),
+            "autoflow-dependency-smoke-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dependencyRoot);
+            File.WriteAllText(Path.Combine(dependencyRoot, "package.json"), "{}");
+            File.WriteAllText(Path.Combine(dependencyRoot, "package-lock.json"), "{}");
+            var active = Path.Combine(dependencyRoot, "node_modules");
+            Directory.CreateDirectory(active);
+            File.WriteAllText(Path.Combine(active, "old.txt"), "original");
+            var failed = false;
+            try
+            {
+                await LauncherDependencyRecovery.InstallAsync(dependencyRoot, _ =>
+                    throw new IOException("simulated npm ci failure"));
+            }
+            catch (IOException) { failed = true; }
+            if (!failed || !File.Exists(Path.Combine(active, "old.txt")))
+                throw new Exception("Failed staging modified existing dependencies.");
+
+            await LauncherDependencyRecovery.InstallAsync(dependencyRoot, stage =>
+            {
+                var modules = Path.Combine(stage, "node_modules");
+                Directory.CreateDirectory(modules);
+                File.WriteAllText(Path.Combine(modules, "new.txt"), "updated");
+                return Task.CompletedTask;
+            });
+            if (!File.Exists(Path.Combine(active, "new.txt")) ||
+                !LauncherDependencyRecovery.HasPreservedPrevious(dependencyRoot))
+                throw new Exception("Completed staging did not preserve old dependencies.");
+            if (!LauncherDependencyRecovery.CompleteSuccessfulStartup(dependencyRoot) ||
+                LauncherDependencyRecovery.HasPreservedPrevious(dependencyRoot))
+                throw new Exception("Previous dependencies not cleaned after readiness.");
+
+            var recovery = Path.Combine(dependencyRoot,
+                ".autoflow-launcher-recovery", "node_modules.previous");
+            Directory.Move(active, recovery);
+            if (!LauncherDependencyRecovery.RecoverInterruptedSwap(dependencyRoot) ||
+                !File.Exists(Path.Combine(active, "new.txt")))
+                throw new Exception("Interrupted folder swap could not be recovered.");
+        }
+        finally
+        {
+            if (Directory.Exists(dependencyRoot))
+                Directory.Delete(dependencyRoot, recursive: true);
+        }
+
+        Console.WriteLine("OK: IPv6 HTTP, startup decisions, foreign processes, single instance, log rotation and dependency staging.");
     }
 }

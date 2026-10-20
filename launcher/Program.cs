@@ -595,19 +595,25 @@ internal sealed class LauncherForm : Form
             }
 
             SetProgress(55, "Verificando dependências do projeto...");
+            if (LauncherDependencyRecovery.RecoverInterruptedSwap(repository))
+                Report("Instalação interrompida detectada: dependências anteriores restauradas.");
             if (updated || !Directory.Exists(Path.Combine(repository, "node_modules")))
             {
-                SetProgress(60, "Instalando dependências (npm ci)...");
-                Report("A instalação de dependências pode levar alguns minutos. Aguarde.");
-                Report("Executando npm ci sem modificar banco, fotos ou .env...");
-                var install = await NpmAsync(repository, "npm ci --no-audit --no-fund");
-                if (!install.Ok)
-                    throw new InvalidOperationException("npm ci falhou: " + Tail(install.Summary));
-                Report("Dependências instaladas.");
+                SetProgress(60, "Preparando dependências sem alterar a instalação ativa...");
+                Report("Executando npm ci em pasta isolada. Dependências atuais serão preservadas até concluir.");
+                await LauncherDependencyRecovery.InstallAsync(repository, async stage =>
+                {
+                    var install = await NpmAsync(stage, "npm ci --no-audit --no-fund");
+                    if (!install.Ok)
+                        throw new InvalidOperationException("npm ci falhou no staging: " + Tail(install.Summary));
+                });
+                Report("Novas dependências ativadas. Cópia anterior preservada até a verificação da API e do painel.");
             }
 
             SetProgress(76, "Verificando extensão do Brave...");
-            if (updated || !File.Exists(Path.Combine(repository, "dist", "extension", "manifest.json")))
+            if (updated ||
+                !File.Exists(Path.Combine(repository, "dist", "extension", "manifest.json")) ||
+                File.Exists(Path.Combine(repository, "dist", ".autoflow-extension-build-pending")))
             {
                 SetProgress(79, "Preparando extensão do Brave...");
                 var extension = await NpmAsync(repository, "npm run build:extension");
@@ -673,6 +679,8 @@ internal sealed class LauncherForm : Form
         // on IPv6 localhost (::1) on Windows. Require real HTTP responses.
         // A 5-minute deadline gives first-run dependency optimization time.
         var deadline = Stopwatch.StartNew();
+        try
+        {
         while (deadline.Elapsed < TimeSpan.FromMinutes(5))
         {
             _lifetime.Token.ThrowIfCancellationRequested();
@@ -689,6 +697,20 @@ internal sealed class LauncherForm : Form
                 _open.Enabled = true;
                 _update.Enabled = true;
                 OpenPanel();
+                // Removing the previous tree can be slow on Windows. It must
+                // never block the working UI or turn a healthy boot into failure.
+                if (LauncherDependencyRecovery.HasPreservedPrevious(repository))
+                {
+                    try
+                    {
+                        await Task.Run(() => LauncherDependencyRecovery.CompleteSuccessfulStartup(repository));
+                        Report("Cópia temporária de dependências antigas removida após readiness.");
+                    }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                    {
+                        Report("Dependências anteriores preservadas para inspeção: " + error.Message);
+                    }
+                }
                 return;
             }
             await Task.Delay(750, _lifetime.Token);
@@ -697,6 +719,32 @@ internal sealed class LauncherForm : Form
             "O AutoFlow não respondeu nas verificações HTTP após 5 minutos. " +
             "Verifique se o painel abre em http://localhost:5173 e se a API responde " +
             "em http://127.0.0.1:3333/health/ready. Confira o log para detalhes.");
+        }
+        catch
+        {
+            // Only stop the process tree started by this launcher attempt.
+            // A pre-existing healthy API or browser must remain untouched.
+            if (_serverOwned && _server is not null)
+            {
+                try
+                {
+                    if (!_server.HasExited)
+                        _server.Kill(entireProcessTree: true);
+                    await _server.WaitForExitAsync(new CancellationTokenSource(
+                        TimeSpan.FromSeconds(10)).Token);
+                }
+                catch (InvalidOperationException) { }
+                catch (System.ComponentModel.Win32Exception) { }
+                catch (OperationCanceledException) { }
+                finally
+                {
+                    _serverOwned = false;
+                    _server.Dispose();
+                    _server = null;
+                }
+            }
+            throw;
+        }
     }
 
     private async Task UpdateAndRestartAsync()
