@@ -2,6 +2,9 @@ import assert from 'node:assert/strict'
 import { handleMediaRequest } from '../server/modules/media.ts'
 import { createVehicleModule } from '../server/modules/vehicles.ts'
 import { createFacebookMarketplaceModule } from '../server/modules/facebook-marketplace.ts'
+import { createPublicationQueueModule } from '../server/modules/publication-queue.ts'
+import { findBestAccountForVehicle as sharedAccountSelector } from '../server/modules/accounts.ts'
+import { findBestAccountForVehicle as legacyAccountSelector } from '../server/services/session-manager.ts'
 
 // New modules must never silently claim unrelated paths, especially the
 // unauthenticated media module. Routing to existing handlers is unchanged.
@@ -57,4 +60,24 @@ assert.deepEqual(calls, [{ status: 403, payload: { error: 'Imagem não autorizad
 
 assert.equal(typeof createVehicleModule, 'function')
 assert.equal(typeof createFacebookMarketplaceModule, 'function')
-console.log('OK: modular routes do not intercept unrelated media paths.')
+// The shared selector must retain the old import contract; the Facebook
+// adapter no longer owns publication queue and scheduling routes.
+assert.equal(sharedAccountSelector, legacyAccountSelector)
+const dummyDependencies = {
+  db: noDb,
+  publicationRead: {},
+  management: {},
+  scheduling: {},
+}
+const queue = createPublicationQueueModule(dummyDependencies)
+const publication = new URL('http://localhost/api/publications')
+assert.equal(queue.acceptsPublicationRead({ method: 'GET' }, publication), true)
+assert.equal(queue.acceptsPublicationRead({ method: 'POST' }, publication), false)
+assert.equal(
+  typeof createFacebookMarketplaceModule({ extension: {}, groups: {} }).publicationRead,
+  'undefined',
+)
+assert.equal(typeof queue.scheduler.stop, 'function')
+queue.scheduler.stop()
+
+console.log('OK: media, account selection and queue boundaries verified.')

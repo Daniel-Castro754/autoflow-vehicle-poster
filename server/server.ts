@@ -12,7 +12,7 @@ import { randomBytes, timingSafeEqual, createHmac, createHash } from 'node:crypt
 import { logger } from './lib/logger.ts'
 import { startGroupCurationWorker } from './services/group-curation-worker.ts'
 import { startHealthMonitor, stopHealthMonitor } from './services/health-monitor.ts'
-import { createAutonomousScheduler } from './services/autonomous-scheduler.ts'
+import { createPublicationQueueModule } from './modules/publication-queue.ts'
 import { handleOperationsRoute } from './routes/operations.ts'
 import { handleBackupVerificationRoute } from './routes/backup-verification.ts'
 import { handleInterventionsRoute } from './routes/interventions.ts'
@@ -405,6 +405,10 @@ const facebookModule = createFacebookMarketplaceModule({
     imageBaseUrl,
     imageVariantSecret: secret,
   },
+  groups: { db, send, isAdmin, marketplaceGroups, groupTarget },
+})
+const queueModule = createPublicationQueueModule({
+  db,
   publicationRead: { db, send, userById, recordJobEvent },
   management: {
     db,
@@ -420,14 +424,13 @@ const facebookModule = createFacebookMarketplaceModule({
     refreshVehiclePublicationStatus,
   },
   scheduling: { db, send, jsonBody, canManageJobs, recordJobEvent },
-  groups: { db, send, isAdmin, marketplaceGroups, groupTarget },
 })
+const autopilotScheduler = queueModule.scheduler
 
 if (!restoreBootProbe) {
   startHealthMonitor(db, 60000)
   startGroupCurationWorker(db)
 }
-const autopilotScheduler = createAutonomousScheduler(db)
 if (!restoreBootProbe) autopilotScheduler.start()
 
 async function handleRequest(req: IncomingMessage, res: ServerResponse) {
@@ -540,12 +543,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     }
     if (await vehicleModule.mutation(req, res, url, auth)) return
     if (handleDashboardRoute(req, res, url, auth, db, send, automationStatements, isAdmin)) return
-    if (facebookModule.acceptsPublicationRead(req, url)) {
-      await facebookModule.publicationRead(req, res, url, auth)
+    if (queueModule.acceptsPublicationRead(req, url)) {
+      await queueModule.publicationRead(req, res, url, auth)
       return
     }
-    if (facebookModule.acceptsManagement(req, url)) {
-      await facebookModule.management(req, res, url, auth)
+    if (queueModule.acceptsManagement(req, url)) {
+      await queueModule.management(req, res, url, auth)
       return
     }
     if (
@@ -562,7 +565,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     )
       return
     if (await handleAIRoute(req, res, url, auth, { db, send, jsonBody, isAdmin })) return
-    if (await facebookModule.scheduling(req, res, url, auth)) return
+    if (await queueModule.scheduling(req, res, url, auth)) return
     if (await facebookModule.groups(req, res, url, auth)) return
     if (await handleAlertRoute(req, res, url, auth, { db, send, isAdmin })) return
     return send(res, 404, { error: 'Rota não encontrada.' })

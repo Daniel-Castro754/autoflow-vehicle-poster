@@ -34,3 +34,23 @@ as políticas de duplicidade e as regras de publicação não foram modificados.
 
 Executar `npm run typecheck`, `npm run lint`, `npm test`,
 `npm run build` e `npm run format:check`.
+
+## Segunda entrega — sessões e filas compartilhadas
+
+- `server/modules/accounts.ts` passa a conter a seleção de contas elegíveis,
+  incluindo limites diários e critérios de capacidade. O caminho anterior
+  `server/services/session-manager.ts` continua disponível como reexportação
+  para preservar compatibilidade.
+- `server/modules/publication-queue.ts` concentra a composição das rotas de
+  consulta, gerenciamento e agendamento da fila, além do lifecycle do
+  agendador autônomo já existente.
+- O módulo Facebook mantém somente as rotas específicas da extensão e dos grupos.
+  A ordem das chamadas no servidor continua a mesma para evitar alterações
+  em autenticação, autorização e comportamento de publicação.
+- Testes de fronteira verificam os pontos de entrada da fila e a equivalência
+  do seletor de contas anterior e novo.
+
+**Limites:** esta etapa não introduz Instagram, adaptadores oficiais, novos
+estados de filas nem alterações de esquema SQLite. A seleção de contas ainda
+consulta `social_accounts`, como antes; a generalização do modelo de perfis
+para outras plataformas será uma etapa posterior.
