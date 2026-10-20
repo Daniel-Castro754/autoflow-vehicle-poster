@@ -1,0 +1,7 @@
+codigo,marca,modelo,ano,km,preco,cidade,fotos,descricao
+"A01","Toyota","Corolla XEi","2021","52.000","R$ 119.900","Criciúma - SC","corolla-01.jpg|corolla-02.jpg","Sedã automático com revisões em dia."
+"A02","Honda","Civic EXL","2020","60.800","109900","Içara - SC","civic-01.jpg|civic-02.jpg","Revisado, documentação em ordem."
+"A01","Toyota","Corolla XEi","2021","52.000","119900","Criciúma - SC","corolla-01.jpg|corolla-02.jpg","Linha duplicada proposital."
+"A03","Volkswagen","Polo Comfortline","2022","78.000","","Criciúma - SC","polo-01.jpg","Exemplo com preço ausente."
+"A04","Jeep","Compass Longitude","2021","45.500","129900","Içara - SC","","Exemplo sem fotografias."
+"A05","Fiat","Argo Drive","2023","25.000","R$ 69.900","Criciúma - SC","argo-01.jpg","Veículo revisado e disponível."

@@ -1,0 +1,206 @@
+{
+  "name": "Auto Flow paralelo - Importar CSV local",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "auto-000",
+      "name": "Iniciar teste",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -280,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "/files/veiculos-demo.csv",
+        "options": {}
+      },
+      "id": "auto-001",
+      "name": "Ler CSV de teste",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        0,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "csv",
+        "options": {
+          "headerRow": true
+        }
+      },
+      "id": "auto-002",
+      "name": "Extrair CSV",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        280,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function parseNumber(value) {\n  if (typeof value === 'number') return value;\n  const raw = String(value ?? '').trim().replace(/[R$\\s]/g, '');\n  if (!raw) return NaN;\n  const clean = raw.includes(',') ? raw.replace(/\\./g, '').replace(',', '.') : raw.replace(/\\./g, '');\n  return Number(clean);\n}\nreturn $input.all().map((item) => {\n  const row = item.json;\n  const codigo = String(row.codigo ?? row['Código'] ?? row.id ?? '').trim().toUpperCase();\n  const marca = String(row.marca ?? '').trim();\n  const modelo = String(row.modelo ?? '').trim();\n  const cidade = String(row.cidade ?? '').trim();\n  const descricao = String(row.descricao ?? '').trim();\n  const fotos = Array.isArray(row.fotos) ? row.fotos : String(row.fotos ?? '').split('|').map((s) => s.trim()).filter(Boolean);\n  return {json: {\n    codigo, marca, modelo,\n    ano: parseNumber(row.ano),\n    km: parseNumber(row.km),\n    preco: parseNumber(row.preco),\n    cidade, fotos, descricao\n  }};\n});"
+      },
+      "id": "auto-003",
+      "name": "Padronizar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $input.all().map(({json: v}) => {\n  const erros = [];\n  if (!v.codigo) erros.push('Código ausente');\n  if (!v.marca || !v.modelo) erros.push('Marca ou modelo ausente');\n  if (!Number.isInteger(v.ano) || v.ano < 1980 || v.ano > new Date().getFullYear() + 1) erros.push('Ano inválido');\n  if (!Number.isFinite(v.km) || v.km < 0) erros.push('Quilometragem inválida');\n  if (!Number.isFinite(v.preco) || v.preco <= 0) erros.push('Preço ausente ou inválido');\n  if (!v.cidade) erros.push('Cidade ausente');\n  if (!Array.isArray(v.fotos) || v.fotos.length === 0) erros.push('Sem fotografias');\n  if (!v.descricao) erros.push('Descrição ausente');\n  return {json: {...v, estado: erros.length ? 'revisar' : 'aprovado', erros}};\n});"
+      },
+      "id": "auto-004",
+      "name": "Validar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const vistos = new Set();\nreturn $input.all().map(({json: v}) => {\n  const chave = v.codigo;\n  if (chave && vistos.has(chave)) {\n    return {json: {...v, estado: 'duplicado', erros: [...v.erros, 'Código de estoque repetido na importação']}};\n  }\n  if (chave) vistos.add(chave);\n  return {json: v};\n});"
+      },
+      "id": "auto-005",
+      "name": "Duplicidades",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "let sequencia = 0;\nreturn $input.all().map(({json: v}) => {\n  if (v.estado !== 'aprovado') return {json: {...v, rascunho: null, filaSimulada: null}};\n  const titulo = [v.marca, v.modelo, v.ano].join(' ').trim();\n  const descricao = [titulo, 'KM: ' + v.km.toLocaleString('pt-BR'), 'Cidade: ' + v.cidade,\n    'Preço: R$ ' + v.preco.toLocaleString('pt-BR'), v.descricao].join('\\n');\n  // Apenas simulação em memória; não dispara nem reserva trabalho real.\n  const posicao = ++sequencia;\n  return {json: {\n    ...v, rascunho: {titulo, descricao, imagens: v.fotos},\n    filaSimulada: {posicao, estado: 'rascunho', agendamentoReal: false}\n  }};\n});"
+      },
+      "id": "auto-006",
+      "name": "Gerar rascunhos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const dados = $input.all().map((x) => x.json);\nconst aprovados = dados.filter((v) => v.estado === 'aprovado');\nconst revisar = dados.filter((v) => v.estado === 'revisar');\nconst duplicados = dados.filter((v) => v.estado === 'duplicado');\nreturn [{json: {\n  titulo: 'Auto Flow vs n8n — ensaio isolado',\n  execucao: 'MANUAL / SOMENTE SIMULACAO',\n  observacao: 'Não grava no Auto Flow, não abre o Brave e não publica no Marketplace.',\n  metricas: {\n    recebidos: dados.length,\n    aprovados: aprovados.length,\n    revisar: revisar.length,\n    duplicados: duplicados.length,\n    rascunhosGerados: aprovados.length\n  },\n  filaSimulada: aprovados.map((v) => ({codigo: v.codigo, titulo: v.rascunho.titulo,\n    fotos: v.rascunho.imagens.length, posicao: v.filaSimulada.posicao})),\n  revisar: revisar.map((v) => ({codigo: v.codigo, motivos: v.erros})),\n  duplicados: duplicados.map((v) => ({codigo: v.codigo, motivos: v.erros})),\n  registros: dados\n}}];"
+      },
+      "id": "auto-007",
+      "name": "Relatorio final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        260
+      ]
+    }
+  ],
+  "connections": {
+    "Iniciar teste": {
+      "main": [
+        [
+          {
+            "node": "Ler CSV de teste",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler CSV de teste": {
+      "main": [
+        [
+          {
+            "node": "Extrair CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair CSV": {
+      "main": [
+        [
+          {
+            "node": "Padronizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Padronizar": {
+      "main": [
+        [
+          {
+            "node": "Validar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar": {
+      "main": [
+        [
+          {
+            "node": "Duplicidades",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicidades": {
+      "main": [
+        [
+          {
+            "node": "Gerar rascunhos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar rascunhos": {
+      "main": [
+        [
+          {
+            "node": "Relatorio final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "active": false,
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
