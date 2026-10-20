@@ -14,6 +14,18 @@ internal static class Program
     private static void Main()
     {
         ApplicationConfiguration.Initialize();
+        // Keep only one launcher per interactive Windows session. A second
+        // window must not race the first through git fetch, npm ci and boot.
+        using var instance = LauncherInstanceGuard.TryAcquire(@"Local\AutoFlow.Launcher");
+        if (!instance.Acquired)
+        {
+            MessageBox.Show(
+                "O inicializador do AutoFlow já está aberto.\n\n" +
+                "Use a janela existente para abrir o painel ou atualizar.",
+                "AutoFlow | Já está em execução",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
         Application.Run(new LauncherForm());
     }
 }
@@ -259,8 +271,7 @@ internal sealed class LauncherForm : Form
             var folder = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "AutoFlow");
-            Directory.CreateDirectory(folder);
-            File.AppendAllText(Path.Combine(folder, "launcher.log"), line);
+            LauncherLog.Append(Path.Combine(folder, "launcher.log"), line);
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }

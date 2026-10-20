@@ -67,6 +67,23 @@ Confira o PID com `Get-CimInstance Win32_Process -Filter "ProcessId=PID"`
 e feche **somente** o processo que você confirmou pertencer a uma
 instância antiga do AutoFlow.
 
+## Proteções de estabilidade do inicializador
+
+- **Janela única por sessão Windows:** abrir o EXE duas vezes não dispara duas
+  atualizações, duas instalações de dependências ou dois servidores. A segunda
+  janela apenas informa que o inicializador já está aberto. Se a primeira
+  terminar ou travar e o processo for encerrado, a trava do Windows é liberada.
+- **Registro limitado:** `%LOCALAPPDATA%\AutoFlow\launcher.log` é limitado a aproximadamente
+  2 MiB por arquivo, com uma cópia anterior em `launcher.log.1`. O programa
+  mantém as mensagens mais recentes, sem apagar configurações, banco ou fotos.
+- **Sem mudança na política de atualização:** continuam valendo a verificação
+  de processos, `git merge --ff-only`, a proteção das modificações locais
+  e o bloqueio de portas desconhecidas.
+
+Os testes de exclusividade e rotação foram adicionados a
+`launcher-smoke/LauncherNetworkSmoke.cs`, executado pelo workflow
+**Windows launcher EXE**. A instalação real ainda deve ser homologada no Windows.
+
 ## Atualizar sem fechar os serviços manualmente
 
 Com o AutoFlow já em execução, clique em **Atualizar e reiniciar**. O launcher:
