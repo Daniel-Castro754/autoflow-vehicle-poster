@@ -3,9 +3,7 @@ import { handleMediaRequest } from '../server/modules/media.ts'
 import { createVehicleModule } from '../server/modules/vehicles.ts'
 import { createFacebookMarketplaceModule } from '../server/modules/facebook-marketplace.ts'
 import { createPublicationQueueModule } from '../server/modules/publication-queue.ts'
-import {
-  findBestAccountForVehicle as sharedAccountSelector,
-} from '../server/modules/accounts.ts'
+import { findBestAccountForVehicle as sharedAccountSelector } from '../server/modules/accounts.ts'
 import { findBestAccountForVehicle as legacyAccountSelector } from '../server/services/session-manager.ts'
 
 // New modules must never silently claim unrelated paths, especially the
