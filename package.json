@@ -64,7 +64,7 @@
     "test:profile-capacity": "node --import=./tests/helpers/offline.mjs tests/profile-capacity.mjs",
     "test:publication-ledger": "node tests/publication-ledger.mjs",
     "test:publication-variations": "node --import=./tests/helpers/offline.mjs tests/publication-variations.mjs",
-    "test:publication-variant-route": "node --import=./tests/helpers/offline.mjs tests/publication-variant-route.mjs",
+    "test:publication-variant-route": "node --import=./tests/helpers/offline.mjs tests/publication-variant-route.mjs"
   },
   "dependencies": {
     "google-auth-library": "^11.2.0",
