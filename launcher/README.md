@@ -84,6 +84,29 @@ Os testes de exclusividade e rotação foram adicionados a
 `launcher-smoke/LauncherNetworkSmoke.cs`, executado pelo workflow
 **Windows launcher EXE**. A instalação real ainda deve ser homologada no Windows.
 
+## Fase 2 — recuperação de atualização interrompida
+
+O instalador de dependências agora executa `npm ci` em
+`.autoflow-launcher-recovery/stage-...`, sem remover `node_modules` antes
+de um download bem-sucedido. Depois da preparação, a substituição ocorre
+por renomeação no mesmo volume. A versão anterior é mantida até o painel e
+a API ficarem prontos; se o processo terminar entre as duas renomeações,
+a próxima inicialização restaura o diretório anterior.
+
+A compilação da extensão prepara o diretório e o ZIP separadamente, antes
+de substituir os artefatos existentes. Um marcador de compilação incompleta
+faz o launcher repetir a operação na próxima inicialização.
+
+Se houver falha ou tempo esgotado na inicialização, o launcher encerra
+somente os subprocessos iniciados por aquela tentativa; serviços preexistentes
+não são encerrados. O `%LOCALAPPDATA%\AutoFlow\launcher.log` continua
+armazenando o motivo da falha.
+
+**Limite:** esta fase não executa `git reset`, restauração do banco nem
+rollback automático de commits. Depois de uma atualização de código, as
+dependências anteriores não são necessariamente compatíveis com a nova
+versão. Em caso de erro persistente, preserve os arquivos de diagnóstico.
+
 ## Atualizar sem fechar os serviços manualmente
 
 Com o AutoFlow já em execução, clique em **Atualizar e reiniciar**. O launcher:

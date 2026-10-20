@@ -1,4 +1,5 @@
-import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, readdir, rm, rename, stat, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -8,10 +9,29 @@ const distDir = join(root, 'dist')
 const unpackedDir = join(distDir, 'extension')
 const manifest = JSON.parse(await readFile(join(sourceDir, 'manifest.json'), 'utf8'))
 const zipPath = join(distDir, `autoflow-extension-v${manifest.version}.zip`)
+const markerPath = join(distDir, '.autoflow-extension-build-pending')
+const previousDir = join(distDir, '.autoflow-extension-previous')
+const stageName = `.autoflow-extension-stage-${process.pid}-${randomUUID()}`
+const stageDir = join(distDir, stageName)
+const stagedZip = join(distDir, `${stageName}.zip`)
+
+async function exists(path) {
+  try {
+    await stat(path)
+    return true
+  } catch (error) {
+    if (error.code === 'ENOENT') return false
+    throw error
+  }
+}
 
 await mkdir(distDir, { recursive: true })
-await rm(unpackedDir, { recursive: true, force: true })
-await cp(sourceDir, unpackedDir, { recursive: true })
+// A previous process may have crashed between renaming the old directory
+// and publishing the replacement. Restore the old version before rebuilding.
+if ((await exists(previousDir)) && !(await exists(unpackedDir))) {
+  await rename(previousDir, unpackedDir)
+}
+await cp(sourceDir, stageDir, { recursive: true })
 
 const crcTable = new Uint32Array(256)
 for (let n = 0; n < 256; n++) {
@@ -95,7 +115,39 @@ end.writeUInt16LE(centralParts.length / 2, 10)
 end.writeUInt32LE(centralDirectory.length, 12)
 end.writeUInt32LE(offset, 16)
 end.writeUInt16LE(0, 20)
-await writeFile(zipPath, Buffer.concat([...localParts, centralDirectory, end]))
+// Package the ZIP in a temporary file before touching the current build.
+await writeFile(stagedZip, Buffer.concat([...localParts, centralDirectory, end]))
+await writeFile(markerPath, 'Atualização da extensão em andamento.\n')
+
+let backedUp = false
+let published = false
+try {
+  if (await exists(previousDir)) {
+    // Stale backup from a previous completed-but-interrupted commit.
+    // We can discard it only after the new outputs are fully staged.
+    await rm(previousDir, { recursive: true })
+  }
+  if (await exists(unpackedDir)) {
+    await rename(unpackedDir, previousDir)
+    backedUp = true
+  }
+  await rename(stageDir, unpackedDir)
+  published = true
+  // Node's rename replaces an existing ZIP as part of one filesystem action.
+  await rename(stagedZip, zipPath)
+} catch (error) {
+  // If the final ZIP was not published, keep the old unpacked extension.
+  if (published) await rm(unpackedDir, { recursive: true, force: true })
+  if (backedUp) await rename(previousDir, unpackedDir)
+  throw error
+} finally {
+  await rm(stageDir, { recursive: true, force: true }).catch(() => {})
+  await rm(stagedZip, { force: true }).catch(() => {})
+}
+// The new directory and ZIP are now published. Failure to delete an old
+// backup must not report a working extension build as failed.
+await rm(previousDir, { recursive: true, force: true }).catch(() => {})
+await rm(markerPath, { force: true })
 
 console.log(`Extensão MV3 pronta em ${relative(root, unpackedDir)}`)
 console.log(`ZIP: ${relative(root, zipPath)}`)
