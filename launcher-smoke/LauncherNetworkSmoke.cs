@@ -88,6 +88,48 @@ internal static class LauncherNetworkSmoke
             }
         }
 
-        Console.WriteLine("OK: IPv6 HTTP, startup decisions and foreign-process protection.");
+        // Another launcher thread must not take the same installation lock.
+        var mutexName = @"Local\AutoFlow.Launcher.Smoke." + Guid.NewGuid().ToString("N");
+        using (var first = LauncherInstanceGuard.TryAcquire(mutexName))
+        {
+            if (!first.Acquired) throw new Exception("First launcher cannot acquire its mutex.");
+            var secondAcquired = await Task.Run(() =>
+            {
+                using var second = LauncherInstanceGuard.TryAcquire(mutexName);
+                return second.Acquired;
+            });
+            if (secondAcquired)
+                throw new Exception("A concurrent launcher acquired an occupied mutex.");
+        }
+        using (var afterClose = LauncherInstanceGuard.TryAcquire(mutexName))
+        {
+            if (!afterClose.Acquired)
+                throw new Exception("Launcher mutex was not released after exit.");
+        }
+
+        // Rotation must retain current diagnostics with bounded on-disk size.
+        var logFolder = Path.Combine(Path.GetTempPath(),
+            "autoflow-launcher-smoke-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(logFolder);
+            var logPath = Path.Combine(logFolder, "launcher.log");
+            for (var i = 0; i < 40; i++)
+                LauncherLog.Append(logPath, $"entry-{i:D2}: " + new string('x', 400) + "\n", 4096);
+            if (!File.Exists(logPath + ".1"))
+                throw new Exception("Log file was not rotated.");
+            if (new FileInfo(logPath).Length > 4096 ||
+                new FileInfo(logPath + ".1").Length > 4096)
+                throw new Exception("Launcher log exceeded the configured byte limit.");
+            if (!File.ReadAllText(logPath).Contains("entry-39"))
+                throw new Exception("The most recent diagnostic entry was not retained.");
+        }
+        finally
+        {
+            if (Directory.Exists(logFolder))
+                Directory.Delete(logFolder, recursive: true);
+        }
+
+        Console.WriteLine("OK: IPv6 HTTP, startup decisions, foreign-process protection, single instance and log rotation.");
     }
 }

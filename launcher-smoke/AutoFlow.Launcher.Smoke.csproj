@@ -12,6 +12,8 @@
   <ItemGroup>
     <Compile Include="../launcher/Program.cs" Link="Program.cs" />
     <Compile Include="../launcher/AutoFlowProcessManager.cs" Link="AutoFlowProcessManager.cs" />
+    <Compile Include="../launcher/LauncherInstanceGuard.cs" Link="LauncherInstanceGuard.cs" />
+    <Compile Include="../launcher/LauncherLog.cs" Link="LauncherLog.cs" />
     <Compile Include="LauncherNetworkSmoke.cs" />
   </ItemGroup>
 </Project>
