@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { calculateOptimalSchedule } from '../services/smart-scheduler.ts'
 import { profileCapacity } from '../services/profile-capacity.ts'
-import { findBestAccountForVehicle } from '../services/session-manager.ts'
+import { findBestAccountForVehicle } from '../modules/accounts.ts'
 import { publicationReadinessIssues } from '../services/publication-policy.ts'
 import { markListingRemoved, recordConfirmedListing } from '../services/publication-ledger.ts'
 import {
