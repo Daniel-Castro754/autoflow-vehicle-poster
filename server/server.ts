@@ -1,7 +1,8 @@
 import { servePanel } from './services/static-panel.ts'
+import { handleMediaRequest } from './modules/media.ts'
+import { createVehicleModule } from './modules/vehicles.ts'
+import { createFacebookMarketplaceModule } from './modules/facebook-marketplace.ts'
 import { hashPassword, verifyPassword } from './lib/passwords.ts'
-import { open, readFile } from 'node:fs/promises'
-import { pipeline } from 'node:stream/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
@@ -9,8 +10,6 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomBytes, timingSafeEqual, createHmac, createHash } from 'node:crypto'
 import { logger } from './lib/logger.ts'
-import { renderMildPhotoVariant, signedPublicationPhotoToken } from './services/image-manager.ts'
-import { selectedPublicationPhotoIds, PhotoCurationConflict } from './services/photo-curation.ts'
 import { startGroupCurationWorker } from './services/group-curation-worker.ts'
 import { startHealthMonitor, stopHealthMonitor } from './services/health-monitor.ts'
 import { createAutonomousScheduler } from './services/autonomous-scheduler.ts'
@@ -27,25 +26,12 @@ import { applyMigrations } from './database/migrations.ts'
 import { initializeBaseSchema, registerSqliteFunctions } from './database/schema.ts'
 import { handleAIRoute } from './routes/ai.ts'
 import { initializeCredentialVault, migrateCredentials } from './services/credential-vault.ts'
-import { handleGroupsRoute } from './routes/groups.ts'
-import { handlePublicationSchedulingRoute } from './routes/publication-scheduling.ts'
 import { handleOrganizationRoute } from './routes/organization.ts'
 import { handleAuthRoute } from './routes/auth.ts'
 import { createGoogleSignIn } from './services/google-sign-in.ts'
 import { createAutomationStatements, handleDashboardRoute } from './routes/dashboard.ts'
-import {
-  createVehiclePageStatements,
-  handleVehicleMutationRoute,
-  handleVehicleReadRoute,
-} from './routes/vehicles.ts'
-import { handleExtensionRoute, isExtensionRoute } from './routes/extension.ts'
-import { handlePublicationReadRoute, isPublicationReadRoute } from './routes/publication-reads.ts'
-import {
-  handlePublicationManagementRoute,
-  isPublicationManagementRoute,
-} from './routes/publication-management.ts'
+import { createVehiclePageStatements } from './routes/vehicles.ts'
 import { handleAlertRoute } from './routes/alerts.ts'
-import { handlePhotoCurationRoute } from './routes/photo-curation.ts'
 import { handleIntegrationRoute, isIntegrationRoute } from './routes/integration.ts'
 import { handleIntegrationCredentialsRoute } from './routes/integration-credentials.ts'
 
@@ -379,6 +365,31 @@ for (const organization of (restoreBootProbe
     }
   }
 }
+
+// Feature-owned route wiring. Order of invocation below is kept identical to
+// the pre-modular server so authentication and publication semantics are stable.
+const vehicleModule = createVehicleModule({
+  read: { send, imageBaseUrl, validStatuses: vehicleOptions.status, pageStatements: vehiclePageStatements },
+  photos: { db, send, jsonBody, imageBaseUrl, canWriteVehicle },
+  mutation: { db, send, jsonBody, imageBaseUrl, uploadsDir, isAdmin, canWriteVehicle, canWriteImage, recordJobEvent },
+})
+const facebookModule = createFacebookMarketplaceModule({
+  extension: {
+    db, send, jsonBody, userById, allowedExtensionAccount,
+    marketplaceGroups, groupTarget, jobsIncludeSoldVehicle,
+    publicationDuplicateRisk, recordJobEvent, refreshVehiclePublicationStatus,
+    parseGroupTarget, imageBaseUrl, imageVariantSecret: secret,
+  },
+  publicationRead: { db, send, userById, recordJobEvent },
+  management: {
+    db, send, jsonBody, userById, canWriteVehicle, canManageJobs,
+    jobsIncludeSoldVehicle, allowedExtensionAccount, publicationDuplicateRisk,
+    recordJobEvent, refreshVehiclePublicationStatus,
+  },
+  scheduling: { db, send, jsonBody, canManageJobs, recordJobEvent },
+  groups: { db, send, isAdmin, marketplaceGroups, groupTarget },
+})
+
 if (!restoreBootProbe) {
   startHealthMonitor(db, 60000)
   startGroupCurationWorker(db)
@@ -448,77 +459,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       }
     }
     // Signed image variants are derived only from selected, authentic vehicle photos.
-    const imageVariant = url.pathname.match(
-      /^\/uploads\/variants\/([1-9]\d*)\/([1-9]\d*)\/([a-f0-9]{64})\.jpg$/,
-    )
-    if (req.method === 'GET' && imageVariant) {
-      const jobId = Number(imageVariant[1])
-      const photoId = Number(imageVariant[2])
-      if (!Number.isSafeInteger(jobId) || !Number.isSafeInteger(photoId))
-        return send(res, 404, { error: 'Fotografia inválida.' })
-      const source = db
-        .prepare(
-          `SELECT i.organization_id organizationId,i.vehicle_id vehicleId,i.file_name fileName
-          FROM publication_jobs job
-          JOIN vehicle_images i ON i.organization_id=job.organization_id
-            AND i.vehicle_id=job.vehicle_id
-          WHERE job.id=? AND i.id=? AND job.status!='canceled'`,
-        )
-        .get(jobId, photoId) as
-        { organizationId: number; vehicleId: number; fileName: string } | undefined
-      if (!source) return send(res, 404, { error: 'Fotografia não encontrada.' })
-      const expected = signedPublicationPhotoToken(secret, source.organizationId, jobId, photoId)
-      if (!timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(imageVariant[3], 'hex')))
-        return send(res, 403, { error: 'Imagem não autorizada.' })
-      let selected: number[]
-      try {
-        selected = selectedPublicationPhotoIds(db, source.organizationId, source.vehicleId)
-      } catch (error) {
-        if (error instanceof PhotoCurationConflict)
-          return send(res, 404, { error: 'Seleção de fotografias indisponível.' })
-        throw error
-      }
-      if (!selected.includes(photoId))
-        return send(res, 404, { error: 'Fotografia fora da seleção de publicação.' })
-      const original = await readFile(join(uploadsDir, source.fileName)).catch((error) => {
-        if (error.code === 'ENOENT') return null
-        throw error
-      })
-      if (!original) return send(res, 404, { error: 'Arquivo da fotografia não encontrado.' })
-      const rendered = await renderMildPhotoVariant(original, jobId, photoId)
-      res.writeHead(200, {
-        'Content-Type': 'image/jpeg',
-        'Content-Length': rendered.length,
-        'Cache-Control': 'private, max-age=86400, immutable',
-        'X-Content-Type-Options': 'nosniff',
-      })
-      res.end(rendered)
-      return
-    }
-    const uploadFile = url.pathname.match(/^\/uploads\/([a-f0-9]{24}\.(?:jpg|jpeg|png|webp))$/)
-    if (req.method === 'GET' && uploadFile) {
-      const path = join(uploadsDir, uploadFile[1])
-      const file = await open(path, 'r').catch((error) => {
-        if (error.code === 'ENOENT') return null
-        throw error
-      })
-      if (!file) return send(res, 404, { error: 'Imagem não encontrada.' })
-      try {
-        const info = await file.stat()
-        const ext = uploadFile[1].split('.').pop()
-        const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg'
-        res.writeHead(200, {
-          'Content-Type': mime,
-          'Content-Length': info.size,
-          'Cache-Control': 'public, max-age=86400, immutable',
-          'X-Content-Type-Options': 'nosniff',
-        })
-        await pipeline(file.createReadStream({ autoClose: false }), res)
-      } finally {
-        await file.close()
-      }
-      return
-    }
+    if (await handleMediaRequest(req, res, url, { db, uploadsDir, secret, send })) return
     if (await servePanel(req, res, url, join(root, 'dist'))) return
     if (isIntegrationRoute(url)) {
       await handleIntegrationRoute(req, res, url, { db, send, requestIdFor, jsonBody, uploadsDir })
@@ -558,77 +499,20 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     )
       return
     if (handleOperationsRoute(req, res, url, auth, db, send, isAdmin(auth))) return
-    if (
-      handleVehicleReadRoute(req, res, url, auth, {
-        send,
-        imageBaseUrl,
-        validStatuses: vehicleOptions.status,
-        pageStatements: vehiclePageStatements,
-      })
-    )
-      return
-    if (
-      await handlePhotoCurationRoute(req, res, url, auth, {
-        db,
-        send,
-        jsonBody,
-        imageBaseUrl,
-        canWriteVehicle,
-      })
-    )
-      return
-    if (isExtensionRoute(req, url)) {
-      await handleExtensionRoute(req, res, url, auth, {
-        db,
-        send,
-        jsonBody,
-        userById,
-        allowedExtensionAccount,
-        marketplaceGroups,
-        groupTarget,
-        jobsIncludeSoldVehicle,
-        publicationDuplicateRisk,
-        recordJobEvent,
-        refreshVehiclePublicationStatus,
-        parseGroupTarget,
-        imageBaseUrl,
-        imageVariantSecret: secret,
-      })
+    if (vehicleModule.read(req, res, url, auth)) return
+    if (await vehicleModule.photos(req, res, url, auth)) return
+    if (facebookModule.acceptsExtension(req, url)) {
+      await facebookModule.extension(req, res, url, auth)
       return
     }
-    if (
-      await handleVehicleMutationRoute(req, res, url, auth, {
-        db,
-        send,
-        jsonBody,
-        imageBaseUrl,
-        uploadsDir,
-        isAdmin,
-        canWriteVehicle,
-        canWriteImage,
-        recordJobEvent,
-      })
-    )
-      return
+    if (await vehicleModule.mutation(req, res, url, auth)) return
     if (handleDashboardRoute(req, res, url, auth, db, send, automationStatements, isAdmin)) return
-    if (isPublicationReadRoute(req, url)) {
-      await handlePublicationReadRoute(req, res, url, auth, { db, send, userById, recordJobEvent })
+    if (facebookModule.acceptsPublicationRead(req, url)) {
+      await facebookModule.publicationRead(req, res, url, auth)
       return
     }
-    if (isPublicationManagementRoute(req, url)) {
-      await handlePublicationManagementRoute(req, res, url, auth, {
-        db,
-        send,
-        jsonBody,
-        userById,
-        canWriteVehicle,
-        canManageJobs,
-        jobsIncludeSoldVehicle,
-        allowedExtensionAccount,
-        publicationDuplicateRisk,
-        recordJobEvent,
-        refreshVehiclePublicationStatus,
-      })
+    if (facebookModule.acceptsManagement(req, url)) {
+      await facebookModule.management(req, res, url, auth)
       return
     }
     if (
@@ -645,26 +529,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     )
       return
     if (await handleAIRoute(req, res, url, auth, { db, send, jsonBody, isAdmin })) return
-    if (
-      await handlePublicationSchedulingRoute(req, res, url, auth, {
-        db,
-        send,
-        jsonBody,
-        canManageJobs,
-        recordJobEvent,
-      })
-    )
-      return
-    if (
-      await handleGroupsRoute(req, res, url, auth, {
-        db,
-        send,
-        isAdmin,
-        marketplaceGroups,
-        groupTarget,
-      })
-    )
-      return
+    if (await facebookModule.scheduling(req, res, url, auth)) return
+    if (await facebookModule.groups(req, res, url, auth)) return
     if (await handleAlertRoute(req, res, url, auth, { db, send, isAdmin })) return
     return send(res, 404, { error: 'Rota não encontrada.' })
   } catch (error) {
