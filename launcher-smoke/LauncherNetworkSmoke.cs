@@ -93,11 +93,14 @@ internal static class LauncherNetworkSmoke
         using (var first = LauncherInstanceGuard.TryAcquire(mutexName))
         {
             if (!first.Acquired) throw new Exception("First launcher cannot acquire its mutex.");
-            var secondAcquired = await Task.Run(() =>
+            // A Windows mutex is owned by a *thread*. Do not await while
+            // holding the first lock, or this async smoke-test may resume on
+            // another thread and incorrectly release it from there.
+            var secondAcquired = Task.Run(() =>
             {
                 using var second = LauncherInstanceGuard.TryAcquire(mutexName);
                 return second.Acquired;
-            });
+            }).GetAwaiter().GetResult();
             if (secondAcquired)
                 throw new Exception("A concurrent launcher acquired an occupied mutex.");
         }
