@@ -33,6 +33,28 @@ assert.equal(
   }),
   false,
 )
+const unauthorized = await handleMediaRequest(
+  req,
+  res,
+  new URL(`http://localhost/uploads/variants/5/7/${'0'.repeat(64)}.jpg`),
+  {
+    db: {
+      prepare() {
+        return {
+          get() {
+            return { organizationId: 1, vehicleId: 2, fileName: 'photo.jpg' }
+          },
+        }
+      },
+    },
+    uploadsDir: '/unused',
+    secret: 'test-only-secret',
+    send,
+  },
+)
+assert.equal(unauthorized, true)
+assert.deepEqual(calls, [{ status: 403, payload: { error: 'Imagem não autorizada.' } }])
+
 assert.equal(typeof createVehicleModule, 'function')
 assert.equal(typeof createFacebookMarketplaceModule, 'function')
 console.log('OK: modular routes do not intercept unrelated media paths.')
