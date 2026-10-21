@@ -1,0 +1,27 @@
+name: Temporary bridge checks
+on:
+  push:
+    branches: [feat/activepieces-local-draft-bridge]
+    paths: [.github/workflows/activepieces-bridge-check.yml]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['22.18.0','24']
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run test:bridge
+      - run: npm run format:check
+      - run: npm audit --audit-level=high
