@@ -24,7 +24,8 @@ de sessão da extensão ou cookies do Facebook**.
    Em PowerShell, crie uma chave de 32 bytes e guarde-a em lugar seguro:
    ```powershell
    $bytes = [byte[]]::new(32)
-   [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+   $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+   try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
    $env:ACTIVEPIECES_BRIDGE_KEY = [Convert]::ToBase64String($bytes)
    ```
    Cole esse mesmo valor no campo Header Value do fluxo, sem expô-lo em chat.
