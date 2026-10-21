@@ -190,15 +190,22 @@ export function planDrafts(value, overrides = {}) {
  */
 export function allowedWebhook(value, expectedHost = 'cloud.activepieces.com') {
   const url = new URL(value)
-  const local = url.protocol === 'http:' &&
-    ['localhost', '127.0.0.1'].includes(url.hostname) && url.port === '8080'
+  const local =
+    url.protocol === 'http:' &&
+    ['localhost', '127.0.0.1'].includes(url.hostname) &&
+    url.port === '8080'
   const remote = url.protocol === 'https:' && url.hostname === expectedHost
   if (
     (!local && !remote) ||
-    url.username || url.password || url.search || url.hash ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
     !/^\/api\/v1\/webhooks\/[^/]+\/sync\/?$/.test(url.pathname)
   ) {
-    throw new Error('Webhook inválido: use HTTPS no Cloud ou http://localhost:8080 com /api/v1/webhooks/.../sync.')
+    throw new Error(
+      'Webhook inválido: use HTTPS no Cloud ou http://localhost:8080 com /api/v1/webhooks/.../sync.',
+    )
   }
   return url
 }

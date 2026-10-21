@@ -46,11 +46,14 @@ async function main() {
       throw new Error(
         'Configure ACTIVEPIECES_BRIDGE_URL e ACTIVEPIECES_BRIDGE_KEY (mínimo 24 caracteres).',
       )
-    envelope = await requestJson(allowedWebhook(endpoint, process.env.ACTIVEPIECES_BRIDGE_HOST || 'cloud.activepieces.com'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-AutoFlow-Bridge-Key': key },
-      body: JSON.stringify({ intent: 'list_draft_candidates', dryRun: true }),
-    })
+    envelope = await requestJson(
+      allowedWebhook(endpoint, process.env.ACTIVEPIECES_BRIDGE_HOST || 'cloud.activepieces.com'),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-AutoFlow-Bridge-Key': key },
+        body: JSON.stringify({ intent: 'list_draft_candidates', dryRun: true }),
+      },
+    )
   }
   const plan = planDrafts(envelope, overrides)
   console.log(
