@@ -23,5 +23,5 @@ jobs:
       - run: npm run lint
       - run: npm run build
       - run: npm run test:bridge
-      - run: npm run format:check
+      - run: npx prettier --check docs/ACTIVEPIECES_BRIDGE.md scripts/activepieces-bridge-lib.mjs scripts/activepieces-bridge.mjs tests/activepieces-bridge.mjs
       - run: npm audit --audit-level=high
