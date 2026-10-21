@@ -85,6 +85,7 @@ automaticamente e não confirma que formulários do Facebook foram preenchidos.
 O primeiro objetivo é transporte seguro de rascunhos e inspeção local.
 
 Para testes automatizados:
+
 ```powershell
 npm run test:bridge
 ```
