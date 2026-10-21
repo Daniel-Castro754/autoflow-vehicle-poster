@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { mapToDraft, parseBridgeEnvelope, planDrafts } from '../scripts/activepieces-bridge-lib.mjs'
+import { allowedWebhook, mapToDraft, parseBridgeEnvelope, planDrafts } from '../scripts/activepieces-bridge-lib.mjs'
 const sample = {
   bridgeVersion: 1,
   mode: 'draft_only',
@@ -33,6 +33,13 @@ const sample = {
     },
   ],
 }
+assert.equal(allowedWebhook('http://localhost:8080/api/v1/webhooks/local123/sync').host, 'localhost:8080')
+assert.equal(allowedWebhook('http://127.0.0.1:8080/api/v1/webhooks/local123/sync').host, '127.0.0.1:8080')
+assert.equal(allowedWebhook('https://cloud.activepieces.com/api/v1/webhooks/cloud123/sync').protocol, 'https:')
+assert.throws(() => allowedWebhook('http://evil.example/api/v1/webhooks/abc/sync'))
+assert.throws(() => allowedWebhook('http://192.168.1.2:8080/api/v1/webhooks/abc/sync'))
+assert.throws(() => allowedWebhook('http://localhost:8080/api/v1/webhooks/abc'))
+assert.throws(() => allowedWebhook('http://localhost:8080/api/v1/webhooks/abc/sync?token=secret'))
 const row = sample.jobs[0]
 const blocked = mapToDraft(row)
 assert(blocked.errors.includes('bodyType'))

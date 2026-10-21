@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Outbound-only bridge. Activepieces Cloud never reaches localhost and no
-// Facebook credentials, cookies, login sessions or publication commands flow here.
+// Outbound-only bridge. Activepieces runs on loopback or approved HTTPS.
+// Facebook credentials, browser sessions and publication commands are never transferred.
 import { readFile } from 'node:fs/promises'
-import { planDrafts } from './activepieces-bridge-lib.mjs'
+import { allowedWebhook, planDrafts } from './activepieces-bridge-lib.mjs'
 
 const args = process.argv.slice(2)
 function argument(flag) {
@@ -14,24 +14,6 @@ function argument(flag) {
 }
 async function jsonFile(path) {
   return JSON.parse(await readFile(path, 'utf8'))
-}
-function allowedWebhook(value) {
-  const url = new URL(value)
-  const expectedHost = process.env.ACTIVEPIECES_BRIDGE_HOST || 'cloud.activepieces.com'
-  if (
-    url.protocol !== 'https:' ||
-    url.hostname !== expectedHost ||
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash ||
-    !/^\/api\/v1\/webhooks\/[^/]+\/sync\/?$/.test(url.pathname)
-  ) {
-    throw new Error(
-      'Webhook inválido: use HTTPS, host configurado e URL /api/v1/webhooks/.../sync.',
-    )
-  }
-  return url
 }
 async function requestJson(url, options) {
   const response = await fetch(url, { ...options, signal: AbortSignal.timeout(20000) })
@@ -64,7 +46,7 @@ async function main() {
       throw new Error(
         'Configure ACTIVEPIECES_BRIDGE_URL e ACTIVEPIECES_BRIDGE_KEY (mínimo 24 caracteres).',
       )
-    envelope = await requestJson(allowedWebhook(endpoint), {
+    envelope = await requestJson(allowedWebhook(endpoint, process.env.ACTIVEPIECES_BRIDGE_HOST || 'cloud.activepieces.com'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-AutoFlow-Bridge-Key': key },
       body: JSON.stringify({ intent: 'list_draft_candidates', dryRun: true }),

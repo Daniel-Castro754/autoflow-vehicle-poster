@@ -182,3 +182,23 @@ export function planDrafts(value, overrides = {}) {
     ignoredAtSource: doc.blocked?.length || 0,
   }
 }
+
+/**
+ * Accept the official Activepieces Cloud over TLS, or a self-hosted
+ * Activepieces instance on the local Windows loopback (fixed port 8080).
+ * Never send bridge credentials over plaintext to remote hosts.
+ */
+export function allowedWebhook(value, expectedHost = 'cloud.activepieces.com') {
+  const url = new URL(value)
+  const local = url.protocol === 'http:' &&
+    ['localhost', '127.0.0.1'].includes(url.hostname) && url.port === '8080'
+  const remote = url.protocol === 'https:' && url.hostname === expectedHost
+  if (
+    (!local && !remote) ||
+    url.username || url.password || url.search || url.hash ||
+    !/^\/api\/v1\/webhooks\/[^/]+\/sync\/?$/.test(url.pathname)
+  ) {
+    throw new Error('Webhook inválido: use HTTPS no Cloud ou http://localhost:8080 com /api/v1/webhooks/.../sync.')
+  }
+  return url
+}
