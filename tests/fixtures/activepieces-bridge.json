@@ -1,0 +1,30 @@
+{
+  "bridgeVersion": 1,
+  "mode": "draft_only",
+  "dryRun": true,
+  "truncated": false,
+  "jobs": [
+    {
+      "source": "activepieces",
+      "mode": "draft_only",
+      "jobId": "DEMO-001",
+      "vehicleId": "PILOTO-001",
+      "platform": "facebook_marketplace",
+      "vehicle": {
+        "vehicle_id": "PILOTO-001",
+        "marca": "Honda",
+        "modelo": "Civic",
+        "ano_modelo": 2022,
+        "preco": 109000,
+        "quilometragem": 28000,
+        "cidade": "Curitiba",
+        "estado": "PR",
+        "descricao": "Veículo de demonstração",
+        "cor": "Prata",
+        "combustivel": "Flex",
+        "cambio": "Automatico",
+        "fotos_json": "https://example.test/01.jpg"
+      }
+    }
+  ]
+}
