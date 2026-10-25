@@ -75,6 +75,31 @@ assert.equal(plan.eligible.length, 1)
 assert.equal(plan.blocked.length, 0)
 assert.equal(plan.eligible[0].body.stockCode, 'PILOTO-001')
 assert.equal(plan.eligible[0].body.location, 'Curitiba, PR')
+
+const completeVehicle = { ...sample.jobs[0].vehicle, ...overrides['PILOTO-001'] }
+const withVehicle = (changes) => ({ ...row, vehicle: { ...completeVehicle, ...changes } })
+assert(mapToDraft(withVehicle({ marca: 'Marca inexistente' })).errors.includes('marca'))
+assert(!mapToDraft(withVehicle({ marca: 'Outra' })).errors.includes('marca'))
+assert(mapToDraft(withVehicle({ vehicle_id: 'INV@LIDO' })).errors.includes('vehicle_id'))
+assert(mapToDraft(withVehicle({ vehicle_id: 'A'.repeat(65) })).errors.includes('vehicle_id'))
+assert(mapToDraft(withVehicle({ vin: '!' })).errors.includes('vin'))
+assert(mapToDraft(withVehicle({ vin: 'ABCD' })).errors.includes('vin'))
+const normalized = mapToDraft(withVehicle({ vehicle_id: 'abc / 123', vin: 'ab 1234' }))
+assert.equal(normalized.body.stockCode, 'ABC/123')
+assert.equal(normalized.body.vin, 'AB1234')
+assert(!normalized.errors.includes('vehicle_id'))
+assert(!normalized.errors.includes('vin'))
+const duplicatedNormalized = planDrafts({
+  ...sample,
+  jobs: [
+    { ...row, jobId: 'job-001', vehicle: { ...completeVehicle, vehicle_id: ' abc-1 ' } },
+    { ...row, jobId: 'job-002', vehicle: { ...completeVehicle, vehicle_id: 'ABC-1' } },
+  ],
+})
+assert.equal(duplicatedNormalized.eligible.length, 1)
+assert.equal(duplicatedNormalized.blocked.length, 1)
+assert(duplicatedNormalized.blocked[0].errors.includes('vehicle_id repetido no lote'))
+
 assert.throws(() => parseBridgeEnvelope({ ...sample, mode: 'publish' }))
 assert.throws(() => parseBridgeEnvelope({ ...sample, truncated: true }))
 assert.throws(() => parseBridgeEnvelope({ ...sample, jobs: [row, row] }))
