@@ -11,6 +11,69 @@ const choices = {
     'Comercial/industrial',
     'Outro',
   ]),
+  make: new Set([
+    'AM General',
+    'Agrale',
+    'Alfa Romeo',
+    'Aston Martin',
+    'Audi',
+    'BMW',
+    'Bentley',
+    'BYD',
+    'Cadillac',
+    'Caoa Chery',
+    'Chery',
+    'Chevrolet',
+    'Chrysler',
+    'Citroën',
+    'Cross Lander',
+    'Cupra',
+    'DS',
+    'Daewoo',
+    'Daihatsu',
+    'Dodge',
+    'Effa',
+    'Ferrari',
+    'Fiat',
+    'Ford',
+    'Geely',
+    'GWM',
+    'Honda',
+    'Hyundai',
+    'Iveco',
+    'JAC',
+    'Jaecoo',
+    'Jaguar',
+    'Jeep',
+    'Kia',
+    'Lamborghini',
+    'Land Rover',
+    'Lexus',
+    'Lifan',
+    'Maserati',
+    'Mazda',
+    'Mercedes-Benz',
+    'Mini',
+    'Mitsubishi',
+    'Nissan',
+    'Omoda',
+    'Peugeot',
+    'Porsche',
+    'RAM',
+    'Renault',
+    'Rolls-Royce',
+    'Seat',
+    'Smart',
+    'SsangYong',
+    'Subaru',
+    'Suzuki',
+    'Tesla',
+    'Toyota',
+    'Troller',
+    'Volkswagen',
+    'Volvo',
+    'Outra',
+  ]),
   transmission: new Set(['Automático', 'Manual', 'Automatizado']),
   fuelType: new Set([
     'Flex',
@@ -66,6 +129,8 @@ const aliases = {
   exteriorColor: { prata: 'Prateado', prateado: 'Prateado' },
 }
 const string = (v) => (typeof v === 'string' ? v.trim() : '')
+// Keep identifiers aligned with normalizeInventoryIdentifier (without silently truncating).
+const normalizeIdentifier = (v) => string(v).toUpperCase().replace(/\s+/g, '')
 const number = (v) => (v === '' || v === null || v === undefined ? NaN : Number(v))
 const opt = (name, value) => {
   const text = string(value)
@@ -108,12 +173,14 @@ export function mapToDraft(job, overrides = {}) {
   const vehicleId = string(input.vehicle_id)
   const corrections = overrides[vehicleId] || {}
   const v = { ...input, ...corrections }
+  const stockCode = normalizeIdentifier(vehicleId)
+  const vin = normalizeIdentifier(v.vin)
   const year = number(v.ano_modelo),
     price = number(v.preco),
     km = number(v.quilometragem)
   const body = {
-    stockCode: vehicleId,
-    vin: string(v.vin),
+    stockCode,
+    vin,
     year,
     make: string(v.marca),
     model: string(v.modelo),
@@ -132,7 +199,9 @@ export function mapToDraft(job, overrides = {}) {
     status: 'Rascunho',
   }
   const errors = []
-  if (!vehicleId || vehicleId.length > 100) errors.push('vehicle_id')
+  if (!stockCode || stockCode.length > 64 || !/^[A-Z0-9._/-]+$/.test(stockCode))
+    errors.push('vehicle_id')
+  if (vin && !/^[A-Z0-9-]{5,32}$/.test(vin)) errors.push('vin')
   if (!Number.isInteger(year) || year < 1900 || year > new Date().getFullYear() + 1)
     errors.push('ano_modelo')
   if (!Number.isFinite(price) || price <= 0) errors.push('preco')
@@ -145,6 +214,8 @@ export function mapToDraft(job, overrides = {}) {
   ]) {
     if (!body[property]) errors.push(key)
   }
+  // Same supported manufacturer list as validateVehicleBody in the API.
+  if (body.make && !choices.make.has(body.make)) errors.push('marca')
   for (const [property, key] of [
     ['vehicleType', 'vehicleType'],
     ['transmission', 'cambio'],
@@ -160,7 +231,7 @@ export function mapToDraft(job, overrides = {}) {
   }
   return {
     jobId: job.jobId,
-    vehicleId,
+    vehicleId: stockCode,
     body,
     errors,
     note: 'Criação de rascunho apenas; fotografias precisam ser importadas e revisadas no Auto Flow.',
