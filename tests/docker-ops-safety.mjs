@@ -5,7 +5,7 @@ import {
   copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import { createBackup } from '../scripts/backup.mjs'
@@ -19,7 +19,10 @@ try {
   mkdirSync(scripts)
   mkdirSync(data)
   mkdirSync(join(data, 'uploads'))
-  copyFileSync(join(repository, 'scripts', 'rotate-auth-secret.mjs'), join(scripts, 'rotate-auth-secret.mjs'))
+  copyFileSync(
+    join(repository, 'scripts', 'rotate-auth-secret.mjs'),
+    join(scripts, 'rotate-auth-secret.mjs'),
+  )
   copyFileSync(join(repository, 'scripts', 'backup.mjs'), join(scripts, 'backup.mjs'))
   const original = randomBytes(48).toString('base64url')
   const envPath = join(temp, '.env')
