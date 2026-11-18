@@ -125,14 +125,18 @@ Copie `.env.example` para `.env` e preencha `AUTH_SECRET`, `INITIAL_ADMIN_EMAIL`
 
 Para ativar a criação periódica da fila, use **Configurações → Agendar estoque automaticamente** e escolha o intervalo. A configuração **Publicar automaticamente** continua independente. Detalhes sobre limites, métricas, logs e alertas estão em [Operação autônoma e observabilidade](docs/AUTONOMOUS_OPERATIONS.md).
 
-## Container local
+## Container local (Docker Desktop)
 
-```sh
-docker build -t autoflow .
-docker run --rm --env-file .env -p 127.0.0.1:3333:3333 -v autoflow-data:/app/data autoflow
+**Recomendado para uso contínuo no Windows:** use o `compose.yaml`, que mantém o painel e a API na porta 3333, reinicia o container automaticamente e preserva banco, cofre e fotos na pasta local `./data`.
+
+```powershell
+# Crie e preencha .env antes de iniciar; pare a API local antiga.
+docker compose up -d --build
+docker compose ps
+Invoke-RestMethod http://localhost:3333/api/health/ready
 ```
 
-O container serve o painel compilado e a API na porta 3333, como usuário sem privilégios. Banco e fotos ficam no volume `/app/data`. Para acesso remoto, configure `PUBLIC_ORIGIN` e `CORS_ORIGINS` com as origens reais. A extensão continua usando a API local.
+Leia **[Auto Flow sempre ativo no Docker Desktop](docs/DOCKER_DESKTOP.md)** *antes do primeiro deploy* para configurar o `.env`, preservar seu `AUTH_SECRET` e criar backup dos dados existentes. O container serve o painel compilado e a API como usuário sem privilégios. A porta fica limitada à própria máquina; não publique-a na internet sem proxy HTTPS e autenticação adequada. A extensão do Brave ainda precisa do navegador funcionando.
 
 ## Extensão local
 
