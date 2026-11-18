@@ -35,7 +35,7 @@ function Invoke-DockerChecked {
     if ($LASTEXITCODE -ne 0) { throw "Falha no Docker (codigo $LASTEXITCODE)." }
 }
 
-Invoke-DockerChecked @('info', '--format', '{{.ServerVersion}}')
+Invoke-DockerChecked -ArgsForDocker @('info', '--format', '{{.ServerVersion}}')
 $containerState = & docker inspect --format '{{.State.Running}}' autoflow-vehicle-poster 2>$null
 if ($LASTEXITCODE -ne 0) {
     throw "Container autoflow-vehicle-poster nao encontrado. Nao alterei outros containers."
