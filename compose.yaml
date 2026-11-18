@@ -1,0 +1,47 @@
+# Auto Flow local permanente no Docker Desktop (Windows 11 / WSL2).
+# A pasta ./data existente é mantida no host para preservar SQLite, cofre e fotos.
+name: autoflow-vehicle-poster
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: autoflow-vehicle-poster:local
+    container_name: autoflow-vehicle-poster
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      # O .env de desenvolvimento usa HOST=127.0.0.1; dentro do Docker a API
+      # precisa escutar em todas as interfaces DO CONTAINER.
+      HOST: 0.0.0.0
+      PORT: "3333"
+      DATA_DIR: /app/data
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:3333}
+    ports:
+      # Acesso apenas deste computador; não expor o login à rede sem HTTPS/proxy.
+      - "127.0.0.1:${AUTOFLOW_HOST_PORT:-3333}:3333"
+    volumes:
+      # Não remova nem substitua esta montagem sem migrar o banco e o cofre.
+      - type: bind
+        source: ./data
+        target: /app/data
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3333/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
