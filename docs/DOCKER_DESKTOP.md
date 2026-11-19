@@ -8,7 +8,7 @@ continua usando SQLite.
 ## Antes de começar
 
 - Docker Desktop instalado, em execução e com WSL2 funcional.
-- Diretório local: `C:\Users\Daniel\autoflow-vehicle-poster` (ajuste se for outro).
+- Diretório local: `$HOME\autoflow-vehicle-poster` (ajuste se for outro).
 - Pare qualquer execução anterior com `npm run dev`, `npm run dev:api`
   ou pelo inicializador AutoFlow.exe. **Não execute duas instâncias no mesmo banco**.
 - Não troque o valor de `AUTH_SECRET` de uma instalação já usada: ele protege
@@ -20,7 +20,7 @@ continua usando SQLite.
 No PowerShell:
 
 ```powershell
-cd "C:\Users\Daniel\autoflow-vehicle-poster"
+cd "$HOME\autoflow-vehicle-poster"
 git switch main
 git pull --ff-only
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
@@ -124,6 +124,71 @@ npm run backup -- verify ".\backups\autoflow-backup-AAAA-MM-DD..."
 ```
 
 Substitua o nome de exemplo pela pasta realmente criada.
+
+## Backup automático e troca segura da chave (Docker Desktop)
+
+O script `scripts/backup-docker.ps1` executa o backup **sem instalar npm no host**.
+Ele interrompe somente o serviço `app`, usa a imagem Docker já criada,
+verifica o backup com o mecanismo oficial do projeto e reinicia o app no
+bloco `finally` se estava rodando anteriormente:
+
+```powershell
+cd "$HOME\autoflow-vehicle-poster"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\backup-docker.ps1
+docker compose ps
+```
+
+O destino padrão é `backups/`. O script nunca exclui backups antigos;
+acompanhe o espaço ocupado e **guarde outra cópia fora do computador**.
+A verificação de hash/SQLite não substitui um ensaio de restauração.
+
+Para configurar backup diário **às 03:00**, somente quando a sessão Windows
+estiver aberta e o Docker Desktop funcionando:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-backup-task.ps1 -At 03:00
+Get-ScheduledTask -TaskName "AutoFlow - Backup Diario"
+```
+
+O agendamento é opcional e só é criado após executar o instalador.
+O script não agenda publicações no Marketplace. A cópia para e reinicia o
+Auto Flow por um curto período; escolha um horário sem trabalho na fila.
+O Docker Desktop não executa uma tarefa com o computador desligado.
+
+### AUTH_SECRET exposto: rotação offline para banco sem credenciais criptografadas
+
+**Não copie o segredo em chats ou comandos.** O `AUTH_SECRET` atual foi usado
+para criar o cofre Linux, portanto uma troca cega pode inutilizar credenciais.
+O script de rotação verifica a tabela de segredos e **recusa executar** se
+encontrar chaves criptografadas. Não apaga `vault-key.json`.
+
+```powershell
+cd "$HOME\autoflow-vehicle-poster"
+node scripts/rotate-auth-secret.mjs --check
+# Se a checagem permitir, crie um backup antes de continuar:
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\backup-docker.ps1
+docker compose stop app
+node scripts/rotate-auth-secret.mjs --apply
+docker compose up -d --force-recreate app
+docker compose ps
+Invoke-RestMethod http://localhost:3333/api/health/ready
+```
+
+O comando `--apply` exige backup **válido das últimas 24 horas** na pasta
+`backups/`, gera uma nova chave criptograficamente segura e altera apenas
+`AUTH_SECRET` no arquivo `.env`. **A nova chave não é exibida no terminal**.
+As sessões antigas deixam de funcionar: entre novamente no painel e renove
+a autenticação da extensão, se usada.
+
+**Se a checagem recusar por haver credenciais criptografadas, não tente
+contornar apagando o cofre.** A instalação exige uma migração criptográfica
+específica antes da rotação; preserve a chave e o backup atuais até realizar
+esse procedimento.
+
+Depois do primeiro login bem-sucedido, você pode deixar
+`INITIAL_ADMIN_PASSWORD=` vazio no `.env`: esse campo só é necessário se
+o banco **não tiver usuários**. Mantenha uma cópia protegida da chave atual
+em um gerenciador de senhas, fora do GitHub.
 
 ## Atenção: Google, Brave e Activepieces
 

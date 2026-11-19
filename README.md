@@ -136,7 +136,7 @@ docker compose ps
 Invoke-RestMethod http://localhost:3333/api/health/ready
 ```
 
-Leia **[Auto Flow sempre ativo no Docker Desktop](docs/DOCKER_DESKTOP.md)** *antes do primeiro deploy* para configurar o `.env`, preservar seu `AUTH_SECRET` e criar backup dos dados existentes. O container serve o painel compilado e a API como usuário sem privilégios. A porta fica limitada à própria máquina; não publique-a na internet sem proxy HTTPS e autenticação adequada. A extensão do Brave ainda precisa do navegador funcionando.
+Leia **[Auto Flow sempre ativo no Docker Desktop](docs/DOCKER_DESKTOP.md)** _antes do primeiro deploy_ para configurar o `.env`, preservar seu `AUTH_SECRET` e criar backup dos dados existentes. O container serve o painel compilado e a API como usuário sem privilégios. A porta fica limitada à própria máquina; não publique-a na internet sem proxy HTTPS e autenticação adequada. A extensão do Brave ainda precisa do navegador funcionando.
 
 ## Extensão local
 
