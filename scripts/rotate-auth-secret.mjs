@@ -9,7 +9,13 @@
  */
 import { randomBytes } from 'node:crypto'
 import {
-  existsSync, readFileSync, readdirSync, writeFileSync, renameSync, rmSync, statSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+  renameSync,
+  rmSync,
+  statSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -18,8 +24,11 @@ import { verifyBackup } from './backup.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const fields = [
-  'gemini_api_key', 'openai_api_key', 'alert_telegram_token',
-  'alert_telegram_chat_id', 'alert_webhook_url',
+  'gemini_api_key',
+  'openai_api_key',
+  'alert_telegram_token',
+  'alert_telegram_chat_id',
+  'alert_webhook_url',
 ]
 
 function configuration() {
@@ -46,20 +55,25 @@ function auditVault() {
 
   const db = new DatabaseSync(dbPath, { readOnly: true })
   try {
-    const existing = db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='organization_settings'",
-    ).get()
+    const existing = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='organization_settings'")
+      .get()
     if (!existing) throw new Error('Tabela de credenciais ausente.')
     const columns = new Set(
-      db.prepare('PRAGMA table_info(organization_settings)').all().map((item) => item.name),
+      db
+        .prepare('PRAGMA table_info(organization_settings)')
+        .all()
+        .map((item) => item.name),
     )
     const availableFields = fields.filter((field) => columns.has(field))
     if (availableFields.length !== fields.length)
       throw new Error('Schema de credenciais desconhecido. Nao vou trocar a chave.')
-    const encrypted = db.prepare(
-      'SELECT COUNT(*) count FROM organization_settings WHERE ' +
-        availableFields.map((field) => field + " LIKE 'enc:%'").join(' OR '),
-    ).get()
+    const encrypted = db
+      .prepare(
+        'SELECT COUNT(*) count FROM organization_settings WHERE ' +
+          availableFields.map((field) => field + " LIKE 'enc:%'").join(' OR '),
+      )
+      .get()
     return Number(encrypted.count)
   } finally {
     db.close()
@@ -98,7 +112,7 @@ async function main() {
   if (encrypted > 0) {
     throw new Error(
       'Credenciais criptografadas encontradas. Rotacao automatica bloqueada: ' +
-      'requer migracao segura do cofre, sem apagar ou substituir vault-key.json.',
+        'requer migracao segura do cofre, sem apagar ou substituir vault-key.json.',
     )
   }
   if (process.argv[2] === '--check') {
