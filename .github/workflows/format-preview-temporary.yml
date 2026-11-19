@@ -1,0 +1,26 @@
+name: Temporary formatting preview
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'compose.yaml'
+      - 'README.md'
+      - 'scripts/rotate-auth-secret.mjs'
+      - 'tests/docker-ops-safety.mjs'
+      - '.github/workflows/format-preview-temporary.yml'
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Print exact Prettier patch (no repository writes)
+        run: |
+          npx prettier --write compose.yaml README.md scripts/rotate-auth-secret.mjs tests/docker-ops-safety.mjs
+          git diff -- compose.yaml README.md scripts/rotate-auth-secret.mjs tests/docker-ops-safety.mjs
