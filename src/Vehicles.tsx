@@ -1184,9 +1184,13 @@ function BulkQueueDrawer({
             </span>
           </div>
         )}
-        {error && <div className="auth-error" role="alert">{error}</div>}
-        {!outcome && (
-          accounts.length ? (
+        {error && (
+          <div className="auth-error" role="alert">
+            {error}
+          </div>
+        )}
+        {!outcome &&
+          (accounts.length ? (
             <form onSubmit={(event) => void submit(event)}>
               <label>
                 Perfil Brave de destino (todos os veículos)
@@ -1230,8 +1234,7 @@ function BulkQueueDrawer({
               <h3>Nenhum perfil Brave associado</h3>
               <p>Associe um perfil em Equipe e contas para usar o envio em lote.</p>
             </div>
-          )
-        )}
+          ))}
         {outcome && (
           <div className="bulk-queue-result" role="status">
             <strong>
@@ -1239,7 +1242,9 @@ function BulkQueueDrawer({
             </strong>
             {outcome.failed.length > 0 && (
               <>
-                <p>Os veículos abaixo não entraram na fila. Corrija as pendências e tente novamente.</p>
+                <p>
+                  Os veículos abaixo não entraram na fila. Corrija as pendências e tente novamente.
+                </p>
                 <ul className="bulk-queue-errors">
                   {outcome.failed.map((failure) => (
                     <li key={failure.vehicleId}>
