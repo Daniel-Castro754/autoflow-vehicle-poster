@@ -3,7 +3,7 @@
 export type BulkQueueVehicle = {
   id: number
   label: string
-  imageCount?: number
+  imageCount?: number | undefined
 }
 
 export type BulkQueueFailure = {
