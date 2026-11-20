@@ -23,6 +23,7 @@ import { FieldLabel, HelpTip } from './HelpTip'
 import { DrawerFocusGuard } from './DrawerFocusGuard'
 import { ListingVariantsPanel } from './ListingVariantsPanel'
 import { PhotoCurationPanel } from './PhotoCurationPanel'
+import { enqueueSelectedVehicles, type BulkQueueOutcome } from './bulk-publication-queue'
 import {
   BODY_TYPES,
   FUEL_TYPES,
@@ -185,6 +186,7 @@ export default function VehiclesView({
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [editor, setEditor] = useState<VehicleRecord | null | undefined>(undefined)
   const [queueVehicle, setQueueVehicle] = useState<VehicleRecord | null>(null)
+  const [bulkQueueVehicles, setBulkQueueVehicles] = useState<VehicleRecord[] | null>(null)
   const [pageVehicles, setPageVehicles] = useState<VehicleRecord[]>(vehicles.slice(0, 25))
   const [page, setPage] = useState(1)
   const [pageLoading, setPageLoading] = useState(true)
@@ -824,6 +826,17 @@ export default function VehiclesView({
               text="A exclusão remove os veículos, suas fotos e os registros de publicação relacionados. Uma confirmação será solicitada."
               placement="bottom"
             />
+            <button
+              type="button"
+              className="bulk-queue-action"
+              disabled={pageLoading}
+              onClick={() => {
+                setBulkQueueVehicles(filtered.filter((vehicle) => selected.has(vehicle.id)))
+              }}
+            >
+              <Send />
+              Adicionar à fila ({selected.size})
+            </button>
             <button onClick={() => remove([...selected])}>
               <Trash2 />
               Excluir selecionados
@@ -1045,6 +1058,24 @@ export default function VehiclesView({
           }}
         />
       )}
+      {bulkQueueVehicles && (
+        <BulkQueueDrawer
+          api={api}
+          vehicles={bulkQueueVehicles}
+          accounts={accounts}
+          onClose={() => setBulkQueueVehicles(null)}
+          onDone={async (outcome) => {
+            setBulkQueueVehicles(null)
+            setSelected(new Set(outcome.failed.map((failure) => failure.vehicleId)))
+            notify(
+              outcome.failed.length
+                ? `${outcome.succeeded.length} veículo(s) na fila; ${outcome.failed.length} não enviado(s). Revise os motivos no resumo.`
+                : `${outcome.succeeded.length} veículo(s) adicionado(s) à fila do perfil Brave selecionado.`,
+            )
+            await reload()
+          }}
+        />
+      )}
       {queueVehicle && (
         <QueueDrawer
           api={api}
@@ -1059,6 +1090,178 @@ export default function VehiclesView({
         />
       )}
     </section>
+  )
+}
+
+function BulkQueueDrawer({
+  api,
+  vehicles,
+  accounts,
+  onClose,
+  onDone,
+}: {
+  api: ApiFn
+  vehicles: VehicleRecord[]
+  accounts: AccountOption[]
+  onClose: () => void
+  onDone: (outcome: BulkQueueOutcome) => Promise<void>
+}) {
+  const [accountId, setAccountId] = useState(
+    accounts.find((account) => !account.automationPaused)?.id || 0,
+  )
+  const [sending, setSending] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [outcome, setOutcome] = useState<BulkQueueOutcome | null>(null)
+  const [error, setError] = useState('')
+  const missingPhotos = vehicles.filter((vehicle) => !vehicle.imageCount).length
+  const accountReady = accounts.some(
+    (account) => account.id === accountId && !account.automationPaused,
+  )
+
+  async function finish() {
+    if (sending) return
+    if (outcome) await onDone(outcome)
+    else onClose()
+  }
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (sending || !accountReady) return
+    setSending(true)
+    setError('')
+    setProgress(0)
+    try {
+      const result = await enqueueSelectedVehicles({
+        vehicles: vehicles.map((vehicle) => ({
+          id: vehicle.id,
+          label: `${vehicle.year} ${vehicle.make} ${vehicle.model}`,
+          imageCount: vehicle.imageCount,
+        })),
+        accountId,
+        create: (vehicleId, profileId) =>
+          api('/publications', {
+            method: 'POST',
+            body: JSON.stringify({ vehicleId, accountId: profileId }),
+          }),
+        onProgress: (done) => setProgress(done),
+      })
+      setOutcome(result)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Erro ao adicionar em lote.')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div className="overlay" onMouseDown={() => void finish()}>
+      <aside
+        className="drawer queue-drawer bulk-queue-drawer"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <DrawerFocusGuard label="Adicionar veículos em lote à fila" onClose={() => void finish()} />
+        <button
+          type="button"
+          className="close"
+          disabled={sending}
+          onClick={() => void finish()}
+          aria-label="Fechar envio em lote"
+        >
+          <X />
+        </button>
+        <span className="eyebrow">FILA DA EXTENSÃO · EM LOTE</span>
+        <h2>Adicionar {vehicles.length} veículos à fila</h2>
+        <p>
+          Escolha o perfil do Brave. Cada veículo será validado separadamente, seguindo a ordem
+          selecionada. Nenhuma publicação será feita diretamente por este botão.
+        </p>
+        {missingPhotos > 0 && (
+          <div className="bulk-queue-warning">
+            <CircleAlert size={17} />
+            <span>
+              {missingPhotos} veículo(s) sem fotos. Esses veículos não poderão entrar na fila até
+              terem fotos e os demais dados obrigatórios cadastrados.
+            </span>
+          </div>
+        )}
+        {error && (
+          <div className="auth-error" role="alert">
+            {error}
+          </div>
+        )}
+        {!outcome &&
+          (accounts.length ? (
+            <form onSubmit={(event) => void submit(event)}>
+              <label>
+                Perfil Brave de destino (todos os veículos)
+                <select
+                  value={accountId}
+                  onChange={(event) => setAccountId(Number(event.target.value))}
+                  disabled={sending}
+                  required
+                >
+                  {accounts.map((account) => (
+                    <option
+                      key={account.id}
+                      value={account.id}
+                      disabled={Boolean(account.automationPaused)}
+                    >
+                      {account.label}
+                      {account.browserProfile ? ` · ${account.browserProfile}` : ''}
+                      {account.automationPaused ? ' · pausado' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {!accountReady && (
+                <div className="auth-error" role="alert">
+                  Selecione um perfil ativo. Perfis pausados não recebem novos trabalhos.
+                </div>
+              )}
+              {sending && (
+                <div className="bulk-queue-progress" role="status" aria-live="polite">
+                  Enviando {progress} de {vehicles.length} veículos...
+                  <progress value={progress} max={vehicles.length} />
+                </div>
+              )}
+              <button className="primary" disabled={!accountReady || sending}>
+                {sending ? 'Enviando para a fila...' : `Adicionar ${vehicles.length} à fila`}
+              </button>
+            </form>
+          ) : (
+            <div className="account-empty">
+              <Send />
+              <h3>Nenhum perfil Brave associado</h3>
+              <p>Associe um perfil em Equipe e contas para usar o envio em lote.</p>
+            </div>
+          ))}
+        {outcome && (
+          <div className="bulk-queue-result" role="status">
+            <strong>
+              {outcome.succeeded.length} enviado(s) · {outcome.failed.length} recusado(s)
+            </strong>
+            {outcome.failed.length > 0 && (
+              <>
+                <p>
+                  Os veículos abaixo não entraram na fila. Corrija as pendências e tente novamente.
+                </p>
+                <ul className="bulk-queue-errors">
+                  {outcome.failed.map((failure) => (
+                    <li key={failure.vehicleId}>
+                      <strong>{failure.label}</strong>
+                      <span>{failure.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            <button className="primary" onClick={() => void finish()}>
+              Concluir e atualizar estoque
+            </button>
+          </div>
+        )}
+      </aside>
+    </div>
   )
 }
 
