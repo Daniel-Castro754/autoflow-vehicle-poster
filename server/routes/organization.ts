@@ -603,8 +603,7 @@ export async function handleOrganizationRoute(
           'WHERE id=? AND organization_id=?',
       )
       .get(accountId, auth.organizationId) as
-      | { id: number; label: string; browserProfile: string }
-      | undefined
+      { id: number; label: string; browserProfile: string } | undefined
     if (!current) {
       send(res, 404, { error: 'Perfil de publicação não encontrado nesta empresa.' })
       return true
