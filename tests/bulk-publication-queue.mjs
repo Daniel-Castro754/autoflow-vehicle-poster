@@ -27,14 +27,25 @@ const report = await enqueueSelectedVehicles({
   },
   onProgress: (done, total) => progress.push([done, total]),
 })
-assert.deepEqual(calls, [[101, 7], [102, 7], [103, 7]])
+assert.deepEqual(calls, [
+  [101, 7],
+  [102, 7],
+  [103, 7],
+])
 assert.deepEqual(report.succeeded, [101])
 assert.equal(report.total, 3)
 assert.equal(report.failed.length, 2)
-assert.deepEqual(report.failed.map((item) => item.vehicleId), [102, 103])
+assert.deepEqual(
+  report.failed.map((item) => item.vehicleId),
+  [102, 103],
+)
 assert.match(report.failed[0].reason, /sem fotos cadastradas/i)
 assert.match(report.failed[1].reason, /já possui um trabalho/)
-assert.deepEqual(progress, [[1, 3], [2, 3], [3, 3]])
+assert.deepEqual(progress, [
+  [1, 3],
+  [2, 3],
+  [3, 3],
+])
 
 for (const [input, accountId] of [
   [vehicles, 0],
