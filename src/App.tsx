@@ -16,6 +16,7 @@ import {
   Moon,
   MoreHorizontal,
   Plus,
+  Pencil,
   Send,
   Settings,
   ShieldCheck,
@@ -503,6 +504,50 @@ export default function App() {
     }
   }
 
+  async function updateAccount(e: React.FormEvent<HTMLFormElement>, account: SocialAccount) {
+    e.preventDefault()
+    const form = new FormData(e.currentTarget)
+    try {
+      await api(`/social-accounts/${account.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          userId: Number(form.get('userId')),
+          label: form.get('label'),
+          browserProfile: form.get('browserProfile'),
+        }),
+      })
+      await loadTeam()
+      setToast('Perfil Brave atualizado.')
+      setTimeout(() => setToast(''), 3000)
+      return true
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : 'Não foi possível atualizar o perfil.')
+      setTimeout(() => setToast(''), 4000)
+      return false
+    }
+  }
+
+  async function deleteAccount(account: SocialAccount) {
+    if (
+      !window.confirm(
+        `Excluir a associação "${account.label}"? Esta operação não apaga o perfil do Brave nem a conta do Facebook. Se houver publicações ou histórico, a exclusão será bloqueada.`,
+      )
+    )
+      return
+    try {
+      await api(`/social-accounts/${account.id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ confirmLabel: account.label }),
+      })
+      await loadTeam()
+      setToast('Associação do perfil excluída.')
+      setTimeout(() => setToast(''), 3000)
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : 'Não foi possível excluir o perfil.')
+      setTimeout(() => setToast(''), 5000)
+    }
+  }
+
   async function setAccountAutomation(account: SocialAccount, paused: boolean) {
     if (
       !window.confirm(
@@ -805,6 +850,8 @@ export default function App() {
             onToggleUser={toggleUser}
             onAddUser={addUser}
             onAddAccount={addAccount}
+            onUpdateAccount={updateAccount}
+            onDeleteAccount={deleteAccount}
             onSetAccountAutomation={setAccountAutomation}
           />
         ) : active === 'Relatórios' ? (
@@ -936,6 +983,8 @@ function TeamView({
   onToggleUser,
   onAddUser,
   onAddAccount,
+  onUpdateAccount,
+  onDeleteAccount,
   onSetAccountAutomation,
 }: {
   api: <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
@@ -945,9 +994,12 @@ function TeamView({
   onToggleUser: (user: TeamUser) => Promise<void>
   onAddUser: (e: React.FormEvent<HTMLFormElement>) => Promise<boolean>
   onAddAccount: (e: React.FormEvent<HTMLFormElement>) => Promise<boolean>
+  onUpdateAccount: (e: React.FormEvent<HTMLFormElement>, account: SocialAccount) => Promise<boolean>
+  onDeleteAccount: (account: SocialAccount) => Promise<void>
   onSetAccountAutomation: (account: SocialAccount, paused: boolean) => Promise<void>
 }) {
-  const [modal, setModal] = useState<'user' | 'account' | null>(null)
+  const [modal, setModal] = useState<'user' | 'account' | 'editAccount' | null>(null)
+  const [editingAccount, setEditingAccount] = useState<SocialAccount | null>(null)
   const { activeMembers, pausedProfiles, unassignedProfiles } = calculateTeamSummary(team, accounts)
   return (
     <section className="content team-page">
@@ -1086,6 +1138,29 @@ function TeamView({
                         <i />
                         {account.automationPaused ? 'Automação pausada' : 'Aguardando extensão'}
                       </span>
+                      {canManage && (
+                        <div className="account-card-actions">
+                          <button
+                            type="button"
+                            className="account-action"
+                            onClick={() => {
+                              setEditingAccount(account)
+                              setModal('editAccount')
+                            }}
+                            aria-label={`Editar perfil ${account.label}`}
+                          >
+                            <Pencil size={15} /> Editar
+                          </button>
+                          <button
+                            type="button"
+                            className="account-action account-action-danger"
+                            onClick={() => void onDeleteAccount(account)}
+                            aria-label={`Excluir perfil ${account.label}`}
+                          >
+                            <Trash2 size={15} /> Excluir
+                          </button>
+                        </div>
+                      )}
                       {account.automationPaused && canManage && (
                         <button
                           className="team-user-toggle"
@@ -1122,7 +1197,13 @@ function TeamView({
         <div className="overlay" onMouseDown={() => setModal(null)}>
           <aside className="drawer" onMouseDown={(e) => e.stopPropagation()}>
             <DrawerFocusGuard
-              label={modal === 'user' ? 'Adicionar vendedor' : 'Associar perfil Brave'}
+              label={
+                modal === 'user'
+                  ? 'Adicionar vendedor'
+                  : modal === 'editAccount'
+                    ? 'Editar perfil Brave'
+                    : 'Associar perfil Brave'
+              }
               onClose={() => setModal(null)}
             />
             <button className="close" aria-label="Fechar formulário" onClick={() => setModal(null)}>
@@ -1166,23 +1247,38 @@ function TeamView({
             ) : (
               <>
                 <span className="eyebrow">PERFIL LOCAL</span>
-                <h2>Associar perfil do Brave</h2>
+                <h2>{modal === 'editAccount' ? 'Editar perfil do Brave' : 'Associar perfil do Brave'}</h2>
                 <p>
                   Use um perfil separado para cada pessoa. Não informe e-mail, senha ou cookie do
                   Facebook.
                 </p>
                 <form
+                  key={modal === 'editAccount' ? editingAccount?.id : 'new'}
                   onSubmit={async (e) => {
-                    if (await onAddAccount(e)) setModal(null)
+                    const saved =
+                      modal === 'editAccount' && editingAccount
+                        ? await onUpdateAccount(e, editingAccount)
+                        : await onAddAccount(e)
+                    if (saved) setModal(null)
                   }}
                 >
                   <label>
                     Identificação
-                    <input name="label" placeholder="Ex.: Facebook — Marina" required />
+                    <input
+                      name="label"
+                      placeholder="Ex.: Facebook — Marina"
+                      defaultValue={modal === 'editAccount' ? editingAccount?.label : ''}
+                      maxLength={100}
+                      required
+                    />
                   </label>
                   <label>
                     Responsável
-                    <select name="userId" required>
+                    <select
+                      name="userId"
+                      defaultValue={modal === 'editAccount' ? editingAccount?.userId : ''}
+                      required
+                    >
                       <option value="">Selecione</option>
                       {team
                         .filter((user) => user.active === 1)
@@ -1195,9 +1291,17 @@ function TeamView({
                   </label>
                   <label>
                     Nome do perfil no Brave
-                    <input name="browserProfile" placeholder="Ex.: Perfil 2" required />
+                    <input
+                      name="browserProfile"
+                      placeholder="Ex.: Perfil 2"
+                      defaultValue={modal === 'editAccount' ? editingAccount?.browserProfile : ''}
+                      maxLength={100}
+                      required
+                    />
                   </label>
-                  <button className="primary">Associar perfil</button>
+                  <button className="primary">
+                    {modal === 'editAccount' ? 'Salvar alterações' : 'Associar perfil'}
+                  </button>
                 </form>
               </>
             )}
