@@ -1247,7 +1247,9 @@ function TeamView({
             ) : (
               <>
                 <span className="eyebrow">PERFIL LOCAL</span>
-                <h2>{modal === 'editAccount' ? 'Editar perfil do Brave' : 'Associar perfil do Brave'}</h2>
+                <h2>
+                  {modal === 'editAccount' ? 'Editar perfil do Brave' : 'Associar perfil do Brave'}
+                </h2>
                 <p>
                   Use um perfil separado para cada pessoa. Não informe e-mail, senha ou cookie do
                   Facebook.
