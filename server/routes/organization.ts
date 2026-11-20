@@ -638,6 +638,16 @@ export async function handleOrganizationRoute(
         send(res, 400, { error: 'Selecione um responsável ativo da mesma empresa.' })
         return true
       }
+      const duplicate = db
+        .prepare(
+          'SELECT id FROM social_accounts ' +
+            'WHERE organization_id=? AND id!=? AND lower(trim(browser_profile))=lower(?)',
+        )
+        .get(auth.organizationId, accountId, browserProfile)
+      if (duplicate) {
+        send(res, 409, { error: 'Já existe um perfil associado com esse nome no Brave.' })
+        return true
+      }
       db.prepare(
         'UPDATE social_accounts SET label=?,browser_profile=?,user_id=? ' +
           'WHERE id=? AND organization_id=?',
@@ -704,16 +714,42 @@ export async function handleOrganizationRoute(
       send(res, 403, { error: 'Somente administradores podem associar perfis do Brave.' })
       return true
     }
-    const body = (await jsonBody(req)) as Record<string, unknown>
-    const owner = db
-      .prepare('SELECT id FROM users WHERE id=? AND organization_id=?')
-      .get(Number(body.userId), auth.organizationId)
-    if (!owner) {
-      send(res, 400, { error: 'O responsável selecionado não pertence à empresa.' })
+    const raw = await jsonBody(req)
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      send(res, 400, { error: 'Dados do perfil inválidos.' })
       return true
     }
-    if (!body.label || !body.browserProfile) {
-      send(res, 400, { error: 'Rótulo e perfil do Brave são obrigatórios.' })
+    const body = raw as Record<string, unknown>
+    if (
+      typeof body.label !== 'string' ||
+      typeof body.browserProfile !== 'string' ||
+      typeof body.userId !== 'number' ||
+      !Number.isSafeInteger(body.userId)
+    ) {
+      send(res, 400, { error: 'Informe identificação, nome no Brave e responsável válidos.' })
+      return true
+    }
+    const label = body.label.trim()
+    const browserProfile = body.browserProfile.trim()
+    if (!label || !browserProfile || label.length > 100 || browserProfile.length > 100) {
+      send(res, 400, { error: 'Os nomes são obrigatórios e limitados a 100 caracteres.' })
+      return true
+    }
+    const owner = db
+      .prepare('SELECT id FROM users WHERE id=? AND organization_id=? AND active=1')
+      .get(body.userId, auth.organizationId)
+    if (!owner) {
+      send(res, 400, { error: 'O responsável selecionado não pertence à empresa ou está inativo.' })
+      return true
+    }
+    const existing = db
+      .prepare(
+        'SELECT id FROM social_accounts ' +
+          'WHERE organization_id=? AND lower(trim(browser_profile))=lower(?)',
+      )
+      .get(auth.organizationId, browserProfile)
+    if (existing) {
+      send(res, 409, { error: 'Já existe um perfil associado com esse nome no Brave.' })
       return true
     }
     const result = db
@@ -721,12 +757,7 @@ export async function handleOrganizationRoute(
         `INSERT INTO social_accounts (organization_id,user_id,label,browser_profile,status)
       VALUES (?,?,?,?, 'not_connected')`,
       )
-      .run(
-        auth.organizationId,
-        Number(body.userId),
-        String(body.label),
-        String(body.browserProfile),
-      )
+      .run(auth.organizationId, body.userId, label, browserProfile)
     send(res, 201, { id: Number(result.lastInsertRowid) })
     return true
   }
