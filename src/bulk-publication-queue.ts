@@ -32,7 +32,11 @@ export async function enqueueSelectedVehicles({
   if (!Number.isSafeInteger(accountId) || accountId <= 0)
     throw new Error('Selecione um perfil do Brave válido.')
   const unique = [...new Map(vehicles.map((vehicle) => [vehicle.id, vehicle])).values()]
-  if (!unique.length || unique.length > 25 || unique.some((vehicle) => !Number.isSafeInteger(vehicle.id) || vehicle.id <= 0))
+  if (
+    !unique.length ||
+    unique.length > 25 ||
+    unique.some((vehicle) => !Number.isSafeInteger(vehicle.id) || vehicle.id <= 0)
+  )
     throw new Error('Selecione de 1 a 25 veículos válidos desta página.')
 
   const succeeded: number[] = []
