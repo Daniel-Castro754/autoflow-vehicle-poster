@@ -585,21 +585,170 @@ export async function handleOrganizationRoute(
     return true
   }
 
+  // Editar ou excluir somente associações locais: nunca manipular sessões do Facebook.
+  const identityRoute = url.pathname.match(/^\/api\/social-accounts\/(\d+)$/)
+  if (identityRoute && (req.method === 'PATCH' || req.method === 'DELETE')) {
+    if (!isAdmin(auth)) {
+      send(res, 403, { error: 'Somente administradores podem gerenciar perfis do Brave.' })
+      return true
+    }
+    const accountId = Number(identityRoute[1])
+    if (!Number.isSafeInteger(accountId) || accountId <= 0) {
+      send(res, 400, { error: 'Identificador do perfil inválido.' })
+      return true
+    }
+    const current = db
+      .prepare(
+        'SELECT id,label,browser_profile browserProfile FROM social_accounts ' +
+          'WHERE id=? AND organization_id=?',
+      )
+      .get(accountId, auth.organizationId) as
+      { id: number; label: string; browserProfile: string } | undefined
+    if (!current) {
+      send(res, 404, { error: 'Perfil de publicação não encontrado nesta empresa.' })
+      return true
+    }
+    const raw = await jsonBody(req)
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      send(res, 400, { error: 'Dados do perfil inválidos.' })
+      return true
+    }
+    const body = raw as Record<string, unknown>
+    if (req.method === 'PATCH') {
+      if (
+        typeof body.label !== 'string' ||
+        typeof body.browserProfile !== 'string' ||
+        typeof body.userId !== 'number' ||
+        !Number.isSafeInteger(body.userId)
+      ) {
+        send(res, 400, { error: 'Informe identificação, nome no Brave e responsável válidos.' })
+        return true
+      }
+      const label = body.label.trim()
+      const browserProfile = body.browserProfile.trim()
+      if (!label || !browserProfile || label.length > 100 || browserProfile.length > 100) {
+        send(res, 400, { error: 'Os nomes são obrigatórios e limitados a 100 caracteres.' })
+        return true
+      }
+      const owner = db
+        .prepare('SELECT id FROM users WHERE id=? AND organization_id=? AND active=1')
+        .get(body.userId, auth.organizationId)
+      if (!owner) {
+        send(res, 400, { error: 'Selecione um responsável ativo da mesma empresa.' })
+        return true
+      }
+      const duplicate = db
+        .prepare(
+          'SELECT id FROM social_accounts ' +
+            'WHERE organization_id=? AND id!=? AND lower(trim(browser_profile))=lower(?)',
+        )
+        .get(auth.organizationId, accountId, browserProfile)
+      if (duplicate) {
+        send(res, 409, { error: 'Já existe um perfil associado com esse nome no Brave.' })
+        return true
+      }
+      db.prepare(
+        'UPDATE social_accounts SET label=?,browser_profile=?,user_id=? ' +
+          'WHERE id=? AND organization_id=?',
+      ).run(label, browserProfile, body.userId, accountId, auth.organizationId)
+      send(res, 200, { ok: true, accountId, label, browserProfile, userId: body.userId })
+      return true
+    }
+    if (body.confirmLabel !== current.label) {
+      send(res, 400, { error: 'Confirme o nome atual do perfil para excluir.' })
+      return true
+    }
+    // FK constraints also protect other references; never cascade deletion of job history.
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const fresh = db
+        .prepare('SELECT label FROM social_accounts WHERE id=? AND organization_id=?')
+        .get(accountId, auth.organizationId) as { label: string } | undefined
+      if (!fresh || fresh.label !== body.confirmLabel) {
+        db.exec('ROLLBACK')
+        send(res, 409, { error: 'O perfil foi alterado. Atualize a lista e tente novamente.' })
+        return true
+      }
+      const jobs = db
+        .prepare(
+          'SELECT COUNT(*) count FROM publication_jobs WHERE organization_id=? AND social_account_id=?',
+        )
+        .get(auth.organizationId, accountId) as { count: number }
+      const events = db
+        .prepare(
+          'SELECT COUNT(*) count FROM publication_job_events ' +
+            'WHERE organization_id=? AND (from_account_id=? OR to_account_id=?)',
+        )
+        .get(auth.organizationId, accountId, accountId) as { count: number }
+      if (jobs.count > 0 || events.count > 0) {
+        db.exec('ROLLBACK')
+        send(res, 409, {
+          error:
+            'Este perfil possui publicações ou histórico associado. A exclusão foi bloqueada ' +
+            'para preservar os registros. Edite ou pause o perfil em vez de excluí-lo.',
+        })
+        return true
+      }
+      db.prepare('DELETE FROM social_accounts WHERE id=? AND organization_id=?').run(
+        accountId,
+        auth.organizationId,
+      )
+      db.exec('COMMIT')
+      send(res, 200, { ok: true, accountId })
+    } catch (error) {
+      db.exec('ROLLBACK')
+      if (String(error).includes('FOREIGN KEY')) {
+        send(res, 409, {
+          error: 'Não é possível excluir: existem registros vinculados a este perfil.',
+        })
+        return true
+      }
+      throw error
+    }
+    return true
+  }
+
   if (req.method === 'POST' && url.pathname === '/api/social-accounts') {
     if (!isAdmin(auth)) {
       send(res, 403, { error: 'Somente administradores podem associar perfis do Brave.' })
       return true
     }
-    const body = (await jsonBody(req)) as Record<string, unknown>
-    const owner = db
-      .prepare('SELECT id FROM users WHERE id=? AND organization_id=?')
-      .get(Number(body.userId), auth.organizationId)
-    if (!owner) {
-      send(res, 400, { error: 'O responsável selecionado não pertence à empresa.' })
+    const raw = await jsonBody(req)
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      send(res, 400, { error: 'Dados do perfil inválidos.' })
       return true
     }
-    if (!body.label || !body.browserProfile) {
-      send(res, 400, { error: 'Rótulo e perfil do Brave são obrigatórios.' })
+    const body = raw as Record<string, unknown>
+    if (
+      typeof body.label !== 'string' ||
+      typeof body.browserProfile !== 'string' ||
+      typeof body.userId !== 'number' ||
+      !Number.isSafeInteger(body.userId)
+    ) {
+      send(res, 400, { error: 'Informe identificação, nome no Brave e responsável válidos.' })
+      return true
+    }
+    const label = body.label.trim()
+    const browserProfile = body.browserProfile.trim()
+    if (!label || !browserProfile || label.length > 100 || browserProfile.length > 100) {
+      send(res, 400, { error: 'Os nomes são obrigatórios e limitados a 100 caracteres.' })
+      return true
+    }
+    const owner = db
+      .prepare('SELECT id FROM users WHERE id=? AND organization_id=? AND active=1')
+      .get(body.userId, auth.organizationId)
+    if (!owner) {
+      send(res, 400, { error: 'O responsável selecionado não pertence à empresa ou está inativo.' })
+      return true
+    }
+    const existing = db
+      .prepare(
+        'SELECT id FROM social_accounts ' +
+          'WHERE organization_id=? AND lower(trim(browser_profile))=lower(?)',
+      )
+      .get(auth.organizationId, browserProfile)
+    if (existing) {
+      send(res, 409, { error: 'Já existe um perfil associado com esse nome no Brave.' })
       return true
     }
     const result = db
@@ -607,12 +756,7 @@ export async function handleOrganizationRoute(
         `INSERT INTO social_accounts (organization_id,user_id,label,browser_profile,status)
       VALUES (?,?,?,?, 'not_connected')`,
       )
-      .run(
-        auth.organizationId,
-        Number(body.userId),
-        String(body.label),
-        String(body.browserProfile),
-      )
+      .run(auth.organizationId, body.userId, label, browserProfile)
     send(res, 201, { id: Number(result.lastInsertRowid) })
     return true
   }

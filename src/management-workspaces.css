@@ -555,6 +555,55 @@
   min-height: 34px;
   font-size: 12px;
 }
+.team-page .account-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.team-page .account-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius-sm);
+  padding: 7px 10px;
+  background: var(--af-surface);
+  color: var(--af-text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.team-page .account-action:hover {
+  background: var(--af-surface-muted);
+}
+
+.team-page .account-action-danger {
+  color: #b53d3d;
+  border-color: #dba3a3;
+}
+
+.team-page .account-action-danger:hover {
+  background: #fff1f1;
+}
+
+.team-page .account-action:focus-visible {
+  outline: 2px solid var(--af-primary);
+  outline-offset: 2px;
+}
+
+@media (max-width: 740px) {
+  .team-page .account-card-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+}
+
 .team-page .security-note {
   border: 1px solid var(--af-border);
   border-radius: var(--af-radius);
