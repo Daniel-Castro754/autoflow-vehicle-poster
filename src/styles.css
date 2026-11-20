@@ -2185,6 +2185,17 @@ td {
   font-size: 9px;
   font-weight: 600;
 }
+.bulk-bar .bulk-queue-action {
+  background: #155e9a;
+  color: #fff;
+}
+.bulk-bar .bulk-queue-action:hover {
+  background: #124b77;
+}
+.bulk-bar button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .bulk-bar .bulk-clear {
   background: transparent;
   color: #56716a;
@@ -3822,6 +3833,73 @@ td {
 }
 .row-menu-action.danger > button {
   color: #b54f47;
+}
+/* Batch stock -> extension queue, reusing the single-car publication validation. */
+.bulk-queue-drawer .bulk-queue-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  margin: 14px 0;
+  border: 1px solid #f1d09a;
+  border-radius: 8px;
+  color: #895a13;
+  background: #fff8ea;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.bulk-queue-warning svg {
+  flex: 0 0 17px;
+  margin-top: 1px;
+}
+.bulk-queue-progress {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  color: var(--af-text);
+  font-size: 12px;
+}
+.bulk-queue-progress progress {
+  width: 100%;
+  height: 10px;
+  accent-color: #16735f;
+}
+.bulk-queue-result {
+  display: grid;
+  gap: 12px;
+}
+.bulk-queue-result > strong {
+  font-size: 15px;
+}
+.bulk-queue-errors {
+  display: grid;
+  gap: 8px;
+  max-height: 330px;
+  padding: 0;
+  margin: 0 0 8px;
+  list-style: none;
+  overflow-y: auto;
+}
+.bulk-queue-errors li {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--af-border);
+  border-radius: 8px;
+}
+.bulk-queue-errors li strong {
+  color: var(--af-text);
+  font-size: 12px;
+}
+.bulk-queue-errors li span {
+  color: var(--af-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.theme-dark .bulk-queue-drawer .bulk-queue-warning {
+  background: #38291a;
+  color: #f2c782;
+  border-color: #72512c;
 }
 .queue-drawer {
   width: min(480px, 100%);
