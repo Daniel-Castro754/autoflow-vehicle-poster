@@ -22,6 +22,20 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - name: Validate Auto Flow Docker PowerShell syntax
+        shell: powershell
+        run: |
+          foreach ($file in @('scripts/backup-docker.ps1', 'scripts/install-backup-task.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file).Path, [ref]$tokens, [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Host $_.ToString() }
+              throw "Erro de sintaxe PowerShell: $file"
+            }
+          }
       - run: node tests/windows-vault.mjs
       - run: node tests/windows-recovery.mjs
       - run: node --import=./tests/helpers/offline.mjs tests/backup-verification.mjs
