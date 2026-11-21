@@ -397,7 +397,16 @@ export default function App() {
       operationalStats?.vehicles.attention ?? vehicles.filter((v) => v.status === 'Atenção').length
     const ready =
       operationalStats?.vehicles.ready ?? vehicles.filter((v) => v.status === 'Pronto').length
-    const waiting = accounts.filter((a) => a.status !== 'connected').length
+    const waiting = accounts.filter((a) => {
+      const stamp = a.lastSeenAt
+        ? Date.parse(
+            /(?:Z|[+-]\\d\\d:\\d\\d)$/.test(a.lastSeenAt)
+              ? a.lastSeenAt
+              : a.lastSeenAt.replace(' ', 'T') + 'Z',
+          )
+        : NaN
+      return a.status !== 'connected' || !Number.isFinite(stamp) || Date.now() - stamp > 5 * 60_000
+    }).length
     const soldPendingRemoval = operationalStats?.vehicles.soldPendingRemoval ?? 0
     const overdue = operationalStats?.vehicles.soldRemovalOverdue ?? 0
     if (attention)
@@ -850,6 +859,7 @@ export default function App() {
             onToggleUser={toggleUser}
             onAddUser={addUser}
             onAddAccount={addAccount}
+            onRefreshProfiles={loadTeam}
             onUpdateAccount={updateAccount}
             onDeleteAccount={deleteAccount}
             onSetAccountAutomation={setAccountAutomation}
@@ -983,6 +993,7 @@ function TeamView({
   onToggleUser,
   onAddUser,
   onAddAccount,
+  onRefreshProfiles,
   onUpdateAccount,
   onDeleteAccount,
   onSetAccountAutomation,
@@ -994,12 +1005,22 @@ function TeamView({
   onToggleUser: (user: TeamUser) => Promise<void>
   onAddUser: (e: React.FormEvent<HTMLFormElement>) => Promise<boolean>
   onAddAccount: (e: React.FormEvent<HTMLFormElement>) => Promise<boolean>
+  onRefreshProfiles: () => Promise<void>
   onUpdateAccount: (e: React.FormEvent<HTMLFormElement>, account: SocialAccount) => Promise<boolean>
   onDeleteAccount: (account: SocialAccount) => Promise<void>
   onSetAccountAutomation: (account: SocialAccount, paused: boolean) => Promise<void>
 }) {
   const [modal, setModal] = useState<'user' | 'account' | 'editAccount' | null>(null)
   const [editingAccount, setEditingAccount] = useState<SocialAccount | null>(null)
+  const [presenceNow, setPresenceNow] = useState(() => Date.now())
+  useEffect(() => {
+    const refresh = () => {
+      setPresenceNow(Date.now())
+      void onRefreshProfiles()
+    }
+    const timer = setInterval(refresh, 60_000)
+    return () => clearInterval(timer)
+  }, [onRefreshProfiles])
   const { activeMembers, pausedProfiles, unassignedProfiles } = calculateTeamSummary(team, accounts)
   return (
     <section className="content team-page">
@@ -1119,6 +1140,25 @@ function TeamView({
             <div className="account-list">
               {accounts.map((account) => {
                 const owner = team.find((u) => u.id === account.userId)
+                const lastSeen = account.lastSeenAt
+                  ? Date.parse(
+                      /(?:Z|[+-]\\d\\d:\\d\\d)$/.test(account.lastSeenAt)
+                        ? account.lastSeenAt
+                        : account.lastSeenAt.replace(' ', 'T') + 'Z',
+                    )
+                  : NaN
+                const recentlySeen =
+                  account.status === 'connected' &&
+                  Number.isFinite(lastSeen) &&
+                  lastSeen <= presenceNow &&
+                  presenceNow - lastSeen < 5 * 60_000
+                const presenceLabel = account.automationPaused
+                  ? 'Automação pausada'
+                  : recentlySeen
+                    ? 'Extensão conectada'
+                    : account.lastSeenAt
+                      ? 'Sem sinal recente'
+                      : 'Aguardando extensão'
                 return (
                   <div className="account-card" key={account.id}>
                     <div className="account-card-header">
@@ -1132,11 +1172,16 @@ function TeamView({
                         </small>
                       </div>
                       <span
-                        className={`connection ${account.automationPaused ? 'paused' : ''}`}
-                        title={account.automationPauseReason || ''}
+                        className={`connection ${account.automationPaused ? 'paused' : recentlySeen ? 'connected' : 'offline'}`}
+                        title={
+                          account.automationPauseReason ||
+                          (Number.isFinite(lastSeen)
+                            ? `Último contato da extensão: ${new Date(lastSeen).toLocaleString('pt-BR')}. Não confirma sessão no Facebook.`
+                            : 'Nenhum contato registrado da extensão.')
+                        }
                       >
                         <i />
-                        {account.automationPaused ? 'Automação pausada' : 'Aguardando extensão'}
+                        {presenceLabel}
                       </span>
                       {canManage && (
                         <div className="account-card-actions">
