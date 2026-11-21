@@ -7,6 +7,7 @@ import { findBestAccountForVehicle } from '../server/modules/accounts.ts'
 
 const server = await startTestServer()
 const db = new DatabaseSync(join(server.dataDir, 'autoflow.db'))
+db.function('autoflow_day', (value) => String(value || '').slice(0, 10))
 const fail = (op, status) => assert.rejects(op, (error) => error.status === status)
 
 try {
