@@ -17,12 +17,16 @@ try {
     body: JSON.stringify({ email: server.email, password: server.password }),
   })
   const api = createApiClient(server.base, login.token)
-  const owner = db.prepare('SELECT id, organization_id org FROM users WHERE email=?').get(server.email)
+  const owner = db
+    .prepare('SELECT id, organization_id org FROM users WHERE email=?')
+    .get(server.email)
   const accountId = Number(
-    db.prepare(
-      "INSERT INTO social_accounts (organization_id,user_id,label,browser_profile,status) " +
-      "VALUES (?,?, 'Daniel','Daniel','not_connected')",
-    ).run(owner.org, owner.id).lastInsertRowid,
+    db
+      .prepare(
+        'INSERT INTO social_accounts (organization_id,user_id,label,browser_profile,status) ' +
+          "VALUES (?,?, 'Daniel','Daniel','not_connected')",
+      )
+      .run(owner.org, owner.id).lastInsertRowid,
   )
 
   const presence = (id) =>
@@ -32,10 +36,11 @@ try {
     })
 
   await fail(
-    () => anon('/extension/presence', {
-      method: 'POST',
-      body: JSON.stringify({ accountId }),
-    }),
+    () =>
+      anon('/extension/presence', {
+        method: 'POST',
+        body: JSON.stringify({ accountId }),
+      }),
     401,
   )
   await fail(() => presence(-1), 403)
@@ -43,13 +48,16 @@ try {
   await fail(() => presence(999999), 403)
 
   const foreignOrg = Number(
-    db.prepare("INSERT INTO organizations(name) VALUES ('Fora da organização')").run().lastInsertRowid,
+    db.prepare("INSERT INTO organizations(name) VALUES ('Fora da organização')").run()
+      .lastInsertRowid,
   )
   const foreignAccount = Number(
-    db.prepare(
-      "INSERT INTO social_accounts (organization_id,user_id,label,browser_profile,status) " +
-      "VALUES (?,?, 'Outro','Outro','not_connected')",
-    ).run(foreignOrg, owner.id).lastInsertRowid,
+    db
+      .prepare(
+        'INSERT INTO social_accounts (organization_id,user_id,label,browser_profile,status) ' +
+          "VALUES (?,?, 'Outro','Outro','not_connected')",
+      )
+      .run(foreignOrg, owner.id).lastInsertRowid,
   )
   await fail(() => presence(foreignAccount), 403)
 
@@ -59,9 +67,9 @@ try {
   ).run(accountId)
   assert.equal(findBestAccountForVehicle(db, owner.org, 12345), null)
   assert.deepEqual(await presence(accountId), { ok: true })
-  const fresh = db.prepare(
-    'SELECT status,last_seen_at lastSeen FROM social_accounts WHERE id=?',
-  ).get(accountId)
+  const fresh = db
+    .prepare('SELECT status,last_seen_at lastSeen FROM social_accounts WHERE id=?')
+    .get(accountId)
   assert.equal(fresh.status, 'connected')
   assert(fresh.lastSeen)
   assert.equal(findBestAccountForVehicle(db, owner.org, 12345)?.id, accountId)
@@ -71,9 +79,11 @@ try {
     "UPDATE social_accounts SET automation_paused=1,last_seen_at=datetime('now','-20 minutes') WHERE id=?",
   ).run(accountId)
   assert.deepEqual(await presence(accountId), { ok: true })
-  const paused = db.prepare(
-    'SELECT automation_paused paused,last_seen_at lastSeen FROM social_accounts WHERE id=?',
-  ).get(accountId)
+  const paused = db
+    .prepare(
+      'SELECT automation_paused paused,last_seen_at lastSeen FROM social_accounts WHERE id=?',
+    )
+    .get(accountId)
   assert.equal(paused.paused, 1)
   assert(paused.lastSeen)
   assert.equal(findBestAccountForVehicle(db, owner.org, 12345), null)
