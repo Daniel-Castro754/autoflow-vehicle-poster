@@ -40,6 +40,7 @@ export function findBestAccountForVehicle(
           AND busy.status IN ('pending','filling','error','awaiting_confirmation')) busy
       FROM social_accounts a
       WHERE a.organization_id = ? AND a.status = 'connected' AND COALESCE(a.automation_paused,0)=0
+        AND a.last_seen_at IS NOT NULL AND datetime(a.last_seen_at)>=datetime('now','-5 minutes')
       ORDER BY a.label
     `,
     )

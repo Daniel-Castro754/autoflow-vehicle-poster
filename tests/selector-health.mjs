@@ -52,10 +52,10 @@ db.exec(`
   );
   INSERT INTO organization_settings (organization_id,daily_limit) VALUES (1,10);
   INSERT INTO social_accounts
-    (id,organization_id,label,browser_profile,status,automation_paused)
+    (id,organization_id,label,browser_profile,status,automation_paused,last_seen_at)
   VALUES
-    (1,1,'Perfil com drift','Profile 1','connected',0),
-    (2,1,'Perfil saudável','Profile 2','connected',0);
+    (1,1,'Perfil com drift','Profile 1','connected',0,CURRENT_TIMESTAMP),
+    (2,1,'Perfil saudável','Profile 2','connected',0,CURRENT_TIMESTAMP);
   INSERT INTO publication_jobs (id,organization_id,social_account_id,vehicle_id,status,paused)
   VALUES
     (1,1,1,10,'pending',0),

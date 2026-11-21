@@ -484,7 +484,8 @@ async function planAutopilotJobs(
     .prepare(
       `SELECT a.id,MAX(0,MIN(COALESCE(a.daily_limit_override,?),?)-COALESCE(SUM(CASE WHEN autoflow_day(j.created_at)=autoflow_day(CURRENT_TIMESTAMP) AND j.status!='canceled' THEN 1 ELSE 0 END),0)) remaining
     FROM social_accounts a LEFT JOIN publication_jobs j ON j.organization_id=a.organization_id AND j.social_account_id=a.id
-    WHERE a.organization_id=? AND a.status='connected' AND COALESCE(a.automation_paused,0)=0 GROUP BY a.id`,
+    WHERE a.organization_id=? AND a.status='connected' AND COALESCE(a.automation_paused,0)=0
+      AND a.last_seen_at IS NOT NULL AND datetime(a.last_seen_at)>=datetime('now','-5 minutes') GROUP BY a.id`,
     )
     .all(dailyLimit, dailyLimit, organizationId) as Array<{ id: number; remaining: number }>
   const remainingCapacity = accountCapacity.reduce(
@@ -496,7 +497,8 @@ async function planAutopilotJobs(
   const accounts = db
     .prepare(
       `SELECT id, label, browser_profile browserProfile, status FROM social_accounts
-    WHERE organization_id = ? AND status='connected'`,
+    WHERE organization_id = ? AND status='connected' AND COALESCE(automation_paused,0)=0
+      AND last_seen_at IS NOT NULL AND datetime(last_seen_at)>=datetime('now','-5 minutes')`,
     )
     .all(organizationId) as Array<{
     id: number
@@ -513,7 +515,7 @@ async function planAutopilotJobs(
       descriptionsOptimized: 0,
       assignments: [],
       message:
-        'Não há perfis de publicação cadastrados. Associe um perfil do Brave antes de rodar o piloto automático.',
+        'Não há perfis Brave ativos com comunicação recente. Abra a extensão do perfil e verifique a conexão antes de rodar o piloto automático.',
     }
   }
 

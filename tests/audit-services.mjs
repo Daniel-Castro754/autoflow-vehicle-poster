@@ -116,7 +116,7 @@ try {
     INSERT INTO organizations(id,name) VALUES(1,'Audit');
     INSERT INTO organization_settings(organization_id,daily_limit,auto_publish,auto_advance) VALUES(1,2,1,1);
     INSERT INTO users(id,organization_id,name,email,password_hash) VALUES(1,1,'Audit','audit@local','fixture');
-    INSERT INTO social_accounts(id,organization_id,user_id,label,status) VALUES(1,1,1,'A','connected'),(2,1,1,'B','connected'),(3,1,1,'Offline','not_connected');`)
+    INSERT INTO social_accounts(id,organization_id,user_id,label,status,last_seen_at) VALUES(1,1,1,'A','connected',CURRENT_TIMESTAMP),(2,1,1,'B','connected',CURRENT_TIMESTAMP),(3,1,1,'Offline','not_connected',NULL);`)
   for (let id = 1; id <= 5; id++) {
     db.prepare(
       `INSERT INTO vehicles(id,organization_id,year,make,model,price,km,status,location,description,exterior_color,interior_color,vehicle_condition)
