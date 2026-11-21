@@ -136,10 +136,9 @@ try {
       browserProfile: 'Profile 1',
     }),
   })
-  db.prepare("UPDATE social_accounts SET status='connected',last_seen_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(
-    social.id,
-    org,
-  )
+  db.prepare(
+    "UPDATE social_accounts SET status='connected',last_seen_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+  ).run(social.id, org)
   const pilotPreview = await api('/ai/autopilot/preview')
   assert(pilotPreview.previewId)
   assert(pilotPreview.potentialVehicles.some((item) => item.id === candidate.id))
