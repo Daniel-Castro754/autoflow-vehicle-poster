@@ -1024,6 +1024,28 @@ td {
   border-radius: 50%;
   margin-right: 5px;
 }
+.connection.connected {
+  color: #116b51;
+  background: #e4f5ec;
+}
+.connection.connected i {
+  background: #16876a;
+}
+.connection.offline {
+  color: #6b6f75;
+  background: #eef0f2;
+}
+.connection.offline i {
+  background: #8d969f;
+}
+.theme-dark .connection.connected {
+  color: #b1efd8;
+  background: #153d32;
+}
+.theme-dark .connection.offline {
+  color: #c6ced5;
+  background: #303842;
+}
 .connection.paused {
   color: #9d3f3f;
   background: #fdeaea;
