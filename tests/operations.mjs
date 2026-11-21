@@ -46,7 +46,7 @@ function seedOrg(id, enabled = 1) {
     'INSERT INTO organization_settings(organization_id,autopilot_enabled,daily_limit,auto_publish,auto_advance,stuck_timeout_minutes) VALUES(?,?,2,1,1,15)',
   ).run(id, enabled)
   db.prepare(
-    "INSERT INTO social_accounts(id,organization_id,user_id,label,status) VALUES(?,?,?,?,'connected')",
+    "INSERT INTO social_accounts(id,organization_id,user_id,label,status,last_seen_at) VALUES(?,?,?,?,'connected',CURRENT_TIMESTAMP)",
   ).run(id, id, id, `Account ${id}`)
 }
 function vehicle(
@@ -71,7 +71,7 @@ try {
   vehicle(20, 2)
   vehicle(30, 3)
   db.exec(
-    "INSERT INTO social_accounts(id,organization_id,user_id,label,status) VALUES(10,1,1,'Second account','connected')",
+    "INSERT INTO social_accounts(id,organization_id,user_id,label,status,last_seen_at) VALUES(10,1,1,'Second account','connected',CURRENT_TIMESTAMP)",
   )
   const started = deferred(),
     finish = deferred()
