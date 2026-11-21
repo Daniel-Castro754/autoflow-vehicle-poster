@@ -136,7 +136,7 @@ try {
       browserProfile: 'Profile 1',
     }),
   })
-  db.prepare("UPDATE social_accounts SET status='connected' WHERE id=? AND organization_id=?").run(
+  db.prepare("UPDATE social_accounts SET status='connected',last_seen_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").run(
     social.id,
     org,
   )
