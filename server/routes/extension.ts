@@ -105,9 +105,10 @@ export async function handleExtensionRoute(
     // Facebook session or permission to publish. Paused profiles may report
     // liveness without having their pause removed.
     const raw = await jsonBody(req, 2048)
-    const body = raw && typeof raw === 'object' && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>)
-      : null
+    const body =
+      raw && typeof raw === 'object' && !Array.isArray(raw)
+        ? (raw as Record<string, unknown>)
+        : null
     const accountId = body?.accountId
     if (
       typeof accountId !== 'number' ||
