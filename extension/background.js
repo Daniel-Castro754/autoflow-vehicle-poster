@@ -279,6 +279,25 @@ function ensureHeartbeatAlarm() {
     if (!alarm) chrome.alarms.create(HEARTBEAT_ALARM, { delayInMinutes: 0.5, periodInMinutes: 1 })
   })
 }
+// This only reports that the local extension can reach AutoFlow.
+// It does not assert Facebook login, DOM readiness or a successful publication.
+async function reportExtensionPresence() {
+  const state = await chrome.storage.local.get([
+    'activeAccountId',
+    'token',
+    'refreshToken',
+  ])
+  if (!state.activeAccountId || (!state.token && !state.refreshToken)) return
+  try {
+    await authorizedFetch(`${API}/extension/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountId: state.activeAccountId }),
+    })
+  } catch {
+    // A temporary outage does not change manual pause or authentication state.
+  }
+}
 function scheduleConsumer(nextAt) {
   const delay = Math.max(
     1,
@@ -484,10 +503,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.runtime.onInstalled.addListener(() => {
   console.info('AutoFlow instalado no Brave')
   ensureHeartbeatAlarm()
+  void reportExtensionPresence()
   void synchronizeAutonomousConsumption().catch(() => {})
 })
 chrome.runtime.onStartup.addListener(() => {
   ensureHeartbeatAlarm()
+  void reportExtensionPresence()
   void synchronizeAutonomousConsumption()
     .then((enabled) => {
       if (enabled) return consumeQueue()
@@ -499,6 +520,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   void (async () => {
     await validatePendingTab()
     await flushPendingResults()
+    await reportExtensionPresence()
     await synchronizeAutonomousConsumption()
     await consumeQueue()
   })().catch((error) => console.warn('AutoFlow: falha na verificação da fila', error))
@@ -681,6 +703,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
   if (message.type === 'AUTOFLOW_SYNC_AUTONOMY') {
+    void reportExtensionPresence()
     void synchronizeAutonomousConsumption()
       .then(async (enabled) => {
         if (enabled) await consumeQueue()
