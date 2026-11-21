@@ -400,7 +400,7 @@ export default function App() {
     const waiting = accounts.filter((a) => {
       const stamp = a.lastSeenAt
         ? Date.parse(
-            /(?:Z|[+-]\\d\\d:\\d\\d)$/.test(a.lastSeenAt)
+            /(?:Z|[+-]\d\d:\d\d)$/.test(a.lastSeenAt)
               ? a.lastSeenAt
               : a.lastSeenAt.replace(' ', 'T') + 'Z',
           )
@@ -1142,7 +1142,7 @@ function TeamView({
                 const owner = team.find((u) => u.id === account.userId)
                 const lastSeen = account.lastSeenAt
                   ? Date.parse(
-                      /(?:Z|[+-]\\d\\d:\\d\\d)$/.test(account.lastSeenAt)
+                      /(?:Z|[+-]\d\d:\d\d)$/.test(account.lastSeenAt)
                         ? account.lastSeenAt
                         : account.lastSeenAt.replace(' ', 'T') + 'Z',
                     )
