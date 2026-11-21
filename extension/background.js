@@ -282,11 +282,7 @@ function ensureHeartbeatAlarm() {
 // This only reports that the local extension can reach AutoFlow.
 // It does not assert Facebook login, DOM readiness or a successful publication.
 async function reportExtensionPresence() {
-  const state = await chrome.storage.local.get([
-    'activeAccountId',
-    'token',
-    'refreshToken',
-  ])
+  const state = await chrome.storage.local.get(['activeAccountId', 'token', 'refreshToken'])
   if (!state.activeAccountId || (!state.token && !state.refreshToken)) return
   try {
     await authorizedFetch(`${API}/extension/presence`, {
