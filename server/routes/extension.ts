@@ -59,6 +59,7 @@ export function isExtensionRoute(req: IncomingMessage, url: URL) {
     ['/api/extension/accounts', '/api/extension/queue'].includes(url.pathname)
   )
     return true
+  if (req.method === 'POST' && url.pathname === '/api/extension/presence') return true
   const routes: Record<string, string[]> = {
     POST: [
       'prepare',
@@ -99,6 +100,29 @@ export async function handleExtensionRoute(
     imageVariantSecret,
   }: Dependencies,
 ): Promise<void> {
+  if (req.method === 'POST' && url.pathname === '/api/extension/presence') {
+    // Presence is only a signal from the extension, never proof of a valid
+    // Facebook session or permission to publish. Paused profiles may report
+    // liveness without having their pause removed.
+    const raw = await jsonBody(req, 2048)
+    const body = raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : null
+    const accountId = body?.accountId
+    if (
+      typeof accountId !== 'number' ||
+      !Number.isSafeInteger(accountId) ||
+      accountId <= 0 ||
+      !allowedExtensionAccount(accountId, auth)
+    ) {
+      return send(res, 403, { error: 'Perfil do Brave não autorizado.' })
+    }
+    db.prepare(
+      'UPDATE social_accounts SET last_seen_at=CURRENT_TIMESTAMP,status=? ' +
+        'WHERE id=? AND organization_id=?',
+    ).run('connected', accountId, auth.organizationId)
+    return send(res, 200, { ok: true })
+  }
   if (req.method === 'GET' && url.pathname === '/api/extension/accounts') {
     const current = userById(auth.userId) as { role?: string } | undefined
     const accounts =
