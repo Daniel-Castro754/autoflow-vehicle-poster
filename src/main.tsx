@@ -7,6 +7,7 @@ import './operational-workspaces.css'
 import './management-workspaces.css'
 import './final-polish.css'
 import './zip-import.css'
+import './google-stock.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
