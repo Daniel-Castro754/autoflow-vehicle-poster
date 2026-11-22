@@ -62,7 +62,7 @@ await reject([file('SAV-01__01.png', img1)], /CSV na raiz/)
 await reject([file('veiculos.csv', csv)], /não contém fotos/)
 await reject([...sources, file('outro.csv', csv)], /exatamente um CSV/)
 await reject([...sources, file('relatorio.xlsx', 'x')], /Arquivo inesperado/)
-await reject([...sources, file('fotos/OUTRO/foto.png', img1), file('OUTRO__1.png', img1)], /repetidos/)
+await reject([...sources, file('fotos/OUTRO/01.png', img1), file('OUTRO__1.png', img1)], /repetidos/)
 await reject([file('veiculos.csv', csv), file('fotos/../../secreto.png', img1)], /caminho inseguro/)
 await reject(
   [file('veiculos.csv', csv), file('fotos/01.png', img1)],
@@ -70,8 +70,8 @@ await reject(
 )
 await reject([
   file('veiculos.csv', csv),
-  ...Array.from({ length: 201 }, (_, i) => file('SAV-01__' + i + '.png', img1)),
-], /Máximo de 200 fotos|Não foi possível associar|repetidos/)
+  ...Array.from({ length: 201 }, (_, i) => file('fotos/SAV-01/' + String(i + 1).padStart(3, '0') + '.png', img1)),
+], /Máximo de 200 fotos/)
 
 // Do not guess a vehicle from an image whose exact stock ID is absent from CSV.
 const unmatched = await buildVehicleFolderZip([
