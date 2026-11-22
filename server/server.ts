@@ -34,6 +34,7 @@ import { createVehiclePageStatements } from './routes/vehicles.ts'
 import { handleAlertRoute } from './routes/alerts.ts'
 import { handleIntegrationRoute, isIntegrationRoute } from './routes/integration.ts'
 import { handleIntegrationCredentialsRoute } from './routes/integration-credentials.ts'
+import { createGoogleStockRoutes } from './routes/google-stock.ts'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 // Only the isolated restore worker may use this read-only, restricted startup mode.
@@ -252,6 +253,14 @@ const {
   canManageJobs,
   allowedExtensionAccount,
 } = createAccessControl(db, userById)
+
+const googleStockRoutes = createGoogleStockRoutes({
+  db,
+  send,
+  jsonBody,
+  isAdmin,
+  publicOrigin,
+})
 
 if (!restoreBootProbe && !db.prepare('SELECT id FROM users LIMIT 1').get()) {
   const adminName = String(process.env.INITIAL_ADMIN_NAME || 'Administrador').trim()
@@ -496,6 +505,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     }
     // Signed image variants are derived only from selected, authentic vehicle photos.
     if (await handleMediaRequest(req, res, url, { db, uploadsDir, secret, send })) return
+    if (await googleStockRoutes.callback(req, res, url)) return
     if (await servePanel(req, res, url, join(root, 'dist'))) return
     if (isIntegrationRoute(url)) {
       await handleIntegrationRoute(req, res, url, { db, send, requestIdFor, jsonBody, uploadsDir })
@@ -507,6 +517,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (!activeSession(auth))
       return send(res, 401, { error: 'Esta sessão foi encerrada ou revogada. Entre novamente.' })
     if (await handleAuthRoute(req, res, url, auth, authRouteDependencies)) return
+    if (await googleStockRoutes.authorized(req, res, url, auth)) return
     if (
       await handleIntegrationCredentialsRoute(req, res, url, auth, {
         db,
