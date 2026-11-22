@@ -8,6 +8,7 @@ import {
   CircleAlert,
   Clock3,
   Edit3,
+  FolderOpen,
   ImagePlus,
   MoreHorizontal,
   Plus,
@@ -24,6 +25,7 @@ import { DrawerFocusGuard } from './DrawerFocusGuard'
 import { ListingVariantsPanel } from './ListingVariantsPanel'
 import { PhotoCurationPanel } from './PhotoCurationPanel'
 import { enqueueSelectedVehicles, type BulkQueueOutcome } from './bulk-publication-queue'
+import { buildVehicleFolderZip } from './vehicle-folder-package'
 import {
   BODY_TYPES,
   FUEL_TYPES,
@@ -200,8 +202,14 @@ export default function VehiclesView({
   const [importing, setImporting] = useState(false)
   const [packagePreview, setPackagePreview] = useState<ZipPreview | null>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
   const photoInputRef = useRef<HTMLInputElement>(null)
   const [importingPhotos, setImportingPhotos] = useState(false)
+  // The folder picker is supported by Brave/Chromium. Nothing is read or
+  // synchronized in the background; the user explicitly picks each folder.
+  useEffect(() => {
+    folderInputRef.current?.setAttribute('webkitdirectory', '')
+  }, [])
   const deferredQuery = useDeferredValue(query)
 
   function changeStatusFilter(next: string) {
@@ -502,6 +510,39 @@ export default function VehiclesView({
     }
   }
 
+  async function importFolder(files?: FileList | null) {
+    if (!files?.length || importing) return
+    const mode = window.confirm(
+      'Importar a pasta selecionada e atualizar veículos existentes?\\n\\nOK = atualizar existentes\\nCancelar = importar somente novos',
+    )
+      ? 'update'
+      : 'skip'
+    setImporting(true)
+    setPackagePreview(null)
+    try {
+      // Exact filename-to-stock matching only. Any ambiguous photo is rejected
+      // by the builder or the existing server ZIP parser before confirmation.
+      const packageData = await buildVehicleFolderZip(Array.from(files))
+      const zipBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result).split(',')[1] || '')
+        reader.onerror = () => reject(reader.error || new Error('Não foi possível ler a pasta.'))
+        reader.readAsDataURL(packageData.blob)
+      })
+      const preview = await api<ImportSummary>('/vehicles/import', {
+        method: 'POST',
+        body: JSON.stringify({ zipBase64, mode, dryRun: true }),
+      })
+      if (!preview.previewDigest) throw new Error('Não foi possível validar a prévia da pasta.')
+      setPackagePreview({ zipBase64, mode, summary: preview })
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Falha ao preparar a pasta de estoque.')
+    } finally {
+      setImporting(false)
+      if (folderInputRef.current) folderInputRef.current.value = ''
+    }
+  }
+
   async function confirmPackageImport() {
     if (!packagePreview || importing) return
     setImporting(true)
@@ -560,6 +601,23 @@ export default function VehiclesView({
             {importing ? 'Processando...' : 'Importar CSV ou ZIP'}
           </button>
           <input
+            ref={folderInputRef}
+            type="file"
+            multiple
+            hidden
+            onChange={(event) => void importFolder(event.target.files)}
+          />
+          <button
+            className="secondary"
+            type="button"
+            onClick={() => folderInputRef.current?.click()}
+            disabled={importing || importingPhotos}
+            title="Selecione uma pasta com um CSV e fotos/CODIGO/01.jpg ou fotos nomeadas CODIGO__01.jpg"
+          >
+            <FolderOpen size={18} />
+            {importing ? 'Preparando pasta...' : 'Importar pasta'}
+          </button>
+          <input
             ref={photoInputRef}
             type="file"
             accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
@@ -613,7 +671,10 @@ export default function VehiclesView({
               </button>
               <span className="page-kicker">IMPORTAÇÃO EM LOTE</span>
               <h2>Confira os veículos e suas fotos</h2>
-              <p>Nenhuma alteração foi gravada. A importação só começa após sua confirmação.</p>
+              <p>
+                Nenhuma alteração foi gravada. A importação só começa após sua confirmação. Fotos
+                são vinculadas apenas ao código exato de estoque.
+              </p>
               <div className="package-import-totals">
                 <div>
                   <strong>{packagePreview.summary.created}</strong>
