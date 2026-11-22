@@ -7,6 +7,7 @@ import {
   ChevronRight,
   CircleAlert,
   Clock3,
+  CloudDownload,
   Edit3,
   FolderOpen,
   ImagePlus,
@@ -26,6 +27,7 @@ import { ListingVariantsPanel } from './ListingVariantsPanel'
 import { PhotoCurationPanel } from './PhotoCurationPanel'
 import { enqueueSelectedVehicles, type BulkQueueOutcome } from './bulk-publication-queue'
 import { buildVehicleFolderZip } from './vehicle-folder-package'
+import { GoogleStockImport, type GoogleStockPrepared, type GoogleStockIssue } from './GoogleStockImport'
 import {
   BODY_TYPES,
   FUEL_TYPES,
@@ -108,7 +110,7 @@ type ImportSummary = {
   }>
   errors: Array<{ row: number; error: string }>
 }
-type ZipPreview = { zipBase64: string; mode: 'skip' | 'update'; summary: ImportSummary }
+type ZipPreview = { zipBase64: string; mode: 'skip' | 'update'; summary: ImportSummary; sourceIssues?: GoogleStockIssue[] }
 const money = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
   currency: 'BRL',
@@ -201,6 +203,7 @@ export default function VehiclesView({
   const [summary, setSummary] = useState<VehicleSummary | null>(null)
   const [importing, setImporting] = useState(false)
   const [packagePreview, setPackagePreview] = useState<ZipPreview | null>(null)
+  const [googleImportOpen, setGoogleImportOpen] = useState(false)
   const importInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const photoInputRef = useRef<HTMLInputElement>(null)
@@ -543,6 +546,29 @@ export default function VehiclesView({
     }
   }
 
+  async function reviewGoogleStock(
+    prepared: GoogleStockPrepared,
+    mode: 'skip' | 'update',
+  ) {
+    if (importing) throw new Error('Já existe uma importação em andamento.')
+    setImporting(true)
+    try {
+      const preview = await api<ImportSummary>('/vehicles/import', {
+        method: 'POST',
+        body: JSON.stringify({ zipBase64: prepared.zipBase64, mode, dryRun: true }),
+      })
+      if (!preview.previewDigest) throw new Error('Prévia do pacote do Google inválida.')
+      setPackagePreview({
+        zipBase64: prepared.zipBase64,
+        mode,
+        summary: preview,
+        sourceIssues: prepared.issues,
+      })
+    } finally {
+      setImporting(false)
+    }
+  }
+
   async function confirmPackageImport() {
     if (!packagePreview || importing) return
     setImporting(true)
@@ -600,6 +626,12 @@ export default function VehiclesView({
             <Upload size={18} />
             {importing ? 'Processando...' : 'Importar CSV ou ZIP'}
           </button>
+          {canManage && (
+            <button className="secondary" type="button" onClick={() => setGoogleImportOpen(true)} disabled={importing || importingPhotos}>
+              <CloudDownload size={18} />
+              Google Sheets + Drive
+            </button>
+          )}
           <input
             ref={folderInputRef}
             type="file"
@@ -646,6 +678,13 @@ export default function VehiclesView({
           </div>
         </div>
       </div>
+      {googleImportOpen && canManage && (
+        <GoogleStockImport
+          api={api}
+          onClose={() => setGoogleImportOpen(false)}
+          onImport={reviewGoogleStock}
+        />
+      )}
       {packagePreview &&
         createPortal(
           <div
@@ -712,6 +751,18 @@ export default function VehiclesView({
                   </div>
                 ))}
               </div>
+              {Boolean(packagePreview.sourceIssues?.length) && (
+                <div className="package-import-errors" role="alert">
+                  <strong>
+                    {packagePreview.sourceIssues?.length} veículo(s) pendentes no Drive — não incluídos no pacote.
+                  </strong>
+                  {packagePreview.sourceIssues?.slice(0, 10).map((issue) => (
+                    <p key={issue.row}>
+                      Linha {issue.row} ({issue.stockCode || 'sem código'}): {issue.message}
+                    </p>
+                  ))}
+                </div>
+              )}
               {packagePreview.summary.errors.length > 0 && (
                 <div className="package-import-errors" role="alert">
                   <strong>
