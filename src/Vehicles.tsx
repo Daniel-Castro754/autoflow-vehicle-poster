@@ -671,7 +671,10 @@ export default function VehiclesView({
               </button>
               <span className="page-kicker">IMPORTAÇÃO EM LOTE</span>
               <h2>Confira os veículos e suas fotos</h2>
-              <p>Nenhuma alteração foi gravada. A importação só começa após sua confirmação. Fotos são vinculadas apenas ao código exato de estoque.</p>
+              <p>
+                Nenhuma alteração foi gravada. A importação só começa após sua confirmação. Fotos
+                são vinculadas apenas ao código exato de estoque.
+              </p>
               <div className="package-import-totals">
                 <div>
                   <strong>{packagePreview.summary.created}</strong>
