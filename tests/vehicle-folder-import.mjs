@@ -22,10 +22,14 @@ const csv = [
 ].join('\n')
 const img1 = await sharp({
   create: { width: 80, height: 80, channels: 3, background: '#0088aa' },
-}).png().toBuffer()
+})
+  .png()
+  .toBuffer()
 const img2 = await sharp({
   create: { width: 80, height: 80, channels: 3, background: '#aa9922' },
-}).png().toBuffer()
+})
+  .png()
+  .toBuffer()
 const sources = [
   file('veiculos.csv', csv),
   file('SAV-01__01.png', img1),
@@ -44,7 +48,10 @@ assert.deepEqual([...entries.keys()].sort(), [
 ])
 const parsed = await parseVehiclePackage(zip)
 assert.equal(parsed.rows.length, 2)
-assert.deepEqual(parsed.rowPhotos.map((row) => row.length), [1, 1])
+assert.deepEqual(
+  parsed.rowPhotos.map((row) => row.length),
+  [1, 1],
+)
 assert.equal(parsed.rowPhotos[0][0].hash.length, 64)
 
 const flatInPhotos = await buildVehicleFolderZip([
@@ -62,16 +69,21 @@ await reject([file('SAV-01__01.png', img1)], /CSV na raiz/)
 await reject([file('veiculos.csv', csv)], /não contém fotos/)
 await reject([...sources, file('outro.csv', csv)], /exatamente um CSV/)
 await reject([...sources, file('relatorio.xlsx', 'x')], /Arquivo inesperado/)
-await reject([...sources, file('fotos/OUTRO/01.png', img1), file('OUTRO__1.png', img1)], /repetidos/)
-await reject([file('veiculos.csv', csv), file('fotos/../../secreto.png', img1)], /caminho inseguro/)
 await reject(
-  [file('veiculos.csv', csv), file('fotos/01.png', img1)],
-  /Não foi possível associar/,
+  [...sources, file('fotos/OUTRO/01.png', img1), file('OUTRO__1.png', img1)],
+  /repetidos/,
 )
-await reject([
-  file('veiculos.csv', csv),
-  ...Array.from({ length: 201 }, (_, i) => file('fotos/SAV-01/' + String(i + 1).padStart(3, '0') + '.png', img1)),
-], /Máximo de 200 fotos/)
+await reject([file('veiculos.csv', csv), file('fotos/../../secreto.png', img1)], /caminho inseguro/)
+await reject([file('veiculos.csv', csv), file('fotos/01.png', img1)], /Não foi possível associar/)
+await reject(
+  [
+    file('veiculos.csv', csv),
+    ...Array.from({ length: 201 }, (_, i) =>
+      file('fotos/SAV-01/' + String(i + 1).padStart(3, '0') + '.png', img1),
+    ),
+  ],
+  /Máximo de 200 fotos/,
+)
 
 // Do not guess a vehicle from an image whose exact stock ID is absent from CSV.
 const unmatched = await buildVehicleFolderZip([
@@ -88,7 +100,7 @@ for (const token of [
   'Importar pasta',
   "setAttribute('webkitdirectory', '')",
   'buildVehicleFolderZip(Array.from(files))',
-  "body: JSON.stringify({ zipBase64, mode, dryRun: true })",
+  'body: JSON.stringify({ zipBase64, mode, dryRun: true })',
   'setPackagePreview({ zipBase64, mode, summary: preview })',
 ]) {
   assert(view.includes(token), 'Missing stock folder UI contract: ' + token)
