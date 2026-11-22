@@ -19,6 +19,7 @@ export type CredentialField =
   | 'alert_telegram_token'
   | 'alert_telegram_chat_id'
   | 'alert_webhook_url'
+  | 'google_stock_refresh_token'
 type Field = CredentialField
 type VaultFile =
   | { version: 1; mode: 'dpapi'; wrappedKey: string }
