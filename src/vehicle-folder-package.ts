@@ -100,7 +100,10 @@ function archiveName(relativePath: string): { name: string; kind: 'csv' | 'photo
   if (!/\.(jpe?g|png|webp)$/i.test(filename))
     throw new Error('Arquivo inesperado: ' + relativePath + '. Use somente CSV e fotos.')
   const flat = /^([a-z0-9._-]{1,64})__([0-9]{1,2})\.(jpe?g|png|webp)$/i.exec(filename)
-  if ((segments.length === 1 || (segments.length === 2 && /^(fotos|photos)$/i.test(segments[0]!))) && flat) {
+  if (
+    (segments.length === 1 || (segments.length === 2 && /^(fotos|photos)$/i.test(segments[0]!))) &&
+    flat
+  ) {
     return {
       name: `fotos/${flat[1]!.toLowerCase()}/${flat[2]!.padStart(2, '0')}.${flat[3]!.toLowerCase()}`,
       kind: 'photo',
