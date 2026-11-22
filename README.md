@@ -66,6 +66,7 @@ autorizar as origens do painel e validar a conexão local ou em produção.
 - Indicadores de estoque e publicação
 - Cadastro persistente de veículos
 - Importação CSV de estoque com atualização opcional por ID de estoque/VIN e prevenção de duplicidade
+- Importação supervisionada de pasta local (CSV e fotos por código de estoque), com ZIP montado pelo navegador e prévia obrigatória; [instruções](docs/FOLDER_STOCK_IMPORT.md)
 - Login com sessão assinada e senha protegida por scrypt
 - Acesso opcional com Google, com confirmação da senha na primeira vinculação
 - Banco SQLite local com isolamento por empresa
