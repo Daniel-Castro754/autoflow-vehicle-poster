@@ -450,6 +450,19 @@ const migrations: Migration[] = [
     columns: [['publication_jobs', 'variant_seed', 'INTEGER']],
     sql: '',
   },
+  {
+    version: 26,
+    columns: [],
+    sql: `CREATE TABLE IF NOT EXISTS google_stock_connections (
+      organization_id INTEGER PRIMARY KEY REFERENCES organizations(id),
+      spreadsheet_id TEXT NOT NULL DEFAULT '',
+      root_folder_id TEXT NOT NULL DEFAULT '',
+      refresh_token_enc TEXT NOT NULL DEFAULT '',
+      connected_by INTEGER REFERENCES users(id),
+      connected_at TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {
