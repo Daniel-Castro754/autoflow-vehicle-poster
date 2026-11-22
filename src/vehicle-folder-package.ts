@@ -83,7 +83,7 @@ function zipStored(entries: Array<{ name: string; bytes: Uint8Array }>): Blob {
   write16(result, pos + 10, prepared.length)
   write32(result, pos + 12, directoryBytes)
   write32(result, pos + 16, offset)
-  return new Blob([result], { type: 'application/zip' })
+  return new Blob([result.buffer as ArrayBuffer], { type: 'application/zip' })
 }
 
 // Accept photos in fotos/CODE/01.jpg, or flat photos named CODE__01.jpg
