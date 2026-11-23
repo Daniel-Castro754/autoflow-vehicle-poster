@@ -90,7 +90,7 @@ export function createGoogleStockOAuth({
         .prepare("SELECT id FROM users WHERE id=? AND organization_id=? AND role='admin' AND active=1")
         .get(entry.user, entry.org)
       if (!user) throw new GoogleStockError(403, 'Administrador sem permissão ativa.')
-      let refreshToken = ''
+      let refreshToken: string
       try {
         const result = await client().getToken(code)
         refreshToken = String(result.tokens.refresh_token || '')

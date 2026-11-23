@@ -34,6 +34,7 @@ import { createVehiclePageStatements } from './routes/vehicles.ts'
 import { handleAlertRoute } from './routes/alerts.ts'
 import { handleIntegrationRoute, isIntegrationRoute } from './routes/integration.ts'
 import { handleIntegrationCredentialsRoute } from './routes/integration-credentials.ts'
+import { handleListingExpiryRoute } from './routes/listing-expiry.ts'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 // Only the isolated restore worker may use this read-only, restricted startup mode.
@@ -507,6 +508,17 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (!activeSession(auth))
       return send(res, 401, { error: 'Esta sessão foi encerrada ou revogada. Entre novamente.' })
     if (await handleAuthRoute(req, res, url, auth, authRouteDependencies)) return
+    if (
+      await handleListingExpiryRoute(req, res, url, auth, {
+        db,
+        send,
+        jsonBody,
+        isAdmin,
+        canManageJobs,
+        recordJobEvent,
+      })
+    )
+      return
     if (
       await handleIntegrationCredentialsRoute(req, res, url, auth, {
         db,
