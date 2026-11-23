@@ -22,7 +22,7 @@ db.exec(`
   INSERT INTO social_accounts VALUES(1,1,'Daniel','Profile 1',1),(2,1,'Pai','Profile 2',2),
     (3,2,'Outra empresa','Default',3);
 `)
-const now = Date.parse('2026-11-23T12:00:00Z')
+const now = Date.now()
 function insert(id, age, { org = 1, account = 1, sold = false, status = 'completed', ledger = true,
   listingId = String(id), ledgerStatus = 'active' } = {}) {
   db.prepare('INSERT INTO vehicles VALUES(?,?,?,?,?,?,?)').run(
