@@ -23,16 +23,41 @@ db.exec(`
     (3,2,'Outra empresa','Default',3);
 `)
 const now = Date.now()
-function insert(id, age, { org = 1, account = 1, sold = false, status = 'completed', ledger = true,
-  listingId = String(id), ledgerStatus = 'active' } = {}) {
+function insert(
+  id,
+  age,
+  {
+    org = 1,
+    account = 1,
+    sold = false,
+    status = 'completed',
+    ledger = true,
+    listingId = String(id),
+    ledgerStatus = 'active',
+  } = {},
+) {
   db.prepare('INSERT INTO vehicles VALUES(?,?,?,?,?,?,?)').run(
-    id, org, 2022, 'Toyota', 'Corolla', sold ? 'Vendido' : 'Publicado', null,
+    id,
+    org,
+    2022,
+    'Toyota',
+    'Corolla',
+    sold ? 'Vendido' : 'Publicado',
+    null,
   )
   db.prepare('INSERT INTO publication_jobs VALUES(?,?,?,?,?)').run(id, org, id, account, status)
-  if (ledger) db.prepare('INSERT INTO publication_listing_ledger VALUES(?,?,?,?,?,?,?,?,?)').run(
-    id, org, id, id, ledgerStatus, new Date(now - age * 3600000).toISOString(), listingId,
-    'https://www.facebook.com/marketplace/item/' + id, null,
-  )
+  if (ledger)
+    db.prepare('INSERT INTO publication_listing_ledger VALUES(?,?,?,?,?,?,?,?,?)').run(
+      id,
+      org,
+      id,
+      id,
+      ledgerStatus,
+      new Date(now - age * 3600000).toISOString(),
+      listingId,
+      'https://www.facebook.com/marketplace/item/' + id,
+      null,
+    )
 }
 insert(1, 95)
 insert(2, 96)
@@ -80,28 +105,47 @@ let response
 let body = {}
 const deps = {
   db,
-  send: (_res, status, payload) => { response = { status, payload } },
+  send: (_res, status, payload) => {
+    response = { status, payload }
+  },
   jsonBody: async () => body,
   isAdmin: (auth) => auth.userId === 1,
-  canManageJobs: ([id], auth) => Boolean(db.prepare(
-    `SELECT j.id FROM publication_jobs j JOIN social_accounts a ON a.id=j.social_account_id
+  canManageJobs: ([id], auth) =>
+    Boolean(
+      db
+        .prepare(
+          `SELECT j.id FROM publication_jobs j JOIN social_accounts a ON a.id=j.social_account_id
       WHERE j.id=? AND j.organization_id=? AND (?=1 OR a.user_id=?)`,
-  ).get(id, auth.organizationId, auth.userId, auth.userId)),
+        )
+        .get(id, auth.organizationId, auth.userId, auth.userId),
+    ),
   recordJobEvent: (...args) => events.push(args),
 }
 async function call(method, path, userId = 1, input = {}) {
   body = input
   response = undefined
   const matched = await handleListingExpiryRoute(
-    { method }, {}, new URL('http://localhost/api/publications/' + path),
-    { organizationId: 1, userId }, deps,
+    { method },
+    {},
+    new URL('http://localhost/api/publications/' + path),
+    { organizationId: 1, userId },
+    deps,
   )
   assert.equal(matched, true)
   return response
 }
-assert.equal((await call('PATCH', 'listing-expiry', 2, { enabled: true, days: 7, warning: true })).status, 403)
-assert.equal((await call('PATCH', 'listing-expiry', 1, { enabled: true, days: 0, warning: true })).status, 400)
-assert.equal((await call('PATCH', 'listing-expiry', 1, { enabled: true, days: 7, warning: false })).status, 200)
+assert.equal(
+  (await call('PATCH', 'listing-expiry', 2, { enabled: true, days: 7, warning: true })).status,
+  403,
+)
+assert.equal(
+  (await call('PATCH', 'listing-expiry', 1, { enabled: true, days: 0, warning: true })).status,
+  400,
+)
+assert.equal(
+  (await call('PATCH', 'listing-expiry', 1, { enabled: true, days: 7, warning: false })).status,
+  200,
+)
 assert.equal(get().policy.days, 7)
 assert.equal((await call('GET', 'listing-expiry', 2)).payload.items.length, 1)
 assert.equal((await call('PATCH', '1/extend-listing-expiry', 2, { days: 3 })).status, 403)
@@ -113,6 +157,11 @@ assert.equal((await call('PATCH', '1/extend-listing-expiry', 1, { days: 3 })).st
 assert.equal(events.length, 1)
 assert.equal(events[0][2], 'listing_expiry_extended')
 assert.equal(db.prepare('SELECT status FROM publication_jobs WHERE id=2').get().status, 'completed')
-assert.equal(db.prepare('SELECT status FROM publication_listing_ledger WHERE id=2').get().status, 'active')
+assert.equal(
+  db.prepare('SELECT status FROM publication_listing_ledger WHERE id=2').get().status,
+  'active',
+)
 db.close()
-console.log('OK: validade de anúncios, prorrogação, data incerta, vendidos e isolamento por perfil.')
+console.log(
+  'OK: validade de anúncios, prorrogação, data incerta, vendidos e isolamento por perfil.',
+)
