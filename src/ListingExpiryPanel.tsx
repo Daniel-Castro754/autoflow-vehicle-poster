@@ -63,7 +63,8 @@ export function ListingExpiryPanel({
         const next = await api<Overview>('/publications/listing-expiry?page=' + page)
         if (active) setData(next)
       } catch (error) {
-        if (active) setMessage(error instanceof Error ? error.message : 'Falha ao consultar validade.')
+        if (active)
+          setMessage(error instanceof Error ? error.message : 'Falha ao consultar validade.')
       } finally {
         loading = false
       }
@@ -145,8 +146,8 @@ export function ListingExpiryPanel({
       ) : (
         <>
           <p>
-            {data.counts.total} ativos · {data.counts.sold} vendidos · {data.counts.expired} vencidos
-            · {data.counts.warning} vencendo · {data.counts.review} com data a revisar
+            {data.counts.total} ativos · {data.counts.sold} vendidos · {data.counts.expired}{' '}
+            vencidos · {data.counts.warning} vencendo · {data.counts.review} com data a revisar
           </p>
           {data.canConfigure && (
             <form
@@ -171,8 +172,8 @@ export function ListingExpiryPanel({
                 />
               </label>
               <label>
-                <input type="checkbox" name="warning" defaultChecked={data.policy.warning} />{' '}
-                Avisar 24h antes
+                <input type="checkbox" name="warning" defaultChecked={data.policy.warning} /> Avisar
+                24h antes
               </label>
               <button className="secondary" disabled={busy} type="submit">
                 Salvar validade
@@ -180,13 +181,16 @@ export function ListingExpiryPanel({
             </form>
           )}
           <p>
-            Prazo atual: {data.policy.enabled ? data.policy.days + ' dias' : 'desativado'}. O sistema
-            não exclui nem republica automaticamente. Retire o anúncio pelo perfil indicado antes
-            de registrar a retirada.
+            Prazo atual: {data.policy.enabled ? data.policy.days + ' dias' : 'desativado'}. O
+            sistema não exclui nem republica automaticamente. Retire o anúncio pelo perfil indicado
+            antes de registrar a retirada.
           </p>
           <label>
             Prorrogação (dias){' '}
-            <select value={extraDays} onChange={(event) => setExtraDays(Number(event.target.value))}>
+            <select
+              value={extraDays}
+              onChange={(event) => setExtraDays(Number(event.target.value))}
+            >
               {[1, 2, 3, 7, 14, 30].map((days) => (
                 <option key={days} value={days}>
                   {days}
