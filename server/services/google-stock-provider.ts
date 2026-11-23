@@ -36,7 +36,8 @@ type Pending = { org: number; user: number; expiresAt: number }
 
 export function normalizeGoogleFileId(input: unknown): string {
   const value = String(input || '').trim()
-  const path = /(?:\/folders\/|\/spreadsheets\/d\/|[?&]id=)([A-Za-z0-9_-]{12,160})(?:\/|[?&#]|$)/.exec(value)
+  const path =
+    /(?:\/folders\/|\/spreadsheets\/d\/|[?&]id=)([A-Za-z0-9_-]{12,160})(?:\/|[?&#]|$)/.exec(value)
   const id = path ? path[1]! : value
   if (!/^[A-Za-z0-9_-]{12,160}$/.test(id))
     throw new GoogleStockError(400, 'Informe um ID ou link válido do Google Drive/Sheets.')
@@ -67,8 +68,7 @@ export function createGoogleStockOAuth({
   return {
     configured,
     start(org: number, user: number): string {
-      for (const [state, item] of pending)
-        if (item.expiresAt < Date.now()) pending.delete(state)
+      for (const [state, item] of pending) if (item.expiresAt < Date.now()) pending.delete(state)
       if (pending.size >= MAX_OAUTH_STATES)
         throw new GoogleStockError(429, 'Muitas conexões pendentes. Tente novamente.')
       const state = randomBytes(32).toString('base64url')
@@ -87,7 +87,9 @@ export function createGoogleStockOAuth({
       if (!entry || entry.expiresAt < Date.now() || typeof code !== 'string' || code.length > 4096)
         throw new GoogleStockError(401, 'Autorização Google ausente, expirada ou inválida.')
       const user = db
-        .prepare("SELECT id FROM users WHERE id=? AND organization_id=? AND role='admin' AND active=1")
+        .prepare(
+          "SELECT id FROM users WHERE id=? AND organization_id=? AND role='admin' AND active=1",
+        )
         .get(entry.user, entry.org)
       if (!user) throw new GoogleStockError(403, 'Administrador sem permissão ativa.')
       let refreshToken: string
@@ -95,10 +97,16 @@ export function createGoogleStockOAuth({
         const result = await client().getToken(code)
         refreshToken = String(result.tokens.refresh_token || '')
       } catch {
-        throw new GoogleStockError(502, 'O Google não concluiu a autorização. Tente conectar novamente.')
+        throw new GoogleStockError(
+          502,
+          'O Google não concluiu a autorização. Tente conectar novamente.',
+        )
       }
       if (!refreshToken)
-        throw new GoogleStockError(409, 'O Google não forneceu permissão offline. Remova o acesso anterior e conecte novamente.')
+        throw new GoogleStockError(
+          409,
+          'O Google não forneceu permissão offline. Remova o acesso anterior e conecte novamente.',
+        )
       const encrypted = encryptCredential(refreshToken, entry.org, 'google_stock_refresh_token')
       db.prepare(
         "INSERT INTO google_stock_connections (organization_id,refresh_token_enc,connected_by,connected_at) " +
@@ -110,9 +118,12 @@ export function createGoogleStockOAuth({
     },
     authorizedClient(db: DatabaseSync, organizationId: number): OAuth2Client {
       const row = db
-        .prepare('SELECT refresh_token_enc token FROM google_stock_connections WHERE organization_id=?')
+        .prepare(
+          'SELECT refresh_token_enc token FROM google_stock_connections WHERE organization_id=?',
+        )
         .get(organizationId) as { token?: string } | undefined
-      if (!row?.token) throw new GoogleStockError(409, 'Conecte sua conta Google antes de importar.')
+      if (!row?.token)
+        throw new GoogleStockError(409, 'Conecte sua conta Google antes de importar.')
       const value = decryptCredential(row.token, organizationId, 'google_stock_refresh_token')
       const authClient = client()
       authClient.setCredentials({ refresh_token: value })
@@ -124,7 +135,10 @@ export function createGoogleStockOAuth({
 function googleApiError(): never {
   // Avoid forwarding Google response details, which can contain private filenames,
   // OAuth codes, grant metadata or sensitive third-party diagnostic headers.
-  throw new GoogleStockError(502, 'Falha na leitura do Google Drive/Sheets. Confira a permissão e a conexão.')
+  throw new GoogleStockError(
+    502,
+    'Falha na leitura do Google Drive/Sheets. Confira a permissão e a conexão.',
+  )
 }
 
 export function createGoogleStockSource(auth: OAuth2Client): GoogleStockSource {
@@ -140,10 +154,7 @@ export function createGoogleStockSource(auth: OAuth2Client): GoogleStockSource {
     async spreadsheetRows(spreadsheetId) {
       const target = encodeURIComponent("'Veiculos'!A1:T101")
       const result = await get<{ values?: unknown[][] }>(
-        'https://sheets.googleapis.com/v4/spreadsheets/' +
-          spreadsheetId +
-          '/values/' +
-          target,
+        'https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + target,
         { valueRenderOption: 'UNFORMATTED_VALUE', majorDimension: 'ROWS' },
       )
       return result.values || []
@@ -164,7 +175,10 @@ export function createGoogleStockSource(auth: OAuth2Client): GoogleStockSource {
         },
       )
       if (result.nextPageToken)
-        throw new GoogleStockError(422, 'A pasta contém arquivos demais. Divida os arquivos em lotes menores.')
+        throw new GoogleStockError(
+          422,
+          'A pasta contém arquivos demais. Divida os arquivos em lotes menores.',
+        )
       return result.files || []
     },
     async download(fileId, sizeLimit) {
