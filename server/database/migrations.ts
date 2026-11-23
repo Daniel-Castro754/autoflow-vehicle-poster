@@ -463,6 +463,16 @@ const migrations: Migration[] = [
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );`,
   },
+  {
+    version: 27,
+    columns: [
+      ['organization_settings', 'listing_expiry_enabled', 'INTEGER NOT NULL DEFAULT 1'],
+      ['organization_settings', 'listing_expiry_days', 'INTEGER NOT NULL DEFAULT 4'],
+      ['organization_settings', 'listing_expiry_warning', 'INTEGER NOT NULL DEFAULT 1'],
+      ['publication_listing_ledger', 'expiry_review_until', 'TEXT'],
+    ],
+    sql: '',
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {
