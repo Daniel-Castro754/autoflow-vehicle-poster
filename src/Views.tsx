@@ -50,6 +50,7 @@ import { SchedulingInsights } from './SchedulingInsights'
 import { DrawerFocusGuard } from './DrawerFocusGuard'
 import { formatRate } from './management-metrics'
 import { OverviewPriorities } from './OverviewPriorities'
+import { ListingExpiryPanel } from './ListingExpiryPanel'
 
 type ApiFn = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
 type Vehicle = {
@@ -714,6 +715,13 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
     }
   }
   async function update(id: number, status: string) {
+    if (
+      status === 'removed' &&
+      !window.confirm(
+        'Confirme que você já retirou o anúncio no Facebook pelo perfil responsável. Esta ação apenas registra a retirada no Auto Flow.',
+      )
+    )
+      return
     const current = pageJobs.find((job) => job.id === id),
       confirmNoPublication = status === 'pending' && Boolean(current?.fillReport?.publishAttempted)
     if (
@@ -1079,6 +1087,14 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
           </div>
         </article>
       </div>
+      <ListingExpiryPanel
+        api={api}
+        refreshVersion={refreshVersion}
+        onChanged={async () => {
+          await load()
+          await reload()
+        }}
+      />
       <section className="publication-workflow" aria-label="Organização das publicações">
         <div className="publication-workflow-heading">
           <div>
