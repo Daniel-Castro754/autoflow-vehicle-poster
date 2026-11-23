@@ -4,7 +4,10 @@ import type { DatabaseSync } from 'node:sqlite'
 import { decryptCredential, encryptCredential } from './credential-vault.ts'
 
 export class GoogleStockError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
     super(message)
   }
 }
@@ -109,10 +112,10 @@ export function createGoogleStockOAuth({
         )
       const encrypted = encryptCredential(refreshToken, entry.org, 'google_stock_refresh_token')
       db.prepare(
-        "INSERT INTO google_stock_connections (organization_id,refresh_token_enc,connected_by,connected_at) " +
-          "VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(organization_id) DO UPDATE SET " +
-          "refresh_token_enc=excluded.refresh_token_enc,connected_by=excluded.connected_by," +
-          "connected_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP",
+        'INSERT INTO google_stock_connections (organization_id,refresh_token_enc,connected_by,connected_at) ' +
+          'VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(organization_id) DO UPDATE SET ' +
+          'refresh_token_enc=excluded.refresh_token_enc,connected_by=excluded.connected_by,' +
+          'connected_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP',
       ).run(entry.org, encrypted, entry.user)
       return entry.org
     },
