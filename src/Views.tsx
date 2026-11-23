@@ -2284,6 +2284,10 @@ function jobEventPresentation(event: JobEvent) {
       tone: 'error',
       icon: '×',
     },
+    listing_expiry_extended: {
+      title: 'Validade prorrogada',
+      detail: 'O prazo de retirada do anúncio foi prorrogado.',
+    },
     marked_removed: {
       title: 'Anúncio removido',
       detail: 'O anúncio publicado foi marcado como removido.',
