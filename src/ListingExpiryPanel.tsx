@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { CalendarClock, Check, CircleAlert, Clock3, ExternalLink, ListChecks, RotateCcw, ShieldCheck } from 'lucide-react'
+import {
+  CalendarClock,
+  Check,
+  CircleAlert,
+  Clock3,
+  ExternalLink,
+  ListChecks,
+  RotateCcw,
+  ShieldCheck,
+} from 'lucide-react'
 import './listing-expiry.css'
 
 type ApiFn = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
@@ -67,8 +76,10 @@ function PolicyEditor({
   const [enabled, setEnabled] = useState(policy.enabled)
   const [days, setDays] = useState(String(policy.days))
   const [warning, setWarning] = useState(policy.warning)
-  const valid = days.trim() !== '' && Number.isInteger(Number(days)) && Number(days) >= 1 && Number(days) <= 90
-  const dirty = enabled !== policy.enabled || Number(days) !== policy.days || warning !== policy.warning
+  const valid =
+    days.trim() !== '' && Number.isInteger(Number(days)) && Number(days) >= 1 && Number(days) <= 90
+  const dirty =
+    enabled !== policy.enabled || Number(days) !== policy.days || warning !== policy.warning
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (valid && dirty && !busy) onSave({ enabled, days: Number(days), warning })
@@ -429,11 +440,21 @@ export function ListingExpiryPanel({
           )}
           {data.pages > 1 && (
             <div className="expiry-pagination">
-              <button className="secondary" disabled={data.page <= 1 || busy} onClick={() => setPage(data.page - 1)}>
+              <button
+                className="secondary"
+                disabled={data.page <= 1 || busy}
+                onClick={() => setPage(data.page - 1)}
+              >
                 Anterior
               </button>
-              <span>{data.page} / {data.pages}</span>
-              <button className="secondary" disabled={data.page >= data.pages || busy} onClick={() => setPage(data.page + 1)}>
+              <span>
+                {data.page} / {data.pages}
+              </span>
+              <button
+                className="secondary"
+                disabled={data.page >= data.pages || busy}
+                onClick={() => setPage(data.page + 1)}
+              >
                 Próxima
               </button>
             </div>
