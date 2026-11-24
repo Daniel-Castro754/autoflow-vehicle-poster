@@ -975,9 +975,9 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
   const selectedErrorIds = filteredJobs
     .filter((job) => job.status === 'error' && selected.has(job.id))
     .map((job) => job.id)
-  const pending = publicationStats.pending,
-    completed = publicationStats.completed,
-    errors = publicationStats.errors
+  const pending = publicationStats.pending ?? 0,
+    completed = publicationStats.completed ?? 0,
+    errors = publicationStats.errors ?? 0
   const scheduledCount = publicationStats.scheduled
   const eligibleReassignAccounts = reassignIds
     ? accounts.filter(
