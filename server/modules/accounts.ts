@@ -36,8 +36,8 @@ export function findBestAccountForVehicle(
             AND j.status != 'canceled'
         ), 0) todayCount,
         EXISTS (SELECT 1 FROM publication_jobs busy WHERE busy.organization_id=a.organization_id
-          AND busy.social_account_id=a.id AND busy.vehicle_id=?
-          AND busy.status IN ('pending','filling','error','awaiting_confirmation')) busy
+          AND (busy.social_account_id=a.id OR busy.social_account_id IS NULL) AND busy.vehicle_id=?
+          AND busy.status IN ('pending','filling','error','awaiting_confirmation','completed')) busy
       FROM social_accounts a
       WHERE a.organization_id = ? AND a.status = 'connected' AND COALESCE(a.automation_paused,0)=0
         AND a.last_seen_at IS NOT NULL AND datetime(a.last_seen_at)>=datetime('now','-5 minutes')

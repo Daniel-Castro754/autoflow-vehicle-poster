@@ -38,6 +38,7 @@ type Dependencies = {
     organizationId: number,
     vehicleId: number,
     excludeJobId?: number,
+    accountId?: number | null,
   ) => (Record<string, unknown> & { message: string }) | null
   recordJobEvent: (
     organizationId: number,
@@ -365,7 +366,7 @@ export async function handleExtensionRoute(
         error:
           'O Facebook recebeu um clique em Publicar, mas não confirmou o resultado. Verifique Seus classificados e confirme no painel antes de tentar novamente.',
       })
-    const duplicateRisk = publicationDuplicateRisk(auth.organizationId, job.vehicleId, job.id)
+    const duplicateRisk = publicationDuplicateRisk(auth.organizationId, job.vehicleId, job.id, accountId)
     if (duplicateRisk) {
       recordJobEvent(auth.organizationId, job.id, 'duplicate_blocked', null, duplicateRisk)
       return send(res, 409, { error: duplicateRisk.message, duplicate: duplicateRisk })
@@ -866,7 +867,11 @@ export async function handleExtensionRoute(
         let nextPriority: number | null = null
         if (retriesUsed >= 1) {
           const healthier = findBestAccountForVehicle(db, auth.organizationId, job.vehicleId)
-          if (healthier && healthier.id !== job.accountId) {
+          if (
+            healthier &&
+            healthier.id !== job.accountId &&
+            !publicationDuplicateRisk(auth.organizationId, job.vehicleId, job.id, healthier.id)
+          ) {
             targetAccountId = healthier.id
             nextPriority =
               (

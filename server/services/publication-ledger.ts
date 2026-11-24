@@ -105,6 +105,7 @@ export function activeListingEvidence(
   organizationId: number,
   vehicleId: number,
   excludeJobId = 0,
+  accountId: number | null = null,
 ) {
   return db
     .prepare(
@@ -115,7 +116,8 @@ export function activeListingEvidence(
     LEFT JOIN social_accounts account ON account.id=ledger.social_account_id
     WHERE ledger.organization_id=? AND ledger.vehicle_id=? AND ledger.publication_job_id!=?
       AND ledger.status='active'
+      AND (? IS NULL OR ledger.social_account_id IS NULL OR ledger.social_account_id=?)
     ORDER BY datetime(ledger.last_confirmed_at) DESC,ledger.id DESC LIMIT 1`,
     )
-    .get(organizationId, vehicleId, excludeJobId) as Record<string, unknown> | undefined
+    .get(organizationId, vehicleId, excludeJobId, accountId, accountId) as Record<string, unknown> | undefined
 }

@@ -75,12 +75,20 @@ try {
     return vehicle
   }
 
+  const secondAccount = await api('/social-accounts', {
+    method: 'POST',
+    body: JSON.stringify({
+      userId: admin.id,
+      label: 'Segundo perfil teste',
+      browserProfile: 'Brave teste 2',
+    }),
+  })
   const firstVehicle = await readyVehicle('unit-one')
   const secondVehicle = await readyVehicle('unit-two')
-  const makeJob = (vehicleId) =>
+  const makeJob = (vehicleId, accountId = account.id) =>
     api('/publications', {
       method: 'POST',
-      body: JSON.stringify({ vehicleId, accountId: account.id }),
+      body: JSON.stringify({ vehicleId, accountId }),
     })
   const first = await makeJob(firstVehicle.id)
   const second = await makeJob(secondVehicle.id)
@@ -104,6 +112,14 @@ try {
     'The same stock vehicle may not be published twice just by changing presentation.',
   )
 
+  // Different authorized profiles may manage separate publications of the
+  // same available stock record. The same profile cannot create another job.
+  const otherProfileJob = await makeJob(firstVehicle.id, secondAccount.id)
+  assert.notEqual(otherProfileJob.id, first.id)
+  await assert.rejects(
+    () => makeJob(firstVehicle.id, secondAccount.id),
+    (error) => error.status === 409,
+  )
   const prepared = await api(`/extension/jobs/${first.id}/prepare`, {
     method: 'POST',
     body: JSON.stringify({

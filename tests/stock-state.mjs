@@ -282,7 +282,7 @@ try {
   })
   await call(`/publications/${unsold.jobId}`, 'PATCH', { status: 'removed' })
   assert.equal((await getVehicle(unsold.vehicleId)).status, 'Pronto')
-  // A migration 12 rejeita duplicidades; simule um banco legado para este teste
+  // O índice por perfil rejeita duplicidades no mesmo perfil; simule um banco legado
   // de compatibilidade com anúncios historicamente duplicados.
   // Se houver anúncios legados adicionais ativos, remover um deles não despublica o veículo.
   const db = new DatabaseSync(join(dataDir, 'autoflow.db'))

@@ -527,13 +527,9 @@ async function planAutopilotJobs(
     v.vehicle_condition condition, v.vehicle_type vehicleType, v.body_type bodyType, v.location, v.sold_at soldAt,
     (SELECT COUNT(*) FROM vehicle_images WHERE vehicle_id = v.id AND organization_id = v.organization_id) imageCount
     FROM vehicles v
-    WHERE v.organization_id = ? AND v.status = 'Pronto' AND v.sold_at IS NULL
-      AND v.id NOT IN (
-        SELECT vehicle_id FROM publication_jobs
-        WHERE organization_id = ? AND status IN ('pending', 'filling', 'error', 'awaiting_confirmation', 'completed')
-      )`,
+    WHERE v.organization_id = ? AND v.status IN ('Pronto','Publicado') AND v.sold_at IS NULL`,
     )
-    .all(organizationId, organizationId) as Array<{
+    .all(organizationId) as Array<{
     id: number
     year: number
     make: string
@@ -573,8 +569,10 @@ async function planAutopilotJobs(
     .filter(
       (vehicle) => publicationReadinessIssues(vehicle, vehicle.imageCount, false).length === 0,
     )
-    .filter((vehicle) => !publicationDuplicateRisk(db, organizationId, vehicle.id))
-    .filter((vehicle) => findBestAccountForVehicle(db, organizationId, vehicle.id) !== null)
+    .filter((vehicle) => {
+      const account = findBestAccountForVehicle(db, organizationId, vehicle.id)
+      return account && !publicationDuplicateRisk(db, organizationId, vehicle.id, 0, account.id)
+    })
     .slice(0, automatic ? Math.min(20, remainingCapacity) : remainingCapacity)
   if (!eligibleVehicles.length) {
     return {
@@ -657,7 +655,7 @@ async function planAutopilotJobs(
         v.exterior_color exteriorColor,v.interior_color interiorColor,v.transmission,v.fuel_type fuelType,
         v.vehicle_condition condition,v.vehicle_type vehicleType,v.body_type bodyType,v.location,v.sold_at soldAt,
         (SELECT COUNT(*) FROM vehicle_images WHERE vehicle_id=v.id AND organization_id=v.organization_id) imageCount
-        FROM vehicles v WHERE v.id=? AND v.organization_id=? AND v.status='Pronto' AND v.sold_at IS NULL`,
+        FROM vehicles v WHERE v.id=? AND v.organization_id=? AND v.status IN ('Pronto','Publicado') AND v.sold_at IS NULL`,
         )
         .get(candidate.id, organizationId) as typeof candidate | undefined
       if (!vehicle) continue
@@ -678,14 +676,15 @@ async function planAutopilotJobs(
       if (descriptionFields.some((field) => vehicle[field] !== candidate[field])) continue
       if (vehicle.description !== candidate.description) continue
       if (publicationReadinessIssues(vehicle, vehicle.imageCount, !automatic).length) continue
-      if (publicationDuplicateRisk(db, organizationId, vehicle.id)) continue
+      const best = findBestAccountForVehicle(db, organizationId, vehicle.id)
+      if (!best || publicationDuplicateRisk(db, organizationId, vehicle.id, 0, best.id)) continue
       if (automatic && !String(vehicle.description || '').trim()) {
         const generated = factualDescriptions.get(vehicle.id)
         if (!generated) continue
         const updated = db
           .prepare(
             `UPDATE vehicles SET description=?,updated_at=CURRENT_TIMESTAMP
-            WHERE id=? AND organization_id=? AND status='Pronto' AND sold_at IS NULL
+            WHERE id=? AND organization_id=? AND status IN ('Pronto','Publicado') AND sold_at IS NULL
             AND TRIM(COALESCE(description,''))=''`,
           )
           .run(generated, vehicle.id, organizationId)
@@ -701,15 +700,6 @@ async function planAutopilotJobs(
       if (!listingContent) continue
       const listingHash = calculateListingHash(listingContent)
       if (findDuplicateListingHash(db, organizationId, listingHash)) continue
-      const active = db
-        .prepare(
-          `SELECT 1 FROM publication_jobs WHERE organization_id=? AND vehicle_id=?
-        AND status IN ('pending','filling','error','awaiting_confirmation','completed')`,
-        )
-        .get(organizationId, vehicle.id)
-      if (active) continue
-      const best = findBestAccountForVehicle(db, organizationId, vehicle.id)
-      if (!best) continue
       const targetAccountId = best.id
       const targetAccountLabel = best.label
       const profileIntervalMinutes = profileLimits(

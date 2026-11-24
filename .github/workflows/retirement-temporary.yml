@@ -17,7 +17,7 @@ jobs:
       - run: npm ci
       - name: Exact formatting diff
         run: |
-          npx prettier --write server/services/listing-expiry.ts server/routes/extension.ts server/services/ai-agent.ts extension/popup.js extension/background.js extension/popup.html extension/popup.css src/ListingExpiryPanel.tsx tests/listing-expiry.mjs tests/extension-manual-launch.mjs docs/LISTING_EXPIRY.md server/services/ai-operation-previews.ts tests/autonomous-flow.mjs
+          npx prettier --write .
           git diff
       - run: npm run format:check
       - run: npm run typecheck
@@ -25,4 +25,10 @@ jobs:
       - run: npm run test:listing-expiry
       - run: npm run test:extension-manual-launch
       - run: npm run test:autonomous
+      - run: npm run test:publication-variant-route
+      - run: npm run test:publication-variations
+      - run: npm run test:publication-ledger
+      - run: npm run test:queue
+      - run: npm run test:stock
+      - run: npm run test:publish-safety
       - run: npm run build

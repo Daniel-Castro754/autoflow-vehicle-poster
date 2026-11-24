@@ -206,10 +206,10 @@ function autopilotSnapshot(db: DatabaseSync, org: number) {
     .prepare(
       'SELECT id,status,browser_profile FROM social_accounts WHERE organization_id=? ORDER BY id',
     )
-    .all(org) as Array<{ status: string }>
+    .all(org) as Array<{ id: number; status: string }>
   const vehicles = db
     .prepare(
-      "SELECT v.id,v.year,v.make,v.model,v.price,v.km,v.description,v.status,v.updated_at,(SELECT COUNT(*) FROM vehicle_images i WHERE i.organization_id=v.organization_id AND i.vehicle_id=v.id) photoCount FROM vehicles v WHERE v.organization_id=? AND v.status='Pronto' AND v.sold_at IS NULL ORDER BY v.id",
+      "SELECT v.id,v.year,v.make,v.model,v.price,v.km,v.description,v.status,v.updated_at,(SELECT COUNT(*) FROM vehicle_images i WHERE i.organization_id=v.organization_id AND i.vehicle_id=v.id) photoCount FROM vehicles v WHERE v.organization_id=? AND v.status IN ('Pronto','Publicado') AND v.sold_at IS NULL ORDER BY v.id",
     )
     .all(org) as Array<{
     id: number
@@ -222,15 +222,23 @@ function autopilotSnapshot(db: DatabaseSync, org: number) {
     .prepare(
       'SELECT id,vehicle_id vehicleId,social_account_id accountId,status,scheduled_at FROM publication_jobs WHERE organization_id=? ORDER BY id',
     )
-    .all(org) as Array<{ vehicleId: number; status: string }>
-  const used = new Set(
-    jobs
-      .filter((j) =>
-        ['pending', 'filling', 'error', 'awaiting_confirmation', 'completed'].includes(j.status),
-      )
-      .map((j) => j.vehicleId),
+    .all(org) as Array<{ vehicleId: number; accountId: number | null; status: string }>
+  const openJobs = jobs.filter((j) =>
+    ['pending', 'filling', 'error', 'awaiting_confirmation', 'completed'].includes(j.status),
   )
-  const candidates = vehicles.filter((v) => !used.has(v.id) && v.photoCount > 0)
+  const candidates = vehicles.filter(
+    (v) =>
+      v.photoCount > 0 &&
+      accounts.some(
+        (account) =>
+          account.status === 'connected' &&
+          !openJobs.some(
+            (job) =>
+              job.vehicleId === v.id &&
+              (job.accountId === null || job.accountId === account.id),
+          ),
+      ),
+  )
   return {
     digest: sha({ settings, accounts, vehicles, jobs }),
     candidates,

@@ -473,6 +473,14 @@ const migrations: Migration[] = [
     ],
     sql: '',
   },
+  {
+    version: 28,
+    columns: [],
+    sql: `DROP INDEX IF EXISTS uq_publication_jobs_open_vehicle;
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_publication_jobs_open_vehicle
+      ON publication_jobs (organization_id,vehicle_id,COALESCE(social_account_id,0))
+      WHERE status IN ('pending','filling','error','awaiting_confirmation','completed');`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

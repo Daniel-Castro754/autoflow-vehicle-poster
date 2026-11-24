@@ -133,8 +133,13 @@ function recordJobEvent(
   recordOperationalSignal(db, organizationId, publicationJobId, eventType, details, createdBy)
 }
 
-function publicationDuplicateRisk(organizationId: number, vehicleId: number, excludeJobId = 0) {
-  return findPublicationDuplicateRisk(db, organizationId, vehicleId, excludeJobId)
+function publicationDuplicateRisk(
+  organizationId: number,
+  vehicleId: number,
+  excludeJobId = 0,
+  accountId: number | null = null,
+) {
+  return findPublicationDuplicateRisk(db, organizationId, vehicleId, excludeJobId, accountId)
 }
 
 const dummyPasswordHash = await hashPassword(randomBytes(32).toString('hex'))

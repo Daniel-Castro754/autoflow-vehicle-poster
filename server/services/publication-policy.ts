@@ -80,8 +80,9 @@ export function publicationDuplicateRisk(
   organizationId: number,
   vehicleId: number,
   excludeJobId = 0,
+  accountId: number | null = null,
 ) {
-  const listing = activeListingEvidence(db, organizationId, vehicleId, excludeJobId)
+  const listing = activeListingEvidence(db, organizationId, vehicleId, excludeJobId, accountId)
   if (listing)
     return {
       type: 'active_external_listing',
@@ -94,9 +95,10 @@ export function publicationDuplicateRisk(
       `SELECT j.id jobId,j.status,COALESCE(a.label,'Perfil não definido') accountLabel
     FROM publication_jobs j LEFT JOIN social_accounts a ON a.id=j.social_account_id
     WHERE j.organization_id=? AND j.vehicle_id=? AND j.id!=? AND j.status IN ('pending','filling','error','awaiting_confirmation','completed')
+      AND (? IS NULL OR j.social_account_id IS NULL OR j.social_account_id=?)
     ORDER BY CASE j.status WHEN 'completed' THEN 0 WHEN 'filling' THEN 1 ELSE 2 END,j.updated_at DESC LIMIT 1`,
     )
-    .get(organizationId, vehicleId, excludeJobId) as Record<string, unknown> | undefined
+    .get(organizationId, vehicleId, excludeJobId, accountId, accountId) as Record<string, unknown> | undefined
   if (sameVehicle)
     return {
       type: 'same_vehicle',

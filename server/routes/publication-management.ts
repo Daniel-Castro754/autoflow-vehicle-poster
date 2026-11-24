@@ -31,6 +31,7 @@ type Dependencies = {
     organizationId: number,
     vehicleId: number,
     excludeJobId?: number,
+    accountId?: number | null,
   ) => (Record<string, unknown> & { message: string }) | null
   recordJobEvent: (
     organizationId: number,
@@ -168,7 +169,7 @@ export async function handlePublicationManagementRoute(
       })
     if (!allowedExtensionAccount(accountId, auth))
       return send(res, 403, { error: 'Você não pode criar trabalhos para este perfil.' })
-    const duplicateRisk = publicationDuplicateRisk(auth.organizationId, vehicle.id)
+    const duplicateRisk = publicationDuplicateRisk(auth.organizationId, vehicle.id, 0, accountId)
     if (duplicateRisk)
       return send(res, 409, { error: duplicateRisk.message, duplicate: duplicateRisk })
     const listingContent = listingSnapshotForVehicle(
@@ -235,7 +236,7 @@ export async function handlePublicationManagementRoute(
     let publicationJobId: number
     db.exec('BEGIN IMMEDIATE')
     try {
-      const concurrentRisk = publicationDuplicateRisk(auth.organizationId, vehicle.id)
+      const concurrentRisk = publicationDuplicateRisk(auth.organizationId, vehicle.id, 0, accountId)
       if (concurrentRisk) {
         db.exec('ROLLBACK')
         return send(res, 409, { error: concurrentRisk.message, duplicate: concurrentRisk })
@@ -280,7 +281,7 @@ export async function handlePublicationManagementRoute(
         smartSchedule: Boolean(b.smartSchedule),
       })
       db.prepare(
-        "UPDATE vehicles SET status='Pronto',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+        "UPDATE vehicles SET status=CASE WHEN status='Publicado' THEN status ELSE 'Pronto' END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
       ).run(vehicle.id, auth.organizationId)
       db.exec('COMMIT')
     } catch (error) {
@@ -376,7 +377,7 @@ export async function handlePublicationManagementRoute(
         jobId: exhaustedJob.id,
       })
     for (const job of jobs) {
-      const duplicateRisk = publicationDuplicateRisk(auth.organizationId, job.vehicleId, job.id)
+      const duplicateRisk = publicationDuplicateRisk(auth.organizationId, job.vehicleId, job.id, job.accountId ?? null)
       if (duplicateRisk)
         return send(res, 409, {
           error: duplicateRisk.message,
@@ -493,11 +494,17 @@ export async function handlePublicationManagementRoute(
         error: 'Trabalhos de veículos vendidos devem ser reconciliados no perfil original.',
       })
     const transferredVehicleIds = jobs.map((job) => job.vehicleId)
+    if (new Set(transferredVehicleIds).size !== transferredVehicleIds.length)
+      return send(res, 409, { error: 'Selecione apenas um trabalho por veículo para o perfil de destino.' })
+    for (const job of jobs) {
+      const risk = publicationDuplicateRisk(auth.organizationId, job.vehicleId, job.id, accountId)
+      if (risk) return send(res, 409, { error: risk.message, duplicate: risk })
+    }
     const duplicatePlaceholders = transferredVehicleIds.map(() => '?').join(',')
     const duplicate = db
       .prepare(
         `SELECT id FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND vehicle_id IN (${duplicatePlaceholders})
-        AND status IN ('pending','filling','error','awaiting_confirmation') AND id NOT IN (${placeholders}) LIMIT 1`,
+        AND status IN ('pending','filling','error','awaiting_confirmation','completed') AND id NOT IN (${placeholders}) LIMIT 1`,
       )
       .get(auth.organizationId, accountId, ...transferredVehicleIds, ...ids)
     if (duplicate)
@@ -764,6 +771,7 @@ export async function handlePublicationManagementRoute(
         auth.organizationId,
         job.vehicleId,
         Number(publication[1]),
+        job.accountId,
       )
       if (duplicateRisk)
         return send(res, 409, { error: duplicateRisk.message, duplicate: duplicateRisk })
