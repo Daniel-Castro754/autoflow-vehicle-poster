@@ -90,6 +90,25 @@ try {
   assert.equal(capacity.remaining, 1)
   assert(capacity.retryAfterSeconds > 0)
   assert(capacity.nextAllowedAt)
+  assert.equal(capacity.canReleaseFailedInterval, true)
+  const release = (body = { action: 'release_failed_interval', confirm: true }) =>
+    api(path, { method: 'POST', body: JSON.stringify(body) })
+  await reject(release({ action: 'release_failed_interval' }), 400)
+  const released = await release()
+  assert.equal(released.retryAfterSeconds, 0)
+  assert.equal(released.used, 1)
+  assert.equal(released.failedIntervalReleased, true)
+  await reject(release(), 409)
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM publication_job_events WHERE event_type='failed_interval_released' AND created_by=?").get(org.id).n, 1)
+  db.prepare(
+    'INSERT INTO publication_job_events(organization_id,publication_job_id,event_type,details) ' +
+      "VALUES (?,?, 'filling_started', ?)",
+  ).run(org.org, job, JSON.stringify({ accountId }))
+  capacity = profileCapacity(db, org.org, accountId)
+  assert(capacity.retryAfterSeconds > 0)
+  assert.equal(capacity.failedIntervalReleased, false)
+  assert.equal(capacity.used, 2)
+  await reject(release(), 409, 'Daily limit remains enforced')
   const fallback = await patch({
     dailyLimitOverride: null,
     intervalMinutesOverride: null,

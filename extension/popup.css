@@ -351,3 +351,17 @@ select:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+
+.capacity-box {
+  border: 1px solid #82918d;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 12px;
+  font-size: 11px;
+}
+.capacity-box > small, .capacity-box details small { display: block; margin: 5px 0; }
+.capacity-timer { font-size: 28px; font-weight: bold; font-variant-numeric: tabular-nums; margin: 4px 0; }
+.capacity-box summary { cursor: pointer; font-weight: bold; margin: 8px 0; }
+.capacity-box button { margin: 4px 0; font-size: 11px; }
+.capacity-box input { width: 100%; }
+#capacityError { overflow-wrap: anywhere; }

@@ -28,6 +28,21 @@
           <label>Perfil ativo do Brave<select id="accountSelect"></select></label
           ><small id="profileMeta">A fila será filtrada por este perfil.</small>
         </div>
+        <section class="capacity-box" aria-label="Intervalo operacional">
+          <strong id="capacityState">Consultando intervalo...</strong>
+          <div id="capacityTimer" class="capacity-timer" aria-label="Tempo restante">--:--</div>
+          <small id="capacityMeta"></small>
+          <details id="capacitySettings" hidden>
+            <summary>Configurações do perfil</summary>
+            <label>Intervalo em minutos (vazio = padrão da empresa)
+              <input id="intervalInput" type="number" min="0" max="1440" step="1" />
+            </label>
+            <button id="saveInterval" type="button">Salvar intervalo</button>
+            <button id="releaseInterval" type="button" disabled>Liberar intervalo de tentativa com falha</button>
+            <small>Não libera limite diário, publicação incerta, reserva ativa ou intervalo após publicação.</small>
+          </details>
+          <small id="capacityError" role="status"></small>
+        </section>
         <div id="dispatchError" class="dispatch-error" role="alert" hidden></div>
         <button id="autoRun" class="auto-run" type="button">Iniciar consumo automático</button>
         <div class="heading">

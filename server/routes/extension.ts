@@ -224,6 +224,7 @@ export async function handleExtensionRoute(
       account,
       jobs,
       nextScheduledAt,
+      capacity: profileCapacity(db, auth.organizationId, accountId),
       automation: {
         autoAdvance: Boolean(settings?.autoAdvance),
         fillGroups: Boolean(settings?.fillGroups),

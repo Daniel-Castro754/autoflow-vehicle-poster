@@ -373,6 +373,11 @@ async function consumeQueue() {
     if (!response.ok) throw new Error(`Falha ao consultar a fila: HTTP ${response.status}`)
     const queue = await response.json()
     if (queue.nextScheduledAt) scheduleConsumer(queue.nextScheduledAt)
+    if (queue.capacity?.blockedByDailyLimit) return
+    if (Number(queue.capacity?.retryAfterSeconds) > 0) {
+      if (queue.capacity.nextAllowedAt) scheduleConsumer(queue.capacity.nextAllowedAt)
+      return
+    }
     const job = queue.jobs.find(
       (item) => item.jobStatus === 'pending' && !item.locked && !item.publishUncertain,
     )

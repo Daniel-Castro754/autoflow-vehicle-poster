@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { dailyExecutionAttempts } from './daily-capacity.ts'
+import { publicationMayExist } from './publication-evidence.ts'
 
 export type ProfileLimits = {
   accountId: number
@@ -96,6 +97,42 @@ export function lastProfileActivityAt(
   return candidates.length ? Math.max(...candidates) : null
 }
 
+// A release is tied to a single failed claim, not to a profile-wide exemption.
+function failedClaimForInterval(db: DatabaseSync, organizationId: number, accountId: number) {
+  const claim = db
+    .prepare(
+      `SELECT e.id eventId,e.created_at claimedAt,j.id jobId,j.status,j.publish_attempt_at publishAttemptAt,j.fill_report fillReport,j.social_account_id currentAccountId
+       FROM publication_job_events e JOIN publication_jobs j ON j.id=e.publication_job_id AND j.organization_id=e.organization_id
+       WHERE e.organization_id=? AND e.event_type='filling_started'
+       AND COALESCE(CAST(json_extract(e.details,'$.accountId') AS INTEGER),j.social_account_id)=?
+       ORDER BY e.created_at DESC,e.id DESC LIMIT 1`,
+    )
+    .get(organizationId, accountId) as
+    | { eventId: number; claimedAt: string; jobId: number; status: string; publishAttemptAt: string | null; fillReport: string | null; currentAccountId: number }
+    | undefined
+  if (!claim || claim.currentAccountId !== accountId || claim.status !== 'error' || publicationMayExist(claim))
+    return null
+  const finished = db
+    .prepare(
+      "SELECT 1 FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND status IN ('completed','removed') AND datetime(updated_at)>=datetime(?) LIMIT 1",
+    )
+    .get(organizationId, accountId, claim.claimedAt)
+  const active = db
+    .prepare(
+      "SELECT 1 FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND status='filling' AND datetime(lease_expires_at)>CURRENT_TIMESTAMP LIMIT 1",
+    )
+    .get(organizationId, accountId)
+  if (finished || active) return null
+  const release = db
+    .prepare(
+      `SELECT 1 FROM publication_job_events WHERE organization_id=? AND publication_job_id=?
+       AND event_type='failed_interval_released' AND CAST(json_extract(details,'$.claimEventId') AS INTEGER)=?
+       AND CAST(json_extract(details,'$.accountId') AS INTEGER)=? LIMIT 1`,
+    )
+    .get(organizationId, claim.jobId, claim.eventId, accountId)
+  return { ...claim, released: Boolean(release) }
+}
+
 export function profileCapacity(
   db: DatabaseSync,
   organizationId: number,
@@ -117,7 +154,10 @@ export function profileCapacity(
     )
     .get(organizationId, accountId) as { nextAllowedAt: string | null } | undefined
   const cooldownAt = parseSqliteTimestamp(storedCooldown?.nextAllowedAt)
-  const regularAt = lastActivityAt == null ? null : lastActivityAt + limits.intervalMinutes * 60000
+  const failedClaim = failedClaimForInterval(db, organizationId, accountId)
+  const released = Boolean(failedClaim?.released)
+  const regularAt =
+    lastActivityAt == null || released ? null : lastActivityAt + limits.intervalMinutes * 60000
   const nextAllowedTime = Math.max(regularAt || 0, cooldownAt || 0) || null
   const retryAfterSeconds =
     nextAllowedTime != null && nextAllowedTime > now ? Math.ceil((nextAllowedTime - now) / 1000) : 0
@@ -130,5 +170,48 @@ export function profileCapacity(
     nextAllowedAt: retryAfterSeconds ? new Date(nextAllowedTime!).toISOString() : null,
     retryAfterSeconds,
     blockedByDailyLimit: used >= limits.dailyLimit,
+    canReleaseFailedInterval: Boolean(
+      failedClaim &&
+        !released &&
+        retryAfterSeconds > 0 &&
+        used < limits.dailyLimit &&
+        (cooldownAt == null || cooldownAt <= now),
+    ),
+    failedIntervalReleased: released,
+    publicationCooldownUntil: cooldownAt != null && cooldownAt > now ? new Date(cooldownAt).toISOString() : null,
+  }
+}
+
+// No changes to the daily counter, post-publication cooldown, lease or job status.
+export function releaseFailedExecutionInterval(
+  db: DatabaseSync,
+  organizationId: number,
+  accountId: number,
+  actorId: number,
+) {
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const capacity = profileCapacity(db, organizationId, accountId)
+    const claim = failedClaimForInterval(db, organizationId, accountId)
+    if (!capacity.canReleaseFailedInterval || !claim || claim.released) {
+      db.exec('COMMIT')
+      return null
+    }
+    db.prepare(
+      `INSERT INTO publication_job_events
+       (organization_id,publication_job_id,event_type,created_by,details)
+       VALUES (?,?,'failed_interval_released',?,?)`,
+    ).run(organizationId, claim.jobId, actorId, JSON.stringify({
+      claimEventId: claim.eventId,
+      accountId,
+      previousNextAllowedAt: capacity.nextAllowedAt,
+      reason: 'manual_retry_after_failed_fill',
+    }))
+    const result = profileCapacity(db, organizationId, accountId)
+    db.exec('COMMIT')
+    return result
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
   }
 }
