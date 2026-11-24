@@ -259,8 +259,17 @@ function loadQueue() {
                 ? 'Preencher novamente'
                 : 'Retomar preenchimento'
         card.innerHTML = `<div class="vehicle-top"><strong>${Number(job.year)} ${escapeHtml(job.make)} ${escapeHtml(job.model)}</strong><span class="status ${locked ? 'locked' : escapeHtml(job.jobStatus)}">${job.publishUncertain ? 'Resultado incerto' : locked ? 'Em execução' : statusLabel(job.jobStatus)}</span></div><small>${Number(job.km).toLocaleString('pt-BR')} km · ${Number(job.price).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })} · ${Number(job.imageCount || 0)} fotos</small><div class="job-meta">Trabalho #${Number(job.jobId)} · ${escapeHtml(job.accountLabel)}${job.errorCode ? ' · ' + escapeHtml(job.errorCode) : ''}</div><button data-id="${Number(job.jobId)}" ${locked ? 'disabled title="Resolva a pendência no painel antes de repetir."' : ''}>${action}</button>`
+        const hide = document.createElement('button')
+        hide.type = 'button'
+        hide.className = 'hide-job'
+        hide.textContent = '×'
+        hide.title = locked ? 'Revise a execução no painel antes de retirar.' : 'Retirar da fila da extensão'
+        hide.setAttribute('aria-label', 'Retirar trabalho #' + Number(job.jobId) + ' da extensão')
+        hide.disabled = locked
+        hide.onclick = () => void hideQueueJob(job.jobId, activeAccountId, hide)
+        card.querySelector('.vehicle-top').appendChild(hide)
         if (!locked) {
-          const button = card.querySelector('button')
+          const button = card.querySelector('button[data-id]')
           button.dataset.jobAvailable = 'true'
           button.onclick = () => prepare(job.jobId)
         }
@@ -272,6 +281,22 @@ function loadQueue() {
       if (seq === loadQueueSeq)
         $('queue').innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`
     })
+}
+async function hideQueueJob(jobId, accountId, button) {
+  if (!accountId || button.disabled) return
+  button.disabled = true
+  try {
+    await request('/extension/jobs/' + encodeURIComponent(jobId) + '/hide', {
+      method: 'POST',
+      body: JSON.stringify({ accountId }),
+    })
+    if (accountId !== activeAccountId) return
+    loadQueue()
+  } catch (error) {
+    if (accountId !== activeAccountId) return
+    alert(error.message)
+    loadQueue()
+  }
 }
 function prepare(jobId) {
   if (!capacity || capacity.blockedByDailyLimit || capacityDeadline > Date.now()) {

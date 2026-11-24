@@ -540,10 +540,29 @@ try {
     method: 'PATCH',
     body: JSON.stringify({ scheduledAt: null }),
   })
-  await call('/publications/extension-visibility', sellerToken, {
-    method: 'PATCH',
-    body: JSON.stringify({ ids: [sellerPublication.id], visible: false }),
+  await expectStatus(403, () =>
+    call(`/extension/jobs/${sellerPublication.id}/hide`, sellerToken, {
+      method: 'POST',
+      body: JSON.stringify({ accountId: first.id }),
+    }),
+  )
+  await call(`/extension/jobs/${sellerPublication.id}/hide`, sellerToken, {
+    method: 'POST',
+    body: JSON.stringify({ accountId: second.id }),
   })
+  await call(`/extension/jobs/${sellerPublication.id}/hide`, sellerToken, {
+    method: 'POST',
+    body: JSON.stringify({ accountId: second.id }),
+  })
+  assert(!(await call(`/extension/queue?accountId=${second.id}`, sellerToken)).jobs.some(
+    (item) => item.jobId === sellerPublication.id,
+  ))
+  await expectStatus(409, () =>
+    call(`/extension/jobs/${sellerPublication.id}/prepare`, sellerToken, {
+      method: 'POST',
+      body: JSON.stringify({ accountId: second.id, instanceId: extensionTwo }),
+    }),
+  )
   await call('/publications/extension-visibility', sellerToken, {
     method: 'PATCH',
     body: JSON.stringify({ ids: [sellerPublication.id], visible: true }),
@@ -1051,6 +1070,12 @@ try {
     method: 'PATCH',
     body: JSON.stringify({ status: 'canceled' }),
   })
+  await expectStatus(409, () =>
+    call(`/extension/jobs/${publication.id}/hide`, adminToken, {
+      method: 'POST',
+      body: JSON.stringify({ accountId: first.id }),
+    }),
+  )
   const lockedQueue = await call(`/extension/queue?accountId=${first.id}`, adminToken)
   if (!lockedQueue.jobs.find((item) => item.jobId === publication.id)?.locked)
     throw new Error('A fila não sinalizou que o trabalho está em uso por outra aba.')
@@ -1272,6 +1297,12 @@ try {
     retainedQueue.jobs[0].jobStatus !== 'awaiting_confirmation'
   )
     throw new Error('O veículo saiu da extensão logo após o preenchimento.')
+  await expectStatus(409, () =>
+    call(`/extension/jobs/${publication.id}/hide`, adminToken, {
+      method: 'POST',
+      body: JSON.stringify({ accountId: first.id }),
+    }),
+  )
   await call('/publications/extension-visibility', adminToken, {
     method: 'PATCH',
     body: JSON.stringify({ ids: [publication.id], visible: false }),
