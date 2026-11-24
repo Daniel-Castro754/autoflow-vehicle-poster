@@ -10,7 +10,6 @@ import { publicationReadinessIssues } from '../services/publication-policy.ts'
 import { markListingRemoved, recordConfirmedListing } from '../services/publication-ledger.ts'
 import {
   calculateListingHash,
-  findDuplicateListingHash,
   listingSnapshotForVehicle,
   reserveListingHash,
   releaseUnpublishedHash,
@@ -179,12 +178,6 @@ export async function handlePublicationManagementRoute(
     )
     if (!listingContent) return send(res, 404, { error: 'Veículo não encontrado.' })
     const listingHash = calculateListingHash(listingContent)
-    const contentDuplicate = findDuplicateListingHash(db, auth.organizationId, listingHash)
-    if (contentDuplicate)
-      return send(res, 409, {
-        error: new DuplicateListingHashError(contentDuplicate.jobId).message,
-        duplicate: { type: 'listing_hash', ...contentDuplicate },
-      })
     const settings = db
       .prepare('SELECT max_retries maxRetries FROM organization_settings WHERE organization_id=?')
       .get(auth.organizationId) as { maxRetries?: number } | undefined
@@ -230,7 +223,7 @@ export async function handlePublicationManagementRoute(
       1,
       Math.min(10, Number(b.maxRetries) || Number(settings?.maxRetries) || 3),
     )
-    // Serialize duplicate validation and hash reservation with job creation.
+    // Serialize capacity and per-job hash reservation with job creation.
     // A failed insert must never leave an orphaned pending job.
     let publicationJobId: number
     db.exec('BEGIN IMMEDIATE')
@@ -280,7 +273,7 @@ export async function handlePublicationManagementRoute(
         smartSchedule: Boolean(b.smartSchedule),
       })
       db.prepare(
-        "UPDATE vehicles SET status='Pronto',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+        "UPDATE vehicles SET status=CASE WHEN status='Publicado' THEN status ELSE 'Pronto' END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
       ).run(vehicle.id, auth.organizationId)
       db.exec('COMMIT')
     } catch (error) {
@@ -491,18 +484,6 @@ export async function handlePublicationManagementRoute(
     if (jobsIncludeSoldVehicle(ids, auth.organizationId))
       return send(res, 409, {
         error: 'Trabalhos de veículos vendidos devem ser reconciliados no perfil original.',
-      })
-    const transferredVehicleIds = jobs.map((job) => job.vehicleId)
-    const duplicatePlaceholders = transferredVehicleIds.map(() => '?').join(',')
-    const duplicate = db
-      .prepare(
-        `SELECT id FROM publication_jobs WHERE organization_id=? AND social_account_id=? AND vehicle_id IN (${duplicatePlaceholders})
-        AND status IN ('pending','filling','error','awaiting_confirmation') AND id NOT IN (${placeholders}) LIMIT 1`,
-      )
-      .get(auth.organizationId, accountId, ...transferredVehicleIds, ...ids)
-    if (duplicate)
-      return send(res, 409, {
-        error: 'O perfil de destino já possui um trabalho ativo para um dos veículos selecionados.',
       })
     const targetCapacity = profileCapacity(db, auth.organizationId, accountId)
     if (targetCapacity.queuedToday + jobs.length > targetCapacity.dailyLimit)

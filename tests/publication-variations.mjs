@@ -17,7 +17,6 @@ import {
   confirmPublishedHash,
   findDuplicateListingHash,
   markPublishedHashRemoved,
-  DuplicateListingHashError,
 } from '../server/services/duplicate-checker.ts'
 import { publishWithRandomDelay } from '../server/services/publication-service.ts'
 import { profileCapacity } from '../server/services/profile-capacity.ts'
@@ -128,8 +127,13 @@ try {
   reserveListingHash(db, 1, 1, 1, hash)
   db.exec('COMMIT')
   assert.equal(findDuplicateListingHash(db, 1, hash)?.jobId, 1)
-  assert.throws(() => reserveListingHash(db, 1, 2, 2, hash), DuplicateListingHashError)
-  reserveListingHash(db, 1, 2, 2, secondHash)
+  reserveListingHash(db, 1, 2, 2, hash)
+  reserveListingHash(db, 1, 2, 2, hash)
+  assert.throws(() => reserveListingHash(db, 1, 2, 2, secondHash), /mudaram/)
+  assert.equal(
+    db.prepare('SELECT COUNT(*) n FROM published_ads WHERE organization_id=1 AND listing_hash=?').get(hash).n,
+    2,
+  )
   // Organizations are isolated by their own hash namespace.
   reserveListingHash(db, 2, 3, 3, hash)
   assert.equal(confirmPublishedHash(db, 1, 1), true)
@@ -141,8 +145,9 @@ try {
   const capacity = profileCapacity(db, 1, 1)
   assert(capacity.retryAfterSeconds >= 30 * 60)
   markPublishedHashRemoved(db, 1, 1)
+  assert.equal(findDuplicateListingHash(db, 1, hash)?.jobId, 2)
+  markPublishedHashRemoved(db, 1, 2)
   assert.equal(findDuplicateListingHash(db, 1, hash), undefined)
-  assert.equal(findDuplicateListingHash(db, 1, secondHash)?.jobId, 2)
 } finally {
   db.close()
 }

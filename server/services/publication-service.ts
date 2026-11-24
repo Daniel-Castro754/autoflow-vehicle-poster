@@ -1,11 +1,6 @@
 import { randomInt } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import {
-  calculateListingHash,
-  findDuplicateListingHash,
-  listingSnapshotForVehicle,
-  DuplicateListingHashError,
-} from './duplicate-checker.ts'
+import { calculateListingHash, listingSnapshotForVehicle } from './duplicate-checker.ts'
 import {
   pickRandomOrderedSubset,
   publicationPhotoRandom,
@@ -46,8 +41,6 @@ export function prepareListingForPublication(
     throw new Error(
       'Os dados do anúncio foram alterados após entrar na fila. Cancele e revise o trabalho.',
     )
-  const duplicate = findDuplicateListingHash(db, organizationId, listingHash, publicationJobId)
-  if (duplicate) throw new DuplicateListingHashError(duplicate.jobId)
   const rows = db
     .prepare(
       'SELECT id,file_name fileName,photo_category category FROM vehicle_images WHERE organization_id=? AND vehicle_id=?',

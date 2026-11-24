@@ -7,7 +7,7 @@ import { runHealthCheck } from '../server/services/health-monitor.ts'
 import { jpegBase64 } from './helpers/images.mjs'
 import { startTestServer, createApiClient } from './helpers/server.mjs'
 
-// DB-level uniqueness must survive concurrent application writers.
+// Multiple intentional jobs can reference one stock vehicle.
 const isolated = new DatabaseSync(':memory:')
 try {
   initializeBaseSchema(isolated)
@@ -22,13 +22,13 @@ try {
       .prepare('INSERT INTO publication_jobs(organization_id,vehicle_id,status) VALUES(1,1,?)')
       .run(status)
   create('pending')
-  assert.throws(() => create('error'), /UNIQUE constraint failed/)
+  create('error')
   isolated.exec("UPDATE publication_jobs SET status='removed'")
   create('completed')
-  assert.throws(() => create('pending'), /UNIQUE constraint failed/)
+  create('pending')
   isolated.exec("UPDATE publication_jobs SET status='removed'")
   create('pending')
-  assert.equal(isolated.prepare('SELECT COUNT(*) n FROM publication_jobs').get().n, 3)
+  assert.equal(isolated.prepare('SELECT COUNT(*) n FROM publication_jobs').get().n, 5)
 } finally {
   isolated.close()
 }
@@ -108,17 +108,15 @@ try {
   const firstJob = await createJob(vehicleA)
   const secondJob = await createJob(vehicleB)
 
-  // Duplicate writes are blocked at the DB layer, including across API clients.
+  // Repeating a stock unit creates a new independent job.
   const orgId = db.prepare('SELECT organization_id id FROM vehicles WHERE id=?').get(vehicleA).id
-  assert.throws(
-    () =>
-      db
-        .prepare(
-          "INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status) VALUES(?,?,?,'pending')",
-        )
-        .run(orgId, vehicleA, account.id),
-    /UNIQUE constraint failed/,
-  )
+  const repeated = db
+    .prepare(
+      "INSERT INTO publication_jobs(organization_id,vehicle_id,social_account_id,status) VALUES(?,?,?,'pending')",
+    )
+    .run(orgId, vehicleA, account.id)
+  assert.notEqual(Number(repeated.lastInsertRowid), firstJob.id)
+  db.prepare('DELETE FROM publication_jobs WHERE id=?').run(repeated.lastInsertRowid)
 
   // Both jobs were created today. A daily limit of one must still allow the FIRST claim.
   await api('/settings', {
@@ -200,7 +198,7 @@ try {
   } finally {
     other.close()
   }
-  console.log('✓ Phase 1: unique open jobs, daily capacity and stale lease fencing')
+  console.log('✓ Phase 1: independent jobs, daily capacity and stale lease fencing')
 } finally {
   db.close()
   await server.close()

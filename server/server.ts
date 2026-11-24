@@ -134,7 +134,9 @@ function recordJobEvent(
 }
 
 function publicationDuplicateRisk(organizationId: number, vehicleId: number, excludeJobId = 0) {
-  return findPublicationDuplicateRisk(db, organizationId, vehicleId, excludeJobId)
+  // Manual queue requests can intentionally repeat a stock unit. Keep the
+  // cross-vehicle photo identity check and the autonomous planner's default policy.
+  return findPublicationDuplicateRisk(db, organizationId, vehicleId, excludeJobId, true)
 }
 
 const dummyPasswordHash = await hashPassword(randomBytes(32).toString('hex'))
