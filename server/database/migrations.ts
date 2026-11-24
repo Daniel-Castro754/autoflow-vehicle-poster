@@ -473,6 +473,17 @@ const migrations: Migration[] = [
     ],
     sql: '',
   },
+  {
+    version: 28,
+    columns: [],
+    // Multiple intentional publication jobs may reference the same stock unit.
+    // Per-job identity and the external listing ID remain unique.
+    sql: `DROP INDEX IF EXISTS uq_publication_jobs_open_vehicle;
+    DROP INDEX IF EXISTS idx_published_ads_active_hash;
+    CREATE INDEX IF NOT EXISTS idx_published_ads_active_hash
+      ON published_ads(organization_id,listing_hash)
+      WHERE status IN ('queued','published');`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

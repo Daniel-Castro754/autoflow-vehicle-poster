@@ -98,10 +98,23 @@ try {
   const expectedCopy = listingSnapshotForVehicle(db, 1, firstVehicle.id, firstJob.variantSeed)
   assert(expectedCopy)
   assert.equal(calculateListingHash(expectedCopy), fingerprints[0].listing_hash)
-  await assert.rejects(
-    () => makeJob(firstVehicle.id),
-    (error) => error.status === 409,
-    'The same stock vehicle may not be published twice just by changing presentation.',
+  const repeated = await makeJob(firstVehicle.id)
+  const otherAccount = await api('/social-accounts', {
+    method: 'POST',
+    body: JSON.stringify({
+      userId: admin.id,
+      label: 'Conta teste 2',
+      browserProfile: 'Brave teste 2',
+    }),
+  })
+  const acrossProfiles = await api('/publications', {
+    method: 'POST',
+    body: JSON.stringify({ vehicleId: firstVehicle.id, accountId: otherAccount.id }),
+  })
+  assert.equal(new Set([first.id, repeated.id, acrossProfiles.id]).size, 3)
+  assert.equal(
+    db.prepare('SELECT COUNT(*) n FROM published_ads WHERE organization_id=1 AND vehicle_id=?').get(firstVehicle.id).n,
+    3,
   )
 
   const prepared = await api(`/extension/jobs/${first.id}/prepare`, {

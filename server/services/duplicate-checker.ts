@@ -77,7 +77,7 @@ export function findDuplicateListingHash(
 }
 
 // Must be called inside the same BEGIN IMMEDIATE transaction as job creation.
-// The partial UNIQUE index also guards against concurrent processes.
+// A hash is evidence for a job, not a uniqueness constraint across jobs.
 export function reserveListingHash(
   db: DatabaseSync,
   organizationId: number,
@@ -95,8 +95,6 @@ export function reserveListingHash(
       throw new Error('Os dados do anúncio mudaram após entrar na fila.')
     return
   }
-  const conflict = findDuplicateListingHash(db, organizationId, hash, publicationJobId)
-  if (conflict) throw new DuplicateListingHashError(conflict.jobId)
   db.prepare(
     `INSERT INTO published_ads
        (organization_id,vehicle_id,publication_job_id,listing_hash,status)

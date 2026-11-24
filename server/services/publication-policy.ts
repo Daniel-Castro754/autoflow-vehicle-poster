@@ -80,9 +80,10 @@ export function publicationDuplicateRisk(
   organizationId: number,
   vehicleId: number,
   excludeJobId = 0,
+  allowRepeatVehicle = false,
 ) {
   const listing = activeListingEvidence(db, organizationId, vehicleId, excludeJobId)
-  if (listing)
+  if (listing && !allowRepeatVehicle)
     return {
       type: 'active_external_listing',
       ...listing,
@@ -97,7 +98,7 @@ export function publicationDuplicateRisk(
     ORDER BY CASE j.status WHEN 'completed' THEN 0 WHEN 'filling' THEN 1 ELSE 2 END,j.updated_at DESC LIMIT 1`,
     )
     .get(organizationId, vehicleId, excludeJobId) as Record<string, unknown> | undefined
-  if (sameVehicle)
+  if (sameVehicle && !allowRepeatVehicle)
     return {
       type: 'same_vehicle',
       ...sameVehicle,

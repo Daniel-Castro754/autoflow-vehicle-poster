@@ -1379,7 +1379,8 @@ function QueueDrawer({
         <h2>Escolher perfil do Brave</h2>
         <p>
           {vehicle.year} {vehicle.make} {vehicle.model} será exibido somente na fila do perfil
-          selecionado.
+          selecionado. Você pode adicionar outra tarefa para o mesmo veículo. Cada tarefa tem seu
+          próprio histórico; confirme que a nova publicação é permitida na plataforma.
         </p>
         {error && (
           <div className="auth-error">
