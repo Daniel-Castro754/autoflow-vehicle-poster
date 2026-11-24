@@ -353,18 +353,67 @@ select:focus-visible {
 }
 
 .capacity-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 3px 8px;
   border: 1px solid #82918d;
   border-radius: 8px;
-  padding: 10px;
-  margin-bottom: 12px;
+  padding: 7px 9px;
+  margin-bottom: 8px;
   font-size: 11px;
 }
-.capacity-box > small, .capacity-box details small { display: block; margin: 5px 0; }
-.capacity-timer { font-size: 28px; font-weight: bold; font-variant-numeric: tabular-nums; margin: 4px 0; }
-.capacity-box summary { cursor: pointer; font-weight: bold; margin: 8px 0; }
-.capacity-box button { margin: 4px 0; font-size: 11px; }
-.capacity-box input { width: 100%; }
-#capacityError { overflow-wrap: anywhere; }
+#capacityState {
+  min-width: 0;
+  line-height: 1.2;
+}
+.capacity-timer {
+  font-size: 16px;
+  line-height: 1.2;
+  font-weight: bold;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+#capacityMeta {
+  font-size: 10px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.capacity-box details {
+  min-width: 0;
+  justify-self: end;
+}
+.capacity-box details[open] {
+  grid-column: 1 / -1;
+  justify-self: stretch;
+}
+.capacity-box summary {
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 10px;
+  margin: 0;
+}
+.capacity-box details[open] summary {
+  margin-bottom: 8px;
+}
+.capacity-box details small {
+  display: block;
+  margin: 5px 0;
+}
+.capacity-box button {
+  margin: 4px 0;
+  font-size: 11px;
+}
+.capacity-box input {
+  width: 100%;
+}
+#capacityError {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+}
+#capacityError:empty {
+  display: none;
+}
 
 .vehicle-top > strong { flex: 1; min-width: 0; }
 .vehicle-top { gap: 6px; align-items: center; }
