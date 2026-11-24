@@ -815,13 +815,48 @@ try {
       dataBase64: jpegBase64('golf-foto-1'),
     }),
   })
+  const retiredVehicle = await call('/vehicles', token, {
+    method: 'POST',
+    body: JSON.stringify({
+      make: 'Honda',
+      model: 'City',
+      trim: 'EX',
+      year: 2023,
+      price: 104900,
+      km: 27000,
+      vehicleType: 'Carro/picape',
+      bodyType: 'Sedã',
+      condition: 'Excelente',
+      transmission: 'Automático',
+      fuelType: 'Flex',
+      exteriorColor: 'Branco',
+      interiorColor: 'Preto',
+      status: 'Pronto',
+      description: 'Veículo disponível no estoque, anúncio anterior retirado.',
+      location: 'São Paulo, SP',
+    }),
+  })
+  await call(`/vehicles/${retiredVehicle.id}/images`, token, {
+    method: 'POST',
+    body: JSON.stringify({
+      name: 'city-retired.jpg',
+      mimeType: 'image/jpeg',
+      dataBase64: jpegBase64('city-retired-photo'),
+    }),
+  })
   const testDb = new DatabaseSync(join(dataDir, 'autoflow.db'))
+  testDb
+    .prepare(
+      "INSERT INTO publication_jobs(organization_id,vehicle_id,status) SELECT organization_id,id,'removed' FROM vehicles WHERE id=?",
+    )
+    .run(retiredVehicle.id)
   testDb
     .prepare("UPDATE vehicles SET vehicle_type='' WHERE id=?")
     .run(incompleteAutopilotVehicle.id)
 
   const pilotPreview = await call('/ai/autopilot/preview', token)
   assert(pilotPreview.previewId)
+  assert(!pilotPreview.potentialVehicles.some((item) => item.id === retiredVehicle.id))
   const autopilotRes = await call('/ai/autopilot/run', token, {
     method: 'POST',
     body: JSON.stringify({ previewId: pilotPreview.previewId }),
@@ -850,6 +885,13 @@ try {
       .prepare('SELECT description FROM vehicles WHERE id=?')
       .get(autopilotVehicle.id)
       .description.trim().length > 0,
+  )
+  assert.equal(
+    testDb
+      .prepare("SELECT COUNT(*) count FROM publication_jobs WHERE vehicle_id=? AND status!='removed'")
+      .get(retiredVehicle.id).count,
+    0,
+    'Retiradas anteriores devem impedir a republicação pelo piloto',
   )
   testDb.close()
   console.log(
