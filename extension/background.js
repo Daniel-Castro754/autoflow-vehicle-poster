@@ -3,6 +3,7 @@ const API = `${API_ORIGIN}/api`
 const HEARTBEAT_ALARM = 'autoflow-heartbeat'
 let queueConsumerRunning = false
 let manualLaunchRunning = false
+let retirementLaunchRunning = false
 let refreshInFlight = null
 
 // Only the extension process uses the refresh secret; content scripts never receive it.
@@ -188,6 +189,36 @@ async function launchManualJob(jobId, accountId, instanceId) {
     return { ok: false, error: message, tabId: tab?.id || null, reserved }
   } finally {
     manualLaunchRunning = false
+  }
+}
+
+// Only a deliberate popup action may open a retirement review. The background
+// owns tab creation and revalidates the selected profile and current server state.
+async function launchRetirementReview(jobId, accountId) {
+  if (retirementLaunchRunning) throw new Error('Já existe uma retirada sendo aberta.')
+  retirementLaunchRunning = true
+  try {
+    if (!Number.isSafeInteger(jobId) || jobId < 1 || !Number.isSafeInteger(accountId) || accountId < 1)
+      throw new Error('Publicação ou perfil inválido.')
+    const state = await chrome.storage.local.get('activeAccountId')
+    if (state.activeAccountId !== accountId) throw new Error('O perfil ativo mudou.')
+    const response = await authorizedFetch(
+      `${API}/extension/retirements?accountId=${accountId}`,
+    )
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.error || 'Não foi possível consultar a retirada.')
+    const item = data.items?.find((entry) => entry.jobId === jobId)
+    if (!item || !['sold', 'expired'].includes(item.state))
+      throw new Error('A publicação não está mais pendente de retirada.')
+    const current = await chrome.storage.local.get('activeAccountId')
+    if (current.activeAccountId !== accountId) throw new Error('O perfil ativo mudou.')
+    const destination = item.canonicalUrl || 'https://www.facebook.com/marketplace/you/selling'
+    if (!/^https:\/\/www\.facebook\.com\/marketplace\/(item\/[A-Za-z0-9_-]+|you\/selling)$/.test(destination))
+      throw new Error('Endereço do anúncio inválido.')
+    await chrome.tabs.create({ url: destination, active: true })
+    return { ok: true }
+  } finally {
+    retirementLaunchRunning = false
   }
 }
 
@@ -664,6 +695,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       Number(message.accountId),
       String(message.instanceId || ''),
     )
+      .then(sendResponse)
+      .catch((error) =>
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+      )
+    return true
+  }
+  if (message.type === 'AUTOFLOW_OPEN_RETIREMENT') {
+    if (_sender.tab || _sender.url !== chrome.runtime.getURL('popup.html')) {
+      sendResponse({ ok: false, error: 'Abra a retirada pelo painel da extensão.' })
+      return
+    }
+    void launchRetirementReview(Number(message.jobId), Number(message.accountId))
       .then(sendResponse)
       .catch((error) =>
         sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),

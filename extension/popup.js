@@ -178,21 +178,25 @@ async function loadRetirements() {
       button.onclick = async () => {
         button.disabled = true
         try {
-          // Recheck current state and profile before opening anything. A tab
-          // opening is never treated as confirmation of deletion.
-          const current = await request('/extension/retirements?accountId=' + accountId)
-          const fresh = current.items.find((entry) => entry.jobId === item.jobId)
-          if (accountId !== activeAccountId || seq !== retirementSeq || !fresh)
+          if (accountId !== activeAccountId || seq !== retirementSeq)
             throw new Error('A retirada mudou. Atualize a lista.')
-          if (!confirm(
-            'Confira se este Brave está conectado ao Facebook de ' + fresh.accountLabel +
-            ' (' + fresh.browserProfile + '). Abra o anúncio apenas nesse perfil. ' +
-            'A exclusão e sua confirmação no painel são manuais. Continuar?',
-          )) return
-          const destination = fresh.canonicalUrl || 'https://www.facebook.com/marketplace/you/selling'
-          if (!/^https:\/\/www\.facebook\.com\/marketplace\/(item\/[A-Za-z0-9_-]+|you\/selling)$/.test(destination))
-            throw new Error('Endereço do anúncio inválido.')
-          await chrome.tabs.create({ url: destination, active: true })
+          if (
+            !confirm(
+              'Confira se este Brave está conectado ao Facebook de ' +
+                item.accountLabel +
+                ' (' +
+                item.browserProfile +
+                '). Abra o anúncio apenas nesse perfil. ' +
+                'A exclusão e sua confirmação no painel são manuais. Continuar?',
+            )
+          )
+            return
+          const result = await chrome.runtime.sendMessage({
+            type: 'AUTOFLOW_OPEN_RETIREMENT',
+            jobId: item.jobId,
+            accountId,
+          })
+          if (!result?.ok) throw new Error(result?.error || 'Não foi possível abrir a retirada.')
         } catch (error) {
           alert(error.message)
         } finally {

@@ -6,7 +6,7 @@ const background = await readFile(new URL('../extension/background.js', import.m
 const popup = await readFile(new URL('../extension/popup.js', import.meta.url), 'utf8')
 const content = await readFile(new URL('../extension/content.js', import.meta.url), 'utf8')
 
-async function fixture({ ready = true, fillAccepted = true, apiError = '' } = {}) {
+async function fixture({ ready = true, fillAccepted = true, apiError = '', retirementItems = [] } = {}) {
   const requests = []
   const deliveries = []
   const tabs = []
@@ -24,6 +24,7 @@ async function fixture({ ready = true, fillAccepted = true, apiError = '' } = {}
       onInstalled: { addListener: () => {} },
       onStartup: { addListener: () => {} },
       getManifest: () => ({ version: 'test' }),
+      getURL: (path) => 'chrome-extension://test/' + path,
     },
     alarms: {
       get: (_name, callback) => callback(undefined),
@@ -80,6 +81,8 @@ async function fixture({ ready = true, fillAccepted = true, apiError = '' } = {}
   }
   const fetch = async (url, options = {}) => {
     requests.push({ url: String(url), options })
+    if (String(url).includes('/extension/retirements?'))
+      return { ok: true, status: 200, json: async () => ({ items: retirementItems }) }
     if (String(url).endsWith('/prepare')) {
       return {
         ok: !apiError,
@@ -180,6 +183,32 @@ async function fixture({ ready = true, fillAccepted = true, apiError = '' } = {}
   assert.match(result.error, /rejeitou o preenchimento/)
   assert.equal(f.data.pendingJob?.jobId, 42, 'Preserve an acquired lease on delivery failure')
   assert.match(f.data.lastManualLaunchError.message, /rejeitou o preenchimento/)
+}
+{
+  const f = await fixture({
+    retirementItems: [
+      { jobId: 42, state: 'expired', canonicalUrl: 'https://www.facebook.com/marketplace/item/123' },
+      { jobId: 43, state: 'sold', canonicalUrl: '' },
+      { jobId: 44, state: 'expired', canonicalUrl: 'https://example.com/unsafe' },
+      { jobId: 45, state: 'active', canonicalUrl: 'https://www.facebook.com/marketplace/item/45' },
+    ],
+  })
+  const open = (jobId, accountId = 7, sender = { url: 'chrome-extension://test/popup.html' }) =>
+    new Promise((resolve) =>
+      f.listeners.message({ type: 'AUTOFLOW_OPEN_RETIREMENT', jobId, accountId }, sender, resolve),
+    )
+  assert.equal((await open(42, 8)).ok, false, 'Wrong active profile must be blocked')
+  assert.equal((await open(42, 7, { tab: { id: 99 } })).ok, false)
+  assert.equal((await open(44)).ok, false, 'Non-Marketplace URLs must be blocked')
+  assert.equal((await open(45)).ok, false, 'An extended/active listing must not be opened')
+  assert.equal((await open(999)).ok, false, 'Missing listing must be blocked')
+  assert.equal(f.tabs.length, 0)
+  assert.equal((await open(42)).ok, true)
+  assert.equal(f.tabs[0].url, 'https://www.facebook.com/marketplace/item/123')
+  assert.equal((await open(43)).ok, true)
+  assert.equal(f.tabs[1].url, 'https://www.facebook.com/marketplace/you/selling')
+  assert(f.requests.every((request) => !request.options.method || request.options.method === 'GET'))
+  assert.equal(f.deliveries.length, 0, 'Retirement review must not issue click or fill commands')
 }
 assert(popup.includes("type: 'AUTOFLOW_START_MANUAL_JOB'"))
 assert(!popup.includes('chrome.tabs.create('), 'The popup cannot own the tab-creation flow')
