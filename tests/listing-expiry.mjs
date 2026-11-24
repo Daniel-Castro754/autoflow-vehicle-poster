@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
-import { listingExpiryOverview } from '../server/services/listing-expiry.ts'
+import { listingExpiryOverview, requiresManualRepublication } from '../server/services/listing-expiry.ts'
+import { handleExtensionRoute, isExtensionRoute } from '../server/routes/extension.ts'
 import { handleListingExpiryRoute } from '../server/routes/listing-expiry.ts'
 
 const db = new DatabaseSync(':memory:')
@@ -161,6 +162,32 @@ assert.equal(
   db.prepare('SELECT status FROM publication_listing_ledger WHERE id=2').get().status,
   'active',
 )
+// Extension read-only retirement list: profile, organization and authorization fences.
+db.exec("UPDATE organization_settings SET listing_expiry_days=4 WHERE organization_id=1")
+db.exec("UPDATE publication_listing_ledger SET expiry_review_until=NULL WHERE id=2")
+insert(12, 150, { account: 2 })
+assert.deepEqual(listingExpiryOverview(db, 1, null, now, 2).items.map((item) => item.jobId), [12, 6])
+assert.equal(requiresManualRepublication(db, 1, 8), true)
+assert.equal(requiresManualRepublication(db, 2, 8), false)
+assert.equal(requiresManualRepublication(db, 1, 2), false)
+async function retirements(accountId, userId) {
+  const url = new URL('http://localhost/api/extension/retirements?accountId=' + accountId)
+  const req = { method: 'GET' }
+  assert.equal(isExtensionRoute(req, url), true)
+  await handleExtensionRoute(req, {}, url, { organizationId: 1, userId }, {
+    db,
+    send: deps.send,
+    allowedExtensionAccount: (id, auth) => db.prepare(
+      'SELECT id FROM social_accounts WHERE id=? AND organization_id=? AND (?=1 OR user_id=?)',
+    ).get(id, auth.organizationId, auth.userId, auth.userId),
+  })
+  return response
+}
+assert.deepEqual((await retirements(1, 1)).payload.items.map((item) => item.jobId), [3, 2])
+assert.deepEqual((await retirements(2, 2)).payload.items.map((item) => item.jobId), [12])
+assert.equal((await retirements(1, 2)).status, 403)
+assert.equal((await retirements(3, 1)).status, 403)
+assert.equal(db.prepare('SELECT status FROM publication_jobs WHERE id=2').get().status, 'completed')
 db.close()
 console.log(
   'OK: validade de anúncios, prorrogação, data incerta, vendidos e isolamento por perfil.',

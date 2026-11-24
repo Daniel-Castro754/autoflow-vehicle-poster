@@ -7,6 +7,7 @@ let instanceId = ''
 let loadAccountsSeq = 0,
   loadQueueSeq = 0,
   openingJob = false
+let retirementSeq = 0
 async function request(path, options = {}) {
   const send = () =>
     fetch(API + path, {
@@ -70,6 +71,8 @@ async function loadAccounts() {
       $('accountSelect').appendChild(option)
     })
     if (!selected) {
+      retirementSeq++
+      $('retirements').textContent = ''
       activeAccountId = 0
       $('profileMeta').textContent = 'Nenhum perfil associado. Cadastre um em Equipe e contas.'
       $('accountSelect').disabled = true
@@ -112,6 +115,7 @@ function updateProfileMeta(account) {
 function loadQueue() {
   const seq = ++loadQueueSeq
   if (!activeAccountId) return
+  void loadRetirements()
   $('queue').innerHTML = '<div class="empty">Carregando...</div>'
   request('/extension/queue?accountId=' + encodeURIComponent(activeAccountId))
     .then(({ jobs, account, automation }) => {
@@ -152,6 +156,58 @@ function loadQueue() {
         $('queue').innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`
     })
 }
+async function loadRetirements() {
+  const seq = ++retirementSeq
+  const accountId = activeAccountId
+  const container = $('retirements')
+  container.textContent = 'Consultando retiradas...'
+  try {
+    const { items } = await request('/extension/retirements?accountId=' + accountId)
+    if (seq !== retirementSeq || accountId !== activeAccountId) return
+    container.textContent = items.length ? '' : 'Nenhuma retirada pendente para este perfil.'
+    for (const item of items) {
+      const card = document.createElement('div')
+      card.className = 'vehicle error-job'
+      const title = document.createElement('strong')
+      title.textContent = item.vehicle
+      const detail = document.createElement('small')
+      detail.textContent = (item.state === 'sold' ? 'Vendido' : 'Vencido') + ' · #' + item.jobId
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.textContent = item.canonicalUrl ? 'Abrir para revisar retirada' : 'Conferir classificados'
+      button.onclick = async () => {
+        button.disabled = true
+        try {
+          // Recheck current state and profile before opening anything. A tab
+          // opening is never treated as confirmation of deletion.
+          const current = await request('/extension/retirements?accountId=' + accountId)
+          const fresh = current.items.find((entry) => entry.jobId === item.jobId)
+          if (accountId !== activeAccountId || seq !== retirementSeq || !fresh)
+            throw new Error('A retirada mudou. Atualize a lista.')
+          if (!confirm(
+            'Confira se este Brave está conectado ao Facebook de ' + fresh.accountLabel +
+            ' (' + fresh.browserProfile + '). Abra o anúncio apenas nesse perfil. ' +
+            'A exclusão e sua confirmação no painel são manuais. Continuar?',
+          )) return
+          const destination = fresh.canonicalUrl || 'https://www.facebook.com/marketplace/you/selling'
+          if (!/^https:\/\/www\.facebook\.com\/marketplace\/(item\/[A-Za-z0-9_-]+|you\/selling)$/.test(destination))
+            throw new Error('Endereço do anúncio inválido.')
+          await chrome.tabs.create({ url: destination, active: true })
+        } catch (error) {
+          alert(error.message)
+        } finally {
+          button.disabled = false
+        }
+      }
+      card.append(title, detail, button)
+      container.appendChild(card)
+    }
+  } catch (error) {
+    if (seq === retirementSeq && accountId === activeAccountId)
+      container.textContent = error.message
+  }
+}
+
 function prepare(jobId) {
   if (!instanceId) {
     alert('A identificação local da extensão ainda está carregando. Tente novamente.')
@@ -249,6 +305,7 @@ $('login').onclick = async () => {
 $('logout').onclick = async () => {
   loadAccountsSeq++
   loadQueueSeq++
+  retirementSeq++
   try {
     await request('/auth/logout', { method: 'POST' })
   } catch (error) {
@@ -290,6 +347,8 @@ $('autoRun').onclick = () =>
     )
   })
 $('accountSelect').onchange = () => {
+  retirementSeq++
+  $('retirements').textContent = 'Consultando retiradas...'
   activeAccountId = Number($('accountSelect').value)
   const account = availableAccounts.find((item) => item.id === activeAccountId)
   if (account) updateProfileMeta(account)

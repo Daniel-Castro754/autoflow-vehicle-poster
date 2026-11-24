@@ -8,6 +8,7 @@ import { profileCapacity } from '../services/profile-capacity.ts'
 import { publicationPhotoPayload, PhotoCurationConflict } from '../services/photo-curation.ts'
 import { classifyExtensionFailure } from '../services/publication-policy.ts'
 import { recordConfirmedListing } from '../services/publication-ledger.ts'
+import { listingExpiryOverview } from '../services/listing-expiry.ts'
 import { prepareListingForPublication } from '../services/publication-service.ts'
 import {
   calculateListingHash,
@@ -56,7 +57,9 @@ type Dependencies = {
 export function isExtensionRoute(req: IncomingMessage, url: URL) {
   if (
     req.method === 'GET' &&
-    ['/api/extension/accounts', '/api/extension/queue'].includes(url.pathname)
+    ['/api/extension/accounts', '/api/extension/queue', '/api/extension/retirements'].includes(
+      url.pathname,
+    )
   )
     return true
   if (req.method === 'POST' && url.pathname === '/api/extension/presence') return true
@@ -143,6 +146,15 @@ export async function handleExtensionRoute(
             )
             .all(auth.organizationId, auth.userId)
     return send(res, 200, { accounts })
+  }
+  if (req.method === 'GET' && url.pathname === '/api/extension/retirements') {
+    const accountId = Number(url.searchParams.get('accountId'))
+    if (!Number.isSafeInteger(accountId) || accountId <= 0 || !allowedExtensionAccount(accountId, auth))
+      return send(res, 403, { error: 'Perfil do Brave não autorizado.' })
+    const items = listingExpiryOverview(db, auth.organizationId, null, Date.now(), accountId)
+      .items.filter((item) => item.state === 'expired' || item.state === 'sold')
+    // Read-only: opening a listing is not evidence of removal.
+    return send(res, 200, { items })
   }
   if (req.method === 'GET' && url.pathname === '/api/extension/queue') {
     const accountId = Number(url.searchParams.get('accountId'))

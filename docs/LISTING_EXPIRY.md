@@ -29,3 +29,10 @@ Execute `npm run test:listing-expiry`. Em um ambiente de teste, verifique
 o limite exato de 96 horas, os avisos, vendidos, anúncios antigos sem
 evidência, prorrogação e isolamento entre perfis/organizações. Não é
 necessário excluir nem criar anúncios reais para validar esses cenários.
+
+## Retirada assistida na extensão
+
+No Brave responsável, selecione o perfil associado e consulte **Retiradas pendentes**.
+A extensão lista apenas anúncios vendidos ou vencidos desse perfil; a seleção é revalidada antes de abrir o endereço registrado. Sem endereço confirmado, abre Seus classificados para conferência manual. Confira a conta Facebook conectada, exclua manualmente e só então confirme a retirada no painel. A abertura de uma página ou um erro de acesso não confirma exclusão.
+
+O piloto automático não recria trabalhos para veículos com publicação retirada no histórico. Para uma nova publicação, adicione explicitamente o veículo à fila, sujeito às validações existentes. Isso não altera estoque, fotos ou histórico.

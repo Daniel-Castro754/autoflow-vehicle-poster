@@ -351,3 +351,21 @@ select:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+
+.retirement-section {
+  margin-bottom: 14px;
+  padding: 10px;
+  border: 1px solid #d6c29a;
+  border-radius: 8px;
+}
+.retirement-list {
+  display: grid;
+  gap: 8px;
+  max-height: 190px;
+  overflow: auto;
+  font-size: 11px;
+}
+.retirement-list .vehicle strong {
+  display: block;
+  margin-bottom: 6px;
+}

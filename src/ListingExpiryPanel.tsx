@@ -330,8 +330,9 @@ export function ListingExpiryPanel({
           <div className="expiry-notice">
             <ShieldCheck size={17} aria-hidden="true" />
             <span>
-              O Auto Flow sinaliza os vencimentos. Exclua o anúncio no perfil responsável antes de
-              confirmar a retirada. Não há exclusão ou republicação automática por este painel.
+              Abra a extensão no perfil responsável e consulte Retiradas pendentes. Exclua no
+              Facebook antes de confirmar a retirada aqui. Uma nova publicação exige inclusão manual
+              na fila.
             </span>
           </div>
           <div className="expiry-list-heading">

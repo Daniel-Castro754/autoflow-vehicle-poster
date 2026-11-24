@@ -44,6 +44,7 @@ export function listingExpiryOverview(
   organizationId: number,
   userId: number | null,
   now = Date.now(),
+  accountId: number | null = null,
 ) {
   const policy = listingExpiryPolicy(db, organizationId)
   const rows = db
@@ -62,9 +63,10 @@ export function listingExpiryOverview(
         AND l.organization_id=j.organization_id AND l.vehicle_id=v.id
       WHERE j.organization_id=? AND j.status='completed'
         AND (l.id IS NULL OR l.status='active')
-        AND (? IS NULL OR a.user_id=?)`,
+        AND (? IS NULL OR a.user_id=?)
+        AND (? IS NULL OR j.social_account_id=?)`,
     )
-    .all(organizationId, userId, userId) as ListingRow[]
+    .all(organizationId, userId, userId, accountId, accountId) as ListingRow[]
   const items = rows.map((row) => {
     // The legacy migration copied approximate times for rows with an empty
     // external ID. Do not treat those times as confirmed publication dates.
@@ -119,4 +121,20 @@ export function listingExpiryOverview(
       a.jobId - b.jobId,
   )
   return { policy, items }
+}
+
+// A retired listing must never be implicitly scheduled again by the pilot.
+// The explicit vehicle-to-queue flow remains available to the operator.
+export function requiresManualRepublication(
+  db: DatabaseSync,
+  organizationId: number,
+  vehicleId: number,
+) {
+  return Boolean(
+    db
+      .prepare(
+        "SELECT 1 FROM publication_jobs WHERE organization_id=? AND vehicle_id=? AND status='removed' LIMIT 1",
+      )
+      .get(organizationId, vehicleId),
+  )
 }
