@@ -7,6 +7,12 @@ let instanceId = ''
 let loadAccountsSeq = 0,
   loadQueueSeq = 0,
   openingJob = false
+let capacity = null,
+  capacityDeadline = 0,
+  capacitySeq = 0,
+  capacityInputAccount = 0,
+  capacityBusy = false,
+  canManageCapacity = false
 async function request(path, options = {}) {
   const send = () =>
     fetch(API + path, {
@@ -40,7 +46,16 @@ function setConnected(connected, user) {
   $('loginView').hidden = connected
   $('queueView').hidden = !connected
   $('apiState').className = connected ? 'online' : ''
-  if (user) $('userName').textContent = user.name
+  if (user) {
+    $('userName').textContent = user.name
+    canManageCapacity = user.role === 'admin'
+  }
+  if (!connected) {
+    capacitySeq++
+    capacity = null
+    capacityInputAccount = 0
+  }
+  $('capacitySettings').hidden = !connected || !canManageCapacity
 }
 function statusLabel(status) {
   return (
@@ -109,9 +124,110 @@ function updateProfileMeta(account) {
         : ` · Facebook: ${facebookSession.reason || 'requer revisão'}`)
   })
 }
+function capacityPath(accountId = activeAccountId) {
+  return '/social-accounts/' + encodeURIComponent(accountId) + '/capacity'
+}
+function renderCapacity() {
+  const remaining = capacity ? Math.max(0, Math.ceil((capacityDeadline - Date.now()) / 1000)) : 0
+  const blocked = !capacity || capacity.blockedByDailyLimit || remaining > 0
+  const minutes = Math.floor(remaining / 60)
+  const seconds = remaining % 60
+  $('capacityTimer').textContent = capacity
+    ? String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0')
+    : '--:--'
+  $('capacityState').textContent = !capacity
+    ? 'Consultando intervalo...'
+    : capacity.blockedByDailyLimit
+      ? 'Limite diário atingido'
+      : remaining > 0
+        ? 'Perfil em espera'
+        : 'Intervalo operacional livre'
+  $('capacityMeta').textContent = capacity
+    ? `Intervalo: ${capacity.intervalMinutes} min · Execuções: ${capacity.used}/${capacity.dailyLimit}` +
+      (remaining > 0 && capacity.nextAllowedAt
+        ? ' · Liberação: ' + new Date(capacity.nextAllowedAt).toLocaleTimeString('pt-BR')
+        : '')
+    : ''
+  $('saveInterval').disabled = !capacity || capacityBusy
+  $('releaseInterval').disabled =
+    !capacity?.canReleaseFailedInterval || remaining === 0 || capacityBusy
+  for (const button of $('queue').querySelectorAll('button[data-job-available="true"]'))
+    button.disabled = blocked
+}
+function acceptCapacity(value, accountId) {
+  if (accountId !== activeAccountId) return
+  capacity = value
+  capacityDeadline = Date.now() + Math.max(0, Number(value.retryAfterSeconds) || 0) * 1000
+  if (capacityInputAccount !== accountId) {
+    $('intervalInput').value = value.intervalMinutesOverride ?? ''
+    capacityInputAccount = accountId
+  }
+  renderCapacity()
+}
+async function loadCapacity() {
+  if (!activeAccountId || !token || capacityBusy) return
+  const accountId = activeAccountId
+  const seq = ++capacitySeq
+  try {
+    const value = await request(capacityPath(accountId))
+    if (seq !== capacitySeq || accountId !== activeAccountId) return
+    acceptCapacity(value, accountId)
+    $('capacityError').textContent = ''
+  } catch (error) {
+    if (seq !== capacitySeq || accountId !== activeAccountId) return
+    capacity = null
+    $('capacityError').textContent = error.message
+    renderCapacity()
+  }
+}
+async function changeCapacity(release = false) {
+  if (!canManageCapacity || !capacity || capacityBusy || !activeAccountId) return
+  const accountId = activeAccountId
+  const input = $('intervalInput').value.trim()
+  const interval = input === '' ? null : Number(input)
+  if (!release && interval !== null && (!Number.isInteger(interval) || interval < 0 || interval > 1440)) {
+    $('capacityError').textContent = 'Informe um intervalo inteiro de 0 a 1440 minutos.'
+    return
+  }
+  if (release && !confirm('Liberar somente o intervalo da última tentativa com falha? O consumo automático desta extensão será pausado.')) return
+  capacityBusy = true
+  capacitySeq++
+  renderCapacity()
+  try {
+    if (release) {
+      await chrome.storage.local.set({ autoRun: false, autoRunManuallyPaused: true, autoRunManaged: false })
+      updateAutoRunButton()
+    }
+    const value = await request(capacityPath(accountId), {
+      method: release ? 'POST' : 'PATCH',
+      body: JSON.stringify(release
+        ? { action: 'release_failed_interval', confirm: true }
+        : { dailyLimitOverride: capacity.dailyLimitOverride, intervalMinutesOverride: interval }),
+    })
+    if (accountId !== activeAccountId) return
+    capacityInputAccount = 0
+    acceptCapacity(value, accountId)
+    $('capacityError').textContent = release ? 'Intervalo liberado. Inicie o próximo trabalho manualmente.' : 'Intervalo salvo.'
+    loadQueue()
+  } catch (error) {
+    if (accountId === activeAccountId) $('capacityError').textContent = error.message
+  } finally {
+    capacityBusy = false
+    renderCapacity()
+  }
+}
+$('saveInterval').onclick = () => void changeCapacity()
+$('releaseInterval').onclick = () => void changeCapacity(true)
+setInterval(() => {
+  if (!capacity || !activeAccountId) return
+  renderCapacity()
+}, 1000)
+setInterval(() => void loadCapacity(), 15000)
+
 function loadQueue() {
   const seq = ++loadQueueSeq
   if (!activeAccountId) return
+  void loadCapacity()
   $('queue').innerHTML = '<div class="empty">Carregando...</div>'
   request('/extension/queue?accountId=' + encodeURIComponent(activeAccountId))
     .then(({ jobs, account, automation }) => {
@@ -143,9 +259,14 @@ function loadQueue() {
                 ? 'Preencher novamente'
                 : 'Retomar preenchimento'
         card.innerHTML = `<div class="vehicle-top"><strong>${Number(job.year)} ${escapeHtml(job.make)} ${escapeHtml(job.model)}</strong><span class="status ${locked ? 'locked' : escapeHtml(job.jobStatus)}">${job.publishUncertain ? 'Resultado incerto' : locked ? 'Em execução' : statusLabel(job.jobStatus)}</span></div><small>${Number(job.km).toLocaleString('pt-BR')} km · ${Number(job.price).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })} · ${Number(job.imageCount || 0)} fotos</small><div class="job-meta">Trabalho #${Number(job.jobId)} · ${escapeHtml(job.accountLabel)}${job.errorCode ? ' · ' + escapeHtml(job.errorCode) : ''}</div><button data-id="${Number(job.jobId)}" ${locked ? 'disabled title="Resolva a pendência no painel antes de repetir."' : ''}>${action}</button>`
-        if (!locked) card.querySelector('button').onclick = () => prepare(job.jobId)
+        if (!locked) {
+          const button = card.querySelector('button')
+          button.dataset.jobAvailable = 'true'
+          button.onclick = () => prepare(job.jobId)
+        }
         $('queue').appendChild(card)
       })
+      renderCapacity()
     })
     .catch((error) => {
       if (seq === loadQueueSeq)
@@ -153,6 +274,10 @@ function loadQueue() {
     })
 }
 function prepare(jobId) {
+  if (!capacity || capacity.blockedByDailyLimit || capacityDeadline > Date.now()) {
+    void loadCapacity()
+    return
+  }
   if (!instanceId) {
     alert('A identificação local da extensão ainda está carregando. Tente novamente.')
     return
@@ -291,6 +416,10 @@ $('autoRun').onclick = () =>
   })
 $('accountSelect').onchange = () => {
   activeAccountId = Number($('accountSelect').value)
+  capacitySeq++
+  capacity = null
+  capacityInputAccount = 0
+  renderCapacity()
   const account = availableAccounts.find((item) => item.id === activeAccountId)
   if (account) updateProfileMeta(account)
   chrome.storage.local.set(

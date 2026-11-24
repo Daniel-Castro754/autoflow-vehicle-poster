@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { closeSelectorCircuitBreaker } from '../services/selector-health.ts'
-import { profileCapacity } from '../services/profile-capacity.ts'
+import { profileCapacity, releaseFailedExecutionInterval } from '../services/profile-capacity.ts'
 import { recordAiAudit } from '../services/ai-audit-history.ts'
 import { encryptCredential } from '../services/credential-vault.ts'
 import { validateTelegramDestination, validateWebhookAddress } from '../services/alert-secrets.ts'
@@ -499,7 +499,7 @@ export async function handleOrganizationRoute(
   }
 
   const capacityRoute = url.pathname.match(/^\/api\/social-accounts\/(\d+)\/capacity$/)
-  if (capacityRoute && (req.method === 'GET' || req.method === 'PATCH')) {
+  if (capacityRoute && (req.method === 'GET' || req.method === 'PATCH' || req.method === 'POST')) {
     const accountId = Number(capacityRoute[1])
     const account = db
       .prepare('SELECT id,user_id userId FROM social_accounts WHERE id=? AND organization_id=?')
@@ -522,6 +522,20 @@ export async function handleOrganizationRoute(
       return true
     }
     const body = (await jsonBody(req)) as Record<string, unknown> | null
+    if (req.method === 'POST') {
+      if (body?.action !== 'release_failed_interval' || body.confirm !== true) {
+        send(res, 400, { error: 'Confirme a liberação do intervalo da tentativa com falha.' })
+        return true
+      }
+      const capacity = releaseFailedExecutionInterval(db, auth.organizationId, accountId, auth.userId)
+      if (!capacity) {
+        send(res, 409, { error: 'Não há intervalo de tentativa com falha elegível para liberação. Outros bloqueios permanecem ativos.' })
+        return true
+      }
+      res.setHeader('Cache-Control', 'no-store')
+      send(res, 200, capacity)
+      return true
+    }
     const validOverride = (value: unknown, min: number, max: number) =>
       value === null ||
       (typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max)
