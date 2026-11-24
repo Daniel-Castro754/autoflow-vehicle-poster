@@ -122,19 +122,3 @@ export function listingExpiryOverview(
   )
   return { policy, items }
 }
-
-// A retired listing must never be implicitly scheduled again by the pilot.
-// The explicit vehicle-to-queue flow remains available to the operator.
-export function requiresManualRepublication(
-  db: DatabaseSync,
-  organizationId: number,
-  vehicleId: number,
-) {
-  return Boolean(
-    db
-      .prepare(
-        "SELECT 1 FROM publication_jobs WHERE organization_id=? AND vehicle_id=? AND status='removed' LIMIT 1",
-      )
-      .get(organizationId, vehicleId),
-  )
-}

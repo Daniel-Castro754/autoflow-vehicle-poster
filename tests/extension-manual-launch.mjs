@@ -6,7 +6,12 @@ const background = await readFile(new URL('../extension/background.js', import.m
 const popup = await readFile(new URL('../extension/popup.js', import.meta.url), 'utf8')
 const content = await readFile(new URL('../extension/content.js', import.meta.url), 'utf8')
 
-async function fixture({ ready = true, fillAccepted = true, apiError = '', retirementItems = [] } = {}) {
+async function fixture({
+  ready = true,
+  fillAccepted = true,
+  apiError = '',
+  retirementItems = [],
+} = {}) {
   const requests = []
   const deliveries = []
   const tabs = []
@@ -187,7 +192,11 @@ async function fixture({ ready = true, fillAccepted = true, apiError = '', retir
 {
   const f = await fixture({
     retirementItems: [
-      { jobId: 42, state: 'expired', canonicalUrl: 'https://www.facebook.com/marketplace/item/123' },
+      {
+        jobId: 42,
+        state: 'expired',
+        canonicalUrl: 'https://www.facebook.com/marketplace/item/123',
+      },
       { jobId: 43, state: 'sold', canonicalUrl: '' },
       { jobId: 44, state: 'expired', canonicalUrl: 'https://example.com/unsafe' },
       { jobId: 45, state: 'active', canonicalUrl: 'https://www.facebook.com/marketplace/item/45' },

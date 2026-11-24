@@ -856,7 +856,7 @@ try {
 
   const pilotPreview = await call('/ai/autopilot/preview', token)
   assert(pilotPreview.previewId)
-  assert(!pilotPreview.potentialVehicles.some((item) => item.id === retiredVehicle.id))
+  assert(pilotPreview.potentialVehicles.some((item) => item.id === retiredVehicle.id))
   const autopilotRes = await call('/ai/autopilot/run', token, {
     method: 'POST',
     body: JSON.stringify({ previewId: pilotPreview.previewId }),
@@ -864,10 +864,11 @@ try {
   assert.equal(autopilotRes.ok, true)
   assert.equal(
     autopilotRes.jobsCreated,
-    1,
-    'O piloto deve agendar somente o veículo elegível sem risco de duplicidade',
+    2,
+    'O piloto deve agendar veículos disponíveis, inclusive após retirada confirmada',
   )
-  assert.equal(autopilotRes.assignments[0].vehicleId, autopilotVehicle.id)
+  assert(autopilotRes.assignments.some((item) => item.vehicleId === autopilotVehicle.id))
+  assert(autopilotRes.assignments.some((item) => item.vehicleId === retiredVehicle.id))
   assert.equal(
     testDb
       .prepare('SELECT COUNT(*) count FROM publication_jobs WHERE vehicle_id=?')
@@ -888,10 +889,12 @@ try {
   )
   assert.equal(
     testDb
-      .prepare("SELECT COUNT(*) count FROM publication_jobs WHERE vehicle_id=? AND status!='removed'")
+      .prepare(
+        "SELECT COUNT(*) count FROM publication_jobs WHERE vehicle_id=? AND status!='removed'",
+      )
       .get(retiredVehicle.id).count,
-    0,
-    'Retiradas anteriores devem impedir a republicação pelo piloto',
+    1,
+    'A retirada anterior não impede uma nova publicação do veículo disponível',
   )
   testDb.close()
   console.log(

@@ -149,10 +149,19 @@ export async function handleExtensionRoute(
   }
   if (req.method === 'GET' && url.pathname === '/api/extension/retirements') {
     const accountId = Number(url.searchParams.get('accountId'))
-    if (!Number.isSafeInteger(accountId) || accountId <= 0 || !allowedExtensionAccount(accountId, auth))
+    if (
+      !Number.isSafeInteger(accountId) ||
+      accountId <= 0 ||
+      !allowedExtensionAccount(accountId, auth)
+    )
       return send(res, 403, { error: 'Perfil do Brave não autorizado.' })
-    const items = listingExpiryOverview(db, auth.organizationId, null, Date.now(), accountId)
-      .items.filter((item) => item.state === 'expired' || item.state === 'sold')
+    const items = listingExpiryOverview(
+      db,
+      auth.organizationId,
+      null,
+      Date.now(),
+      accountId,
+    ).items.filter((item) => item.state === 'expired' || item.state === 'sold')
     // Read-only: opening a listing is not evidence of removal.
     return send(res, 200, { items })
   }

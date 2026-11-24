@@ -198,13 +198,16 @@ async function launchRetirementReview(jobId, accountId) {
   if (retirementLaunchRunning) throw new Error('Já existe uma retirada sendo aberta.')
   retirementLaunchRunning = true
   try {
-    if (!Number.isSafeInteger(jobId) || jobId < 1 || !Number.isSafeInteger(accountId) || accountId < 1)
+    if (
+      !Number.isSafeInteger(jobId) ||
+      jobId < 1 ||
+      !Number.isSafeInteger(accountId) ||
+      accountId < 1
+    )
       throw new Error('Publicação ou perfil inválido.')
     const state = await chrome.storage.local.get('activeAccountId')
     if (state.activeAccountId !== accountId) throw new Error('O perfil ativo mudou.')
-    const response = await authorizedFetch(
-      `${API}/extension/retirements?accountId=${accountId}`,
-    )
+    const response = await authorizedFetch(`${API}/extension/retirements?accountId=${accountId}`)
     const data = await response.json()
     if (!response.ok) throw new Error(data.error || 'Não foi possível consultar a retirada.')
     const item = data.items?.find((entry) => entry.jobId === jobId)
@@ -213,7 +216,11 @@ async function launchRetirementReview(jobId, accountId) {
     const current = await chrome.storage.local.get('activeAccountId')
     if (current.activeAccountId !== accountId) throw new Error('O perfil ativo mudou.')
     const destination = item.canonicalUrl || 'https://www.facebook.com/marketplace/you/selling'
-    if (!/^https:\/\/www\.facebook\.com\/marketplace\/(item\/[A-Za-z0-9_-]+|you\/selling)$/.test(destination))
+    if (
+      !/^https:\/\/www\.facebook\.com\/marketplace\/(item\/[A-Za-z0-9_-]+|you\/selling)$/.test(
+        destination,
+      )
+    )
       throw new Error('Endereço do anúncio inválido.')
     await chrome.tabs.create({ url: destination, active: true })
     return { ok: true }

@@ -174,7 +174,9 @@ async function loadRetirements() {
       detail.textContent = (item.state === 'sold' ? 'Vendido' : 'Vencido') + ' · #' + item.jobId
       const button = document.createElement('button')
       button.type = 'button'
-      button.textContent = item.canonicalUrl ? 'Abrir para revisar retirada' : 'Conferir classificados'
+      button.textContent = item.canonicalUrl
+        ? 'Abrir para revisar retirada'
+        : 'Conferir classificados'
       button.onclick = async () => {
         button.disabled = true
         try {

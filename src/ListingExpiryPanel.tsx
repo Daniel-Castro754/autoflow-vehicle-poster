@@ -331,8 +331,8 @@ export function ListingExpiryPanel({
             <ShieldCheck size={17} aria-hidden="true" />
             <span>
               Abra a extensão no perfil responsável e consulte Retiradas pendentes. Exclua no
-              Facebook antes de confirmar a retirada aqui. Uma nova publicação exige inclusão manual
-              na fila.
+              Facebook antes de confirmar a retirada aqui. Veículos disponíveis podem voltar à fila
+              pelo piloto automático, se habilitado.
             </span>
           </div>
           <div className="expiry-list-heading">

@@ -16,7 +16,6 @@ import { findBestAccountForVehicle } from '../modules/accounts.ts'
 import { coordinateAutopilot, skippedAutopilot } from './autopilot-coordinator.ts'
 import { previewGroupCuration } from './group-curation-worker.ts'
 import { publicationDuplicateRisk, publicationReadinessIssues } from './publication-policy.ts'
-import { requiresManualRepublication } from './listing-expiry.ts'
 import {
   calculateListingHash,
   findDuplicateListingHash,
@@ -574,7 +573,6 @@ async function planAutopilotJobs(
     .filter(
       (vehicle) => publicationReadinessIssues(vehicle, vehicle.imageCount, false).length === 0,
     )
-    .filter((vehicle) => !requiresManualRepublication(db, organizationId, vehicle.id))
     .filter((vehicle) => !publicationDuplicateRisk(db, organizationId, vehicle.id))
     .filter((vehicle) => findBestAccountForVehicle(db, organizationId, vehicle.id) !== null)
     .slice(0, automatic ? Math.min(20, remainingCapacity) : remainingCapacity)
@@ -586,7 +584,7 @@ async function planAutopilotJobs(
       descriptionsOptimized: 0,
       assignments: [],
       message:
-        'Nenhum veículo pronto está elegível. Anúncios retirados exigem inclusão manual na fila.',
+        'Nenhum veículo pronto tem cadastro completo, fotos e perfil elegível para publicação.',
     }
   }
 
@@ -680,7 +678,6 @@ async function planAutopilotJobs(
       if (descriptionFields.some((field) => vehicle[field] !== candidate[field])) continue
       if (vehicle.description !== candidate.description) continue
       if (publicationReadinessIssues(vehicle, vehicle.imageCount, !automatic).length) continue
-      if (requiresManualRepublication(db, organizationId, vehicle.id)) continue
       if (publicationDuplicateRisk(db, organizationId, vehicle.id)) continue
       if (automatic && !String(vehicle.description || '').trim()) {
         const generated = factualDescriptions.get(vehicle.id)

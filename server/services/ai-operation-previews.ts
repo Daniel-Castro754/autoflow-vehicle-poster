@@ -226,7 +226,7 @@ function autopilotSnapshot(db: DatabaseSync, org: number) {
   const used = new Set(
     jobs
       .filter((j) =>
-        ['pending', 'filling', 'error', 'awaiting_confirmation', 'completed', 'removed'].includes(j.status),
+        ['pending', 'filling', 'error', 'awaiting_confirmation', 'completed'].includes(j.status),
       )
       .map((j) => j.vehicleId),
   )
