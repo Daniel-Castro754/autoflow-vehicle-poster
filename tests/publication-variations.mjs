@@ -80,7 +80,7 @@ const db = new DatabaseSync(':memory:')
 try {
   initializeBaseSchema(db)
   applyMigrations(db)
-  assert.equal(db.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 27)
+  assert.equal(db.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 28)
   db.exec(`
     INSERT INTO organizations(id,name) VALUES(1,'Test'),(2,'Other');
     INSERT INTO users(id,organization_id,name,email,password_hash) VALUES
