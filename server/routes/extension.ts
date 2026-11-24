@@ -63,6 +63,7 @@ export function isExtensionRoute(req: IncomingMessage, url: URL) {
   const routes: Record<string, string[]> = {
     POST: [
       'prepare',
+      'hide',
       'bind-document',
       'publish-check',
       'publish-started',
@@ -237,6 +238,49 @@ export async function handleExtensionRoute(
       },
     })
   }
+  const extensionHide = url.pathname.match(/^\/api\/extension\/jobs\/(\d+)\/hide$/)
+  if (req.method === 'POST' && extensionHide) {
+    const body = (await jsonBody(req, 2048)) as { accountId?: unknown } | null
+    const accountId = body?.accountId
+    if (typeof accountId !== 'number' || !Number.isSafeInteger(accountId) || accountId <= 0)
+      return send(res, 400, { error: 'Selecione um perfil válido.' })
+    if (!allowedExtensionAccount(accountId, auth))
+      return send(res, 403, { error: 'Perfil do Brave não autorizado.' })
+    const jobId = Number(extensionHide[1])
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const job = db.prepare(
+        `SELECT id,status,extension_visible visible,fill_report fillReport,
+        publish_attempt_at publishAttemptAt,
+        CASE WHEN datetime(lease_expires_at)>CURRENT_TIMESTAMP THEN 1 ELSE 0 END locked
+        FROM publication_jobs WHERE id=? AND organization_id=? AND social_account_id=?`,
+      ).get(jobId, auth.organizationId, accountId) as
+        | { id: number; status: string; visible: number; locked: number; fillReport: string; publishAttemptAt: string | null }
+        | undefined
+      if (!job) {
+        db.exec('COMMIT')
+        return send(res, 404, { error: 'Trabalho não encontrado para este perfil.' })
+      }
+      if (job.locked || publicationMayExist(job)) {
+        db.exec('COMMIT')
+        return send(res, 409, { error: 'Conclua ou revise esta execução no painel antes de retirá-la da extensão.' })
+      }
+      if (job.visible) {
+        db.prepare(
+          'UPDATE publication_jobs SET extension_visible=0 WHERE id=? AND organization_id=? AND social_account_id=?',
+        ).run(jobId, auth.organizationId, accountId)
+        recordJobEvent(auth.organizationId, jobId, 'hidden_from_extension', auth.userId, {
+          source: 'extension_popup',
+          accountId,
+        })
+      }
+      db.exec('COMMIT')
+    } catch (error) {
+      db.exec('ROLLBACK')
+      throw error
+    }
+    return send(res, 200, { ok: true, visible: false })
+  }
   const extensionPrepare = url.pathname.match(/^\/api\/extension\/jobs\/(\d+)\/prepare$/)
   if (req.method === 'POST' && extensionPrepare) {
     const b = (await jsonBody(req)) as {
@@ -286,7 +330,7 @@ export async function handleExtensionRoute(
       })
     const job = db
       .prepare(
-        `SELECT j.id,j.vehicle_id vehicleId,j.status,j.paused,j.scheduled_at scheduledAt,j.lease_expires_at leaseExpiresAt,j.fill_report fillReport,j.publish_attempt_at publishAttemptAt,j.variant_seed variantSeed FROM publication_jobs j
+        `SELECT j.id,j.vehicle_id vehicleId,j.status,j.paused,j.extension_visible extensionVisible,j.scheduled_at scheduledAt,j.lease_expires_at leaseExpiresAt,j.fill_report fillReport,j.publish_attempt_at publishAttemptAt,j.variant_seed variantSeed FROM publication_jobs j
         WHERE j.id=? AND j.organization_id=? AND j.social_account_id=?`,
       )
       .get(Number(extensionPrepare[1]), auth.organizationId, accountId) as
@@ -295,6 +339,7 @@ export async function handleExtensionRoute(
           vehicleId: number
           status: string
           paused: number
+          extensionVisible: number
           scheduledAt?: string
           leaseExpiresAt?: string
           fillReport?: string
@@ -306,6 +351,8 @@ export async function handleExtensionRoute(
     if (jobsIncludeSoldVehicle([job.id], auth.organizationId))
       return send(res, 409, { error: 'Veículos vendidos não podem ser publicados.' })
     if (job.paused) return send(res, 409, { error: 'Este trabalho está pausado no painel.' })
+    if (!job.extensionVisible)
+      return send(res, 409, { error: 'Este trabalho foi retirado da fila da extensão.' })
     if (job.scheduledAt && Date.parse(job.scheduledAt) > Date.now())
       return send(res, 409, { error: 'Este trabalho ainda não chegou ao horário agendado.' })
     if (!['pending', 'filling', 'error', 'awaiting_confirmation'].includes(job.status))
@@ -434,7 +481,7 @@ export async function handleExtensionRoute(
         .prepare(
           `UPDATE publication_jobs SET status='filling',attempt_count=attempt_count+1,error_code=NULL,started_at=CURRENT_TIMESTAMP,
           lease_token=?,lease_owner=?,execution_tab_id=?,execution_document=?,execution_document_id=NULL,lease_expires_at=datetime('now',?),updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?
-          AND social_account_id=? AND paused=0 AND publish_attempt_at IS NULL AND status IN ('pending','filling','error','awaiting_confirmation')
+          AND social_account_id=? AND paused=0 AND extension_visible=1 AND publish_attempt_at IS NULL AND status IN ('pending','filling','error','awaiting_confirmation')
           AND (scheduled_at IS NULL OR datetime(scheduled_at)<=CURRENT_TIMESTAMP)
           AND (lease_expires_at IS NULL OR datetime(lease_expires_at)<=CURRENT_TIMESTAMP)
           AND NOT EXISTS (SELECT 1 FROM publication_jobs active WHERE active.organization_id=? AND active.id<>? AND active.status='filling'
