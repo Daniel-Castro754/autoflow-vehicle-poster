@@ -1,0 +1,28 @@
+name: Temporary retirement validation
+on:
+  push:
+    branches: [feat/assisted-listing-retirement-20261124]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Exact formatting diff
+        run: |
+          npx prettier --write server/services/listing-expiry.ts server/routes/extension.ts server/services/ai-agent.ts extension/popup.js extension/background.js extension/popup.html extension/popup.css src/ListingExpiryPanel.tsx tests/listing-expiry.mjs tests/extension-manual-launch.mjs docs/LISTING_EXPIRY.md
+          git diff
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test:listing-expiry
+      - run: npm run test:extension-manual-launch
+      - run: npm run test:autonomous
+      - run: npm run build
