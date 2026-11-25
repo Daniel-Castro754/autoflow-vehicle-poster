@@ -198,6 +198,31 @@ try {
   } finally {
     other.close()
   }
+  // A checkpoint committed after the watchdog read must not be overwritten by
+  // the stale "no publication evidence" branch.
+  db.prepare("UPDATE publication_jobs SET status='filling',started_at=datetime('now','-40 minutes'),lease_expires_at=datetime('now','-1 minute'),publish_attempt_at=NULL,fill_report='' WHERE id=?").run(firstJob.id)
+  let checkpointInterleaved = false
+  const checkpointDb = {
+    prepare(sql) {
+      if (!checkpointInterleaved && String(sql).includes('SELECT id, organization_id organizationId FROM publication_jobs')) {
+        checkpointInterleaved = true
+        db.prepare("UPDATE publication_jobs SET publish_attempt_at=CURRENT_TIMESTAMP WHERE id=?").run(firstJob.id)
+      }
+      return db.prepare(sql)
+    },
+    exec(sql) { return db.exec(sql) },
+  }
+  assert.equal((await runHealthCheck(checkpointDb,{autoRecover:true})).recoveredCount,0)
+  assert(checkpointInterleaved)
+  assert.equal(db.prepare('SELECT status FROM publication_jobs WHERE id=?').get(firstJob.id).status,'filling')
+  assert(db.prepare('SELECT publish_attempt_at checkpoint FROM publication_jobs WHERE id=?').get(firstJob.id).checkpoint)
+  // Recovery must preserve an explicit operator pause and hidden state.
+  db.prepare("UPDATE publication_jobs SET status='filling',paused=1,extension_visible=0,started_at=datetime('now','-60 minutes'),lease_expires_at=datetime('now','-1 minute'),publish_attempt_at=NULL,fill_report='',retry_count=0 WHERE id=?").run(firstJob.id)
+  await runHealthCheck(db, { autoRecover: true })
+  const preserved = db.prepare('SELECT status,paused,extension_visible visible FROM publication_jobs WHERE id=?').get(firstJob.id)
+  assert.equal(preserved.status,'pending')
+  assert.equal(preserved.paused,1)
+  assert.equal(preserved.visible,0)
   console.log('✓ Phase 1: independent jobs, daily capacity and stale lease fencing')
 } finally {
   db.close()

@@ -99,6 +99,7 @@ export async function runHealthCheck(
                 lease_token = NULL, lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
               WHERE id = ? AND organization_id = ?
                 AND status='filling' AND lease_token IS ?
+                AND publish_attempt_at IS ? AND fill_report IS ?
                 AND (lease_expires_at IS NULL OR datetime(lease_expires_at)<=CURRENT_TIMESTAMP)
             `,
               )
@@ -107,6 +108,8 @@ export async function runHealthCheck(
                 job.id,
                 job.organizationId,
                 job.leaseToken,
+                job.publishAttemptAt,
+                job.fillReport,
               )
             if (updated.changes !== 1) {
               db.exec('ROLLBACK')
@@ -164,10 +167,11 @@ export async function runHealthCheck(
                 lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
               WHERE id = ? AND organization_id = ?
                 AND status='filling' AND lease_token IS ?
+                AND publish_attempt_at IS ? AND fill_report IS ?
                 AND (lease_expires_at IS NULL OR datetime(lease_expires_at)<=CURRENT_TIMESTAMP)
             `,
               )
-              .run(job.id, job.organizationId, job.leaseToken)
+              .run(job.id, job.organizationId, job.leaseToken, job.publishAttemptAt, job.fillReport)
             if (updated.changes !== 1) {
               db.exec('ROLLBACK')
               continue
@@ -193,16 +197,17 @@ export async function runHealthCheck(
               .prepare(
                 `
               UPDATE publication_jobs
-              SET status = 'pending', paused = 0, extension_visible = 1, error_code = NULL,
+              SET status = 'pending', error_code = NULL,
                 fill_report = '', started_at = NULL, filled_at = NULL, last_lease_token = NULL,
                 publish_attempt_at = NULL, retry_count = retry_count + 1, lease_token = NULL,
                 lease_owner = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
               WHERE id = ? AND organization_id = ?
                 AND status='filling' AND lease_token IS ?
+                AND publish_attempt_at IS ? AND fill_report IS ?
                 AND (lease_expires_at IS NULL OR datetime(lease_expires_at)<=CURRENT_TIMESTAMP)
             `,
               )
-              .run(job.id, job.organizationId, job.leaseToken)
+              .run(job.id, job.organizationId, job.leaseToken, job.publishAttemptAt, job.fillReport)
             if (updated.changes !== 1) {
               db.exec('ROLLBACK')
               continue

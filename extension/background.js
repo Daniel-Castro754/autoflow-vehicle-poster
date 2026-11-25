@@ -4,6 +4,7 @@ const HEARTBEAT_ALARM = 'autoflow-heartbeat'
 let queueConsumerRunning = false
 let manualLaunchRunning = false
 let refreshInFlight = null
+let recoveryInFlight = null
 
 // Only the extension process uses the refresh secret; content scripts never receive it.
 // A single in-flight rotation prevents racing requests from invalidating each other.
@@ -17,11 +18,11 @@ async function refreshSession() {
     }
     let response
     try {
-      response = await fetch(`${API}/auth/extension/refresh`, {
+      response = await fetchWithRetry(`${API}/auth/extension/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken }),
-      })
+      }, { attempts: 1, timeoutMs: 8000 })
     } catch {
       // A temporary API outage must not log out the extension.
       return null
@@ -31,13 +32,15 @@ async function refreshSession() {
         const current = await chrome.storage.local.get('refreshToken')
         if (current.refreshToken === refreshToken) {
           await chrome.storage.local.remove(['token', 'refreshToken'])
-          await chrome.storage.local.set({ autoRun: false, authNeeded: true })
+          await chrome.storage.local.set({ autoRun: false, autoRunManuallyPaused: true, authNeeded: true })
         }
       }
       return null
     }
     const next = await response.json()
     if (!next.token || !next.refreshToken) return null
+    // Do not restore credentials after an intervening logout or new login.
+    if ((await chrome.storage.local.get('refreshToken')).refreshToken !== refreshToken) return null
     await chrome.storage.local.set({
       token: next.token,
       refreshToken: next.refreshToken,
@@ -346,7 +349,9 @@ async function synchronizeAutonomousConsumption() {
     'autoRun',
     'autoRunManaged',
     'autoRunManuallyPaused',
+    'authNeeded',
   ])
+  if (state.authNeeded || state.autoRunManuallyPaused) return false
   if (!state.activeAccountId || (!state.token && !state.refreshToken)) return false
   let response
   try {
@@ -359,18 +364,21 @@ async function synchronizeAutonomousConsumption() {
   }
   if (!response.ok) return Boolean(state.autoRun)
   const queue = await response.json().catch(() => null)
+  // Re-read the user's choice after network I/O, including a changed profile.
+  const current = await chrome.storage.local.get(['activeAccountId','autoRun','autoRunManaged','autoRunManuallyPaused','authNeeded'])
+  if (current.activeAccountId !== state.activeAccountId || current.authNeeded || current.autoRunManuallyPaused) return false
   if (queue?.automation?.autonomousMode === true) {
-    if (!state.autoRun && !state.autoRunManuallyPaused) {
+    if (!current.autoRun) {
       await chrome.storage.local.set({ autoRun: true, autoRunManaged: true })
       return true
     }
-  } else if (state.autoRunManaged) {
+  } else if (queue && current.autoRunManaged) {
     // Don't continue automatic consumption after an administrator disables
     // any part of the full-cycle opt-in.
     await chrome.storage.local.set({ autoRun: false, autoRunManaged: false })
     return false
   }
-  return Boolean(state.autoRun)
+  return Boolean(current.autoRun)
 }
 
 async function consumeQueue() {
@@ -381,6 +389,8 @@ async function consumeQueue() {
   try {
     const state = await chrome.storage.local.get([
       'autoRun',
+      'autoRunManuallyPaused',
+      'authNeeded',
       'activeAccountId',
       'token',
       'refreshToken',
@@ -391,7 +401,7 @@ async function consumeQueue() {
     ])
     accountId = Number(state.activeAccountId) || 0
     if (!accountId) return
-    if (!state.autoRun) {
+    if (!state.autoRun || state.autoRunManuallyPaused || state.authNeeded) {
       await recordConsumerDecision(accountId, 'consumer_paused')
       return
     }
@@ -412,7 +422,7 @@ async function consumeQueue() {
     if (response.status === 401) {
       const { authNeeded } = await chrome.storage.local.get('authNeeded')
       // An API outage during refresh is transient: retry on the next alarm.
-      if (authNeeded) await chrome.storage.local.set({ autoRun: false })
+      if (authNeeded) await chrome.storage.local.set({ autoRun: false, autoRunManuallyPaused: true })
       await recordConsumerDecision(accountId, 'api_unauthorized', { httpStatus: 401 })
       return
     }
@@ -456,6 +466,7 @@ async function consumeQueue() {
             reason: status.reason,
           },
           autoRun: false,
+          autoRunManuallyPaused: true,
         })
         await recordConsumerDecision(accountId, 'facebook_not_ready', { jobId: currentJobId })
         // Keep the Facebook tab for the human to log in or complete a challenge.
@@ -464,6 +475,11 @@ async function consumeQueue() {
       await chrome.storage.local.set({
         facebookSession: { accountId: state.activeAccountId, ready: true, checkedAt: Date.now() },
       })
+      const current = await chrome.storage.local.get(['activeAccountId','autoRun','autoRunManuallyPaused','authNeeded'])
+      if (current.activeAccountId !== state.activeAccountId || !current.autoRun || current.autoRunManuallyPaused || current.authNeeded) {
+        await chrome.tabs.remove(tab.id).catch(() => {})
+        return
+      }
       const prepareResponse = await authorizedFetch(`${API}/extension/jobs/${job.jobId}/prepare`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + state.token },
@@ -496,6 +512,7 @@ async function consumeQueue() {
       else
         await chrome.storage.local.set({
           autoRun: false,
+          autoRunManuallyPaused: true,
           lastManualLaunchError: {
             jobId: job.jobId,
             message: error instanceof Error ? error.message : String(error),
@@ -564,30 +581,36 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     })
     .catch((error) => console.warn('AutoFlow: falha ao liberar a aba', error))
 })
+// Startup and alarms share one recovery pass. Deliver durable results and
+// validate old tab identity before consulting new work. Never renew a lease
+// solely from browser startup or an alarm.
+async function recoverConsumer() {
+  if (recoveryInFlight) return recoveryInFlight
+  recoveryInFlight = (async () => {
+    await validatePendingTab()
+    await flushPendingResults()
+    await synchronizeAutonomousConsumption()
+    await reportExtensionPresence()
+    await consumeQueue()
+  })()
+  try {
+    await recoveryInFlight
+  } finally {
+    recoveryInFlight = null
+  }
+}
 chrome.runtime.onInstalled.addListener(() => {
   console.info('AutoFlow instalado no Brave')
   ensureHeartbeatAlarm()
-  void reportExtensionPresence()
-  void synchronizeAutonomousConsumption().catch(() => {})
+  void recoverConsumer().catch((error) => console.warn('AutoFlow: falha ao retomar piloto automático', error))
 })
 chrome.runtime.onStartup.addListener(() => {
   ensureHeartbeatAlarm()
-  void reportExtensionPresence()
-  void synchronizeAutonomousConsumption()
-    .then((enabled) => {
-      if (enabled) return consumeQueue()
-    })
-    .catch((error) => console.warn('AutoFlow: falha ao retomar piloto automático', error))
+  void recoverConsumer().catch((error) => console.warn('AutoFlow: falha ao retomar piloto automático', error))
 })
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== HEARTBEAT_ALARM) return
-  void (async () => {
-    await validatePendingTab()
-    await flushPendingResults()
-    await reportExtensionPresence()
-    await synchronizeAutonomousConsumption()
-    await consumeQueue()
-  })().catch((error) => console.warn('AutoFlow: falha na verificação da fila', error))
+  void recoverConsumer().catch((error) => console.warn('AutoFlow: falha na verificação da fila', error))
 })
 ensureHeartbeatAlarm()
 
@@ -652,7 +675,8 @@ async function acknowledgeResult(entry, rejected = false) {
     await chrome.storage.local.remove('pendingJob')
   if (entry.payload.published || rejected)
     removePendingPublish(entry.jobId, undefined, entry.leaseToken)
-  void consumeQueue()
+  // During recovery the serialized pass will consume only after the outbox.
+  if (!recoveryInFlight) void consumeQueue()
 }
 async function deliverResult(entry, token) {
   try {
