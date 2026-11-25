@@ -153,3 +153,70 @@ try {
   db.close()
 }
 console.log('✓ Phase 3: bounded concurrency, tenant isolation, explicit safe retry categories')
+
+
+import { initializeBaseSchema } from '../server/database/schema.ts'
+import { applyMigrations } from '../server/database/migrations.ts'
+import { recordConsumerState } from '../server/services/execution-diagnostics.ts'
+import { redistributeOfflinePendingJobs } from '../server/services/pending-job-reassignment.ts'
+import { listingSnapshotForVehicle, calculateListingHash, reserveListingHash } from '../server/services/duplicate-checker.ts'
+
+{
+  const db = new DatabaseSync(':memory:')
+  initializeBaseSchema(db)
+  applyMigrations(db)
+  try {
+    db.exec(`
+      INSERT INTO organizations(id,name) VALUES (1,'Teste'),(2,'Outra empresa');
+      INSERT INTO users(id,organization_id,name,email,password_hash) VALUES (1,1,'Dono','owner@test','x'),(2,1,'Outro','other@test','x'),(3,2,'Externo','foreign@test','x');
+      INSERT INTO organization_settings(organization_id,autopilot_enabled,daily_limit,execution_interval_minutes) VALUES (1,1,10,25),(2,1,10,25);
+      INSERT INTO social_accounts(id,organization_id,user_id,label,status,last_seen_at,last_consumer_auto_run)
+      VALUES (1,1,1,'Origem','connected',datetime('now','-30 minutes'),1),
+      (2,1,1,'Destino','connected',CURRENT_TIMESTAMP,1),
+      (3,1,2,'Outro dono','connected',CURRENT_TIMESTAMP,1),
+      (4,2,3,'Outra empresa','connected',CURRENT_TIMESTAMP,1);
+    `)
+    for (const [id,model] of [[1,'Corolla'],[2,'Yaris'],[3,'Etios'],[4,'Hilux'],[5,'RAV4'],[6,'Camry'],[7,'Prius']]) {
+      db.prepare(`INSERT INTO vehicles(id,organization_id,year,make,model,price,km,status,location,vehicle_type,
+      transmission,fuel_type,body_type,exterior_color,interior_color,vehicle_condition,description)
+      VALUES (?,1,2022,'Toyota',?,100000,50000,'Pronto','São Paulo','Carro/picape','Automático','Gasolina','Sedã','Preto','Preto','Excelente','Descrição real')`).run(id,model)
+      db.prepare("INSERT INTO vehicle_images(organization_id,vehicle_id,file_name,original_name,mime_type,content_hash) VALUES (1,?,'test.jpg','test.jpg','image/jpeg',?)").run(id,'photo-'+id)
+      db.prepare("INSERT INTO publication_jobs(id,organization_id,vehicle_id,social_account_id,status,scheduled_at) VALUES (?,1,?,1,'pending',datetime('now','-20 minutes'))").run(id,id)
+      db.prepare("INSERT INTO publication_job_events(organization_id,publication_job_id,event_type,details) VALUES (1,?,'autopilot_scheduled',?)").run(id,JSON.stringify({trigger:'recurring'}))
+      reserveListingHash(db,1,id,id,calculateListingHash(listingSnapshotForVehicle(db,1,id)))
+    }
+    db.exec(`
+      UPDATE publication_jobs SET attempt_count=1 WHERE id=2;
+      UPDATE publication_jobs SET status='awaiting_confirmation' WHERE id=3;
+      UPDATE publication_jobs SET paused=1 WHERE id=4;
+      UPDATE publication_jobs SET extension_visible=0 WHERE id=5;
+      UPDATE vehicles SET sold_at=CURRENT_TIMESTAMP WHERE id=6;
+      UPDATE publication_job_events SET details='{"trigger":"manual"}' WHERE publication_job_id=7;
+    `)
+    recordConsumerState(db,1,3,true)
+    recordConsumerState(db,2,4,true)
+    assert.deepEqual(redistributeOfflinePendingJobs(db,1,()=>true),[], 'Different owner/tenant and unknown destination excluded')
+    recordConsumerState(db,1,2,true)
+    db.exec('UPDATE social_accounts SET last_consumer_auto_run=0 WHERE id=1')
+    assert.deepEqual(redistributeOfflinePendingJobs(db,1,()=>true),[], 'Intentional local pause survives restart')
+    db.exec('UPDATE social_accounts SET last_consumer_auto_run=1 WHERE id=1')
+    assert.deepEqual(redistributeOfflinePendingJobs(db,1,()=>false),[], 'Lease required')
+    // A business-day boundary may prevent a safe same-day transfer.
+    const today=db.prepare("SELECT autoflow_day(CURRENT_TIMESTAMP) day,autoflow_day(datetime('now','+1 minute')) nextDay").get()
+    const moved=redistributeOfflinePendingJobs(db,1,()=>true)
+    assert.equal(moved.length,today.day===today.nextDay?1:0)
+    if (moved.length) {
+      assert.equal(moved[0].jobId,1)
+      assert.equal(moved[0].toAccountId,2)
+      assert.equal(db.prepare('SELECT social_account_id id FROM publication_jobs WHERE id=1').get().id,2)
+      assert.equal(db.prepare('SELECT COUNT(*) n FROM publication_jobs').get().n,7)
+      assert.equal(db.prepare("SELECT COUNT(*) n FROM published_ads WHERE publication_job_id=1 AND status='queued'").get().n,1)
+      assert.equal(db.prepare("SELECT COUNT(*) n FROM publication_job_events WHERE publication_job_id=1 AND event_type='reassigned'").get().n,1)
+      db.exec("UPDATE social_accounts SET last_seen_at=datetime('now','-30 minutes') WHERE id=2; UPDATE social_accounts SET last_seen_at=CURRENT_TIMESTAMP WHERE id=1; UPDATE publication_jobs SET scheduled_at=datetime('now','-20 minutes') WHERE id=1")
+      recordConsumerState(db,1,2,true,Date.now()-301000)
+      recordConsumerState(db,1,1,true)
+      assert.deepEqual(redistributeOfflinePendingJobs(db,1,()=>true),[], 'No automatic ping-pong')
+    }
+    console.log('✓ Pending reassignment: same job, owner and tenant; pauses, claims, sales and repeat moves protected.')
+  } finally { db.close() }
+}

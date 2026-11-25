@@ -14,6 +14,8 @@ import { profileCapacity, profileLimits, lastProfileActivityAt } from './profile
 import { organizationScheduleHistory } from './schedule-history.ts'
 import { consumerRoutingEligible, findBestAccountForVehicle } from '../modules/accounts.ts'
 import { consumerState } from './execution-diagnostics.ts'
+import { redistributeOfflinePendingJobs } from './pending-job-reassignment.ts'
+import { logger } from '../lib/logger.ts'
 import { coordinateAutopilot, skippedAutopilot } from './autopilot-coordinator.ts'
 import { previewGroupCuration } from './group-curation-worker.ts'
 import { publicationDuplicateRisk, publicationReadinessIssues } from './publication-policy.ts'
@@ -462,9 +464,16 @@ export async function runAutopilotPipeline(
   userId: number | null,
   { automatic = false } = {},
 ): Promise<AutopilotResult> {
-  return coordinateAutopilot(db, organizationId, automatic, (ownsLease) =>
-    planAutopilotJobs(db, organizationId, userId, automatic, ownsLease),
-  )
+  return coordinateAutopilot(db, organizationId, automatic, async (ownsLease) => {
+    const transfers = automatic ? redistributeOfflinePendingJobs(db, organizationId, ownsLease) : []
+    if (transfers.length) logger.info('Autopilot', 'Trabalhos pendentes redistribuídos', {
+      organizationId, count: transfers.length, transfers,
+    })
+    const result = await planAutopilotJobs(db, organizationId, userId, automatic, ownsLease)
+    return transfers.length
+      ? { ...result, message: result.message + ' Trabalhos redistribuídos: ' + transfers.length + '.' }
+      : result
+  })
 }
 
 async function planAutopilotJobs(
