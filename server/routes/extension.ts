@@ -2,8 +2,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { randomBytes } from 'node:crypto'
 import { logger } from '../lib/logger.ts'
-import { sanitizeExecutionDiagnostics, sanitizeConsumerDiagnostic } from '../services/execution-diagnostics.ts'
-import { publicationMayExist, readPublicationReport } from '../services/publication-evidence.ts'
+import { sanitizeExecutionDiagnostics, sanitizeConsumerDiagnostic, recordConsumerState } from '../services/execution-diagnostics.ts'
+import { publicationMayExist, readPublicationReport, publicationReviewKind } from '../services/publication-evidence.ts'
 import { findBestAccountForVehicle } from '../services/session-manager.ts'
 import { calculateBackoff } from '../lib/retry.ts'
 import { profileCapacity } from '../services/profile-capacity.ts'
@@ -125,9 +125,10 @@ export async function handleExtensionRoute(
       'UPDATE social_accounts SET last_seen_at=CURRENT_TIMESTAMP,status=? ' +
         'WHERE id=? AND organization_id=?',
     ).run('connected', accountId, auth.organizationId)
+    recordConsumerState(db, auth.organizationId, accountId, body?.autoRun)
     const diagnostic = sanitizeConsumerDiagnostic(body?.diagnostic)
     if (diagnostic) logger.info('ExtensionConsumer', 'Estado operacional do perfil', {
-      organizationId: auth.organizationId, accountId, ...diagnostic,
+      organizationId: auth.organizationId, accountId, autoRun: typeof body?.autoRun === 'boolean' ? body.autoRun : null, ...diagnostic,
     })
     return send(res, 200, { ok: true })
   }
@@ -177,7 +178,7 @@ export async function handleExtensionRoute(
     ).run('connected', accountId, auth.organizationId)
     const jobs = db
       .prepare(
-        `SELECT j.id jobId,j.vehicle_id vehicleId,j.status jobStatus,j.error_code errorCode,j.fill_report fillReport,j.queue_priority queuePriority,j.scheduled_at scheduledAt,j.updated_at updatedAt,
+        `SELECT j.id jobId,j.vehicle_id vehicleId,j.status jobStatus,j.error_code errorCode,j.fill_report fillReport,j.publish_attempt_at publishAttemptAt,j.queue_priority queuePriority,j.scheduled_at scheduledAt,j.updated_at updatedAt,
         CASE WHEN j.lease_expires_at IS NOT NULL AND datetime(j.lease_expires_at)>CURRENT_TIMESTAMP THEN 1 ELSE 0 END locked,
         v.year,v.make,v.model,v.trim,v.price,v.km,v.status vehicleStatus,
         (SELECT COUNT(*) FROM vehicle_images i WHERE i.vehicle_id=v.id) imageCount,
@@ -195,10 +196,9 @@ export async function handleExtensionRoute(
       } catch {
         /* relatório antigo */
       }
-      job.publishUncertain =
-        report.publishAttempted === true &&
-        report.published !== true &&
-        report.publishNotClicked !== true
+      job.publishUncertain = publicationMayExist({ publishAttemptAt: job.publishAttemptAt, fillReport: report })
+      job.reviewKind = publicationReviewKind({ status: String(job.jobStatus), publishAttemptAt: job.publishAttemptAt, fillReport: report })
+      delete job.publishAttemptAt
       delete job.fillReport
     }
     const settings = db
@@ -372,6 +372,8 @@ export async function handleExtensionRoute(
         error:
           'Esta execução pode já ter publicado o anúncio. Reconcilie o resultado antes de iniciar outra tentativa.',
       })
+    if (job.status === 'awaiting_confirmation')
+      return send(res, 409, { error: 'Revise o resultado em Publicações antes de preencher novamente.' })
     const capacity = profileCapacity(db, auth.organizationId, accountId)
     if (capacity.blockedByDailyLimit)
       return send(res, 409, {
@@ -487,7 +489,7 @@ export async function handleExtensionRoute(
         .prepare(
           `UPDATE publication_jobs SET status='filling',attempt_count=attempt_count+1,error_code=NULL,started_at=CURRENT_TIMESTAMP,
           lease_token=?,lease_owner=?,execution_tab_id=?,execution_document=?,execution_document_id=NULL,lease_expires_at=datetime('now',?),updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?
-          AND social_account_id=? AND paused=0 AND extension_visible=1 AND publish_attempt_at IS NULL AND status IN ('pending','filling','error','awaiting_confirmation')
+          AND social_account_id=? AND paused=0 AND extension_visible=1 AND publish_attempt_at IS NULL AND status IN ('pending','filling','error')
           AND (scheduled_at IS NULL OR datetime(scheduled_at)<=CURRENT_TIMESTAMP)
           AND (lease_expires_at IS NULL OR datetime(lease_expires_at)<=CURRENT_TIMESTAMP)
           AND NOT EXISTS (SELECT 1 FROM publication_jobs active WHERE active.organization_id=? AND active.id<>? AND active.status='filling'
@@ -1195,7 +1197,9 @@ export async function handleExtensionRoute(
         job.id,
         auth.organizationId,
       )
+    const reviewKind = publicationReviewKind({ status: 'awaiting_confirmation', publishAttemptAt: job.publishAttemptAt, fillReport: report })
     recordJobEvent(auth.organizationId, job.id, 'filled_waiting_confirmation', null, {
+      reviewKind,
       filledCount: report.filledCount,
       totalCount: report.totalCount,
       imageCount: report.imageCount,
@@ -1206,6 +1210,6 @@ export async function handleExtensionRoute(
       flowIssues: report.flowIssues,
       extensionVersion: String(b.extensionVersion || '').slice(0, 30),
     })
-    return send(res, 200, { ok: true, status: 'awaiting_confirmation' })
+    return send(res, 200, { ok: true, status: 'awaiting_confirmation', reviewKind })
   }
 }

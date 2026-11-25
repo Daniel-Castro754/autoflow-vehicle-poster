@@ -728,7 +728,7 @@ export async function handlePublicationManagementRoute(
       })
     if (
       (nextStatus === 'pending' || nextStatus === 'canceled') &&
-      publicationMayExist(job) &&
+      (job.status === 'awaiting_confirmation' || publicationMayExist(job)) &&
       b.confirmNoPublication !== true
     )
       return send(res, 409, {
@@ -791,7 +791,7 @@ export async function handlePublicationManagementRoute(
         Number(publication[1]),
         eventType[nextStatus] || 'status_changed',
         auth.userId,
-        { status: nextStatus, retryConsumed: nextStatus === 'pending' },
+        { status: nextStatus, retryConsumed: nextStatus === 'pending', confirmedNoPublication: b.confirmNoPublication === true },
       )
       db.exec('COMMIT')
     } catch (error) {

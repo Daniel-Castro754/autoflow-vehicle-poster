@@ -32,8 +32,8 @@ type PilotReason = { code: string; message: string }
 type PilotDiagnostic = {
   totalVehicles: number; previewCandidateCount: number; passingInitialChecks: number
   recurringEnabled: boolean; nextRunAt: string | null; lastStatus: string | null; lastJobsCreated: number | null
-  profiles: Array<{ id: number; label: string; queuedToday: number; dailyLimit: number; canSchedule: boolean; reasons: PilotReason[] }>
-  vehicles: Array<{ id: number; title: string; status: string; photoCount: number; previewCandidate: boolean; previewReasons: PilotReason[]; executionReasons: PilotReason[]; blockingJobs: Array<{ id: number; status: string; accountLabel: string; visible: number; paused: number }> }>
+  profiles: Array<{ id: number; label: string; queuedToday: number; dailyLimit: number; canSchedule: boolean; consumer?: { state: string; reportedAt: string | null }; reasons: PilotReason[] }>
+  vehicles: Array<{ id: number; title: string; status: string; photoCount: number; previewCandidate: boolean; previewReasons: PilotReason[]; executionReasons: PilotReason[]; blockingJobs: Array<{ id: number; status: string; accountLabel: string; visible: number; paused: number; reviewKind?: string | null }> }>
 }
 interface InventoryAudit {
   healthScore: number
@@ -247,6 +247,35 @@ export function AiCenterView({
     }
   }, [api])
 
+  const reviewLabels: Record<string, string> = {
+    manual_review: 'Preenchimento entregue para revisão manual',
+    fill_incomplete: 'Preenchimento parcial — revisar campos',
+    publication_uncertain: 'Resultado de publicação incerto',
+    review_unknown: 'Histórico sem evidência suficiente — revisar',
+  }
+  async function reconcilePilotJob(id: number, accountLabel: string, published: boolean) {
+    const message = published
+      ? 'Confirma que encontrou este anúncio publicado no Facebook no perfil ' + accountLabel + '?'
+      : 'Você verificou Seus classificados e fechou o formulário antigo no perfil ' + accountLabel + '? Confirme somente se este anúncio NÃO foi publicado. O trabalho será encerrado, sem apagar o veículo.'
+    if (!window.confirm(message)) return
+    setRunningAutopilot(true)
+    setPilotError('')
+    try {
+      await api('/publications/' + id, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: published ? 'completed' : 'canceled', confirmNoPublication: !published }),
+      })
+      const preview = await api<{ diagnostics?: PilotDiagnostic }>('/ai/autopilot/preview')
+      setPilotDiagnostic(preview.diagnostics ?? null)
+      setMessage('Resultado do trabalho #' + id + ' registrado.')
+      await loadAudit()
+      await reloadVehicles()
+    } catch (err) {
+      setPilotError(err instanceof Error ? err.message : 'Não foi possível registrar o resultado.')
+    } finally {
+      setRunningAutopilot(false)
+    }
+  }
   async function handleRunAutopilot() {
     setRunningAutopilot(true)
     setAutopilotResult(null)
@@ -739,7 +768,7 @@ export function AiCenterView({
                 <strong>Diagnóstico da prévia</strong>
                 <p>Estoque: {pilotDiagnostic.totalVehicles} · Candidatos: {pilotDiagnostic.previewCandidateCount} · Passaram nas verificações iniciais: {pilotDiagnostic.passingInitialChecks}</p>
                 <p>Agendamento recorrente: {pilotDiagnostic.recurringEnabled ? 'Ativo' : 'Desativado'}</p>
-                {pilotDiagnostic.recurringEnabled && pilotDiagnostic.nextRunAt && <p>Próxima rodada prevista (UTC): {pilotDiagnostic.nextRunAt}</p>}
+                {pilotDiagnostic.recurringEnabled && pilotDiagnostic.nextRunAt && <p>Próxima rodada prevista (Brasília): {new Date(pilotDiagnostic.nextRunAt.replace(' ', 'T') + (/(?:Z|[+-]\d\d:\d\d)$/.test(pilotDiagnostic.nextRunAt) ? '' : 'Z')).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</p>}
                 {pilotDiagnostic.lastStatus && <p>Última rodada: {pilotDiagnostic.lastStatus} · Trabalhos criados: {pilotDiagnostic.lastJobsCreated ?? 0}</p>}
                 <strong>Veículos analisados</strong>
                 {pilotDiagnostic.vehicles.map(v => (
@@ -747,12 +776,22 @@ export function AiCenterView({
                     <strong>{v.title} (#{v.id})</strong>
                     <p>{v.status} · {v.photoCount} foto(s) · {v.previewCandidate && !v.executionReasons.length ? 'Passou nas verificações iniciais' : 'Requer revisão'}</p>
                     {[...v.previewReasons, ...v.executionReasons].map(r => <p key={r.code}>{r.message}</p>)}
-                    {v.blockingJobs.map(j => <p key={j.id}>Trabalho #{j.id} · {j.status} · {j.accountLabel}{!j.visible && ' · Oculto da extensão'}{Boolean(j.paused) && ' · Pausado'}</p>)}
+                    {v.blockingJobs.map(j => (
+                      <div key={j.id}>
+                        <p>Trabalho #{j.id} · {j.reviewKind ? reviewLabels[j.reviewKind] || j.status : j.status} · {j.accountLabel}{!j.visible && ' · Oculto da extensão'}{Boolean(j.paused) && ' · Pausado'}</p>
+                        {j.status === 'awaiting_confirmation' && <>
+                          <button className="secondary" disabled={runningAutopilot} onClick={() => void reconcilePilotJob(j.id, j.accountLabel, true)}>Confirmar publicado</button>
+                          <button className="secondary" disabled={runningAutopilot} onClick={() => void reconcilePilotJob(j.id, j.accountLabel, false)}>Encerrar: não publicado</button>
+                        </>}
+                        <button className="small-action" onClick={() => navigate('Publicações')}>Abrir publicações</button>
+                      </div>
+                    ))}
                   </div>
                 ))}
                 <strong>Perfis</strong>
                 {pilotDiagnostic.profiles.map(p => (
                   <div key={p.id}><p>{p.label} · {p.queuedToday}/{p.dailyLimit} trabalhos hoje · {p.canSchedule ? 'Disponível para agendamento' : 'Indisponível'}</p>
+                    <p>Consumo na extensão: {p.consumer?.state === 'enabled' ? 'Ativado (último sinal)' : p.consumer?.state === 'paused' ? 'Pausado (último sinal)' : 'Não informado ou sinal expirado'}</p>
                     {p.reasons.map(r => <p key={r.code}>{r.message}</p>)}
                   </div>
                 ))}

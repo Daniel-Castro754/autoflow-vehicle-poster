@@ -307,7 +307,7 @@ async function recordConsumerDecision(accountId, code, details = {}) {
 // This only reports that the local extension can reach AutoFlow.
 // It does not assert Facebook login, DOM readiness or a successful publication.
 async function reportExtensionPresence() {
-  const state = await chrome.storage.local.get(['activeAccountId', 'token', 'refreshToken', 'consumerDiagnostics'])
+  const state = await chrome.storage.local.get(['activeAccountId', 'token', 'refreshToken', 'consumerDiagnostics', 'autoRun'])
   if (!state.activeAccountId || (!state.token && !state.refreshToken)) return
   try {
     await authorizedFetch(`${API}/extension/presence`, {
@@ -315,6 +315,7 @@ async function reportExtensionPresence() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         accountId: state.activeAccountId,
+        autoRun: Boolean(state.autoRun),
         diagnostic: Array.isArray(state.consumerDiagnostics)
           ? [...state.consumerDiagnostics].reverse().find((entry) => entry.accountId === state.activeAccountId)
           : undefined,

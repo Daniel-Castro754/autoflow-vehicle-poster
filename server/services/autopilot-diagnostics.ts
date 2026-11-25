@@ -2,9 +2,11 @@ import type { DatabaseSync } from 'node:sqlite'
 import { findBestAccountForVehicle } from '../modules/accounts.ts'
 import { publicationDuplicateRisk, publicationReadinessIssues } from './publication-policy.ts'
 import { profileCapacity } from './profile-capacity.ts'
+import { publicationReviewKind } from './publication-evidence.ts'
+import { consumerState } from './execution-diagnostics.ts'
 
 type Reason = { code: string; message: string }
-type Job = { id: number; vehicleId: number; status: string; accountLabel: string; visible: number; paused: number }
+type Job = { id: number; vehicleId: number; status: string; accountLabel: string; visible: number; paused: number; publishAttemptAt?: string; fillReport?: string }
 type Vehicle = Parameters<typeof publicationReadinessIssues>[0] & {
   id: number; status: string; soldAt: string | null; imageCount: number
 }
@@ -26,7 +28,7 @@ export function autopilotDiagnostics(db: DatabaseSync, org: number, automatic = 
     if (!a.recent) reasons.push({ code: 'profile_stale', message: 'Sem comunicação nos últimos cinco minutos.' })
     if (c.queuedToday >= c.dailyLimit) reasons.push({ code: 'queue_daily_limit', message: 'Limite diário de agendamentos atingido.' })
     return { id: a.id, label: a.label, status: a.status, queuedToday: c.queuedToday, dailyLimit: c.dailyLimit,
-      used: c.used, nextAllowedAt: c.nextAllowedAt, canSchedule: reasons.length === 0, reasons }
+      used: c.used, nextAllowedAt: c.nextAllowedAt, consumer: consumerState(db, org, a.id), canSchedule: reasons.length === 0, reasons }
   })
   const stock = db.prepare(
     `SELECT v.id,v.year,v.make,v.model,v.price,v.km,v.status,v.description,v.sold_at soldAt,
@@ -36,7 +38,7 @@ export function autopilotDiagnostics(db: DatabaseSync, org: number, automatic = 
     FROM vehicles v WHERE v.organization_id=? ORDER BY v.id`,
   ).all(org) as Vehicle[]
   const jobs = db.prepare(
-    `SELECT j.id,j.vehicle_id vehicleId,j.status,j.extension_visible visible,j.paused,
+    `SELECT j.id,j.vehicle_id vehicleId,j.status,j.extension_visible visible,j.paused,j.publish_attempt_at publishAttemptAt,j.fill_report fillReport,
     COALESCE(a.label,'Perfil não definido') accountLabel
     FROM publication_jobs j LEFT JOIN social_accounts a ON a.id=j.social_account_id AND a.organization_id=j.organization_id
     WHERE j.organization_id=? AND j.status IN ('pending','filling','error','awaiting_confirmation','completed') ORDER BY j.id`,
@@ -48,7 +50,7 @@ export function autopilotDiagnostics(db: DatabaseSync, org: number, automatic = 
     byVehicle.set(job.vehicleId, list)
   }
   const vehicles = stock.map((v) => {
-    const blockingJobs = byVehicle.get(v.id) ?? []
+    const blockingJobs = (byVehicle.get(v.id) ?? []).map(j => ({ id: j.id, vehicleId: j.vehicleId, status: j.status, accountLabel: j.accountLabel, visible: j.visible, paused: j.paused, reviewKind: publicationReviewKind(j) }))
     const previewReasons: Reason[] = []
     const executionReasons: Reason[] = []
     if (v.soldAt) previewReasons.push({ code: 'sold', message: 'Veículo vendido.' })
@@ -77,7 +79,7 @@ export function summarizeAutopilotDiagnostics(d: ReturnType<typeof autopilotDiag
     reasonCounts[r.code] = (reasonCounts[r.code] ?? 0) + 1
   return { totalVehicles: d.totalVehicles, previewCandidateCount: d.previewCandidateCount,
     passingInitialChecks: d.passingInitialChecks, reasonCounts,
-    profiles: d.profiles.map(p => ({ id: p.id, canSchedule: p.canSchedule, queuedToday: p.queuedToday, dailyLimit: p.dailyLimit, reasons: p.reasons.map(r => r.code) })),
-    vehicles: d.vehicles.slice(0, 100).map(v => ({ id: v.id, reasons: [...v.previewReasons, ...v.executionReasons].map(r => r.code), blockingJobIds: v.blockingJobs.map(j => j.id) })),
+    profiles: d.profiles.map(p => ({ id: p.id, canSchedule: p.canSchedule, queuedToday: p.queuedToday, dailyLimit: p.dailyLimit, consumer: p.consumer.state, reasons: p.reasons.map(r => r.code) })),
+    vehicles: d.vehicles.slice(0, 100).map(v => ({ id: v.id, reasons: [...v.previewReasons, ...v.executionReasons].map(r => r.code), blockingJobIds: v.blockingJobs.map(j => j.id), reviewKinds: v.blockingJobs.map(j => ({ id: j.id, kind: j.reviewKind })) })),
     omittedVehicles: Math.max(0, d.totalVehicles - 100) }
 }
