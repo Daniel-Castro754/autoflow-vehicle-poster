@@ -723,7 +723,7 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
     )
       return
     const current = pageJobs.find((job) => job.id === id),
-      confirmNoPublication = status === 'pending' && Boolean(current?.fillReport?.publishAttempted)
+      confirmNoPublication = (status === 'pending' || status === 'canceled') && Boolean(current?.status === 'awaiting_confirmation' || current?.fillReport?.publishAttempted)
     if (
       confirmNoPublication &&
       !window.confirm(
@@ -742,7 +742,7 @@ export function PublicationsView({ api, reload }: { api: ApiFn; reload: () => Pr
         pending: 'Trabalho devolvido à fila.',
         completed: 'Publicação confirmada.',
         removed: 'Anúncio marcado como removido.',
-        canceled: 'Trabalho cancelado; veículo preservado como vendido.',
+        canceled: 'Trabalho cancelado; veículo e histórico preservados.',
       }
       setMessage(labels[status] || 'Publicação atualizada.')
     } catch (error) {
@@ -2612,7 +2612,7 @@ export function ReportsView({ api, vehicles }: { api: ApiFn; vehicles: Vehicle[]
       const { job } = await api<{ job: Pick<Job, 'id' | 'status' | 'fillReport'> }>(
         `/publications/${jobId}`,
       )
-      const confirmNoPublication = Boolean(job.fillReport?.publishAttempted)
+      const confirmNoPublication = job.status === 'awaiting_confirmation' || Boolean(job.fillReport?.publishAttempted)
       if (
         confirmNoPublication &&
         !window.confirm(

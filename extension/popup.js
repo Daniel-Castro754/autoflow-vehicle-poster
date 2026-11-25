@@ -247,25 +247,28 @@ function loadQueue() {
         : '<div class="empty">Nenhum trabalho pendente para este perfil.<br><small>No painel, use ⋯ → Adicionar à fila e escolha este perfil.</small></div>'
       jobs.forEach((job) => {
         const card = document.createElement('div')
-        const locked = Boolean(job.locked || job.publishUncertain)
+        const review = job.jobStatus === 'awaiting_confirmation'
+        const locked = Boolean(job.locked || job.publishUncertain || review)
         card.className = `vehicle ${locked ? 'locked-job' : job.jobStatus === 'error' ? 'error-job' : job.jobStatus === 'filling' ? 'filling-job' : job.jobStatus === 'awaiting_confirmation' ? 'filled-job' : ''}`
         const action = job.publishUncertain
           ? 'Resultado de publicação a confirmar'
-          : locked
+          : review
+            ? 'Revisar resultado no painel'
+            : locked
             ? 'Em uso em outra aba'
             : job.jobStatus === 'pending'
               ? 'Abrir e preencher'
               : job.jobStatus === 'awaiting_confirmation'
                 ? 'Preencher novamente'
                 : 'Retomar preenchimento'
-        card.innerHTML = `<div class="vehicle-top"><strong>${Number(job.year)} ${escapeHtml(job.make)} ${escapeHtml(job.model)}</strong><span class="status ${locked ? 'locked' : escapeHtml(job.jobStatus)}">${job.publishUncertain ? 'Resultado incerto' : locked ? 'Em execução' : statusLabel(job.jobStatus)}</span></div><small>${Number(job.km).toLocaleString('pt-BR')} km · ${Number(job.price).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })} · ${Number(job.imageCount || 0)} fotos</small><div class="job-meta">Trabalho #${Number(job.jobId)} · ${escapeHtml(job.accountLabel)}${job.errorCode ? ' · ' + escapeHtml(job.errorCode) : ''}</div><button data-id="${Number(job.jobId)}" ${locked ? 'disabled title="Resolva a pendência no painel antes de repetir."' : ''}>${action}</button>`
+        card.innerHTML = `<div class="vehicle-top"><strong>${Number(job.year)} ${escapeHtml(job.make)} ${escapeHtml(job.model)}</strong><span class="status ${locked ? 'locked' : escapeHtml(job.jobStatus)}">${job.publishUncertain ? 'Resultado incerto' : review ? (job.reviewKind === 'fill_incomplete' ? 'Preenchimento parcial' : job.reviewKind === 'manual_review' ? 'Revisão manual' : 'A revisar') : locked ? 'Em execução' : statusLabel(job.jobStatus)}</span></div><small>${Number(job.km).toLocaleString('pt-BR')} km · ${Number(job.price).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })} · ${Number(job.imageCount || 0)} fotos</small><div class="job-meta">Trabalho #${Number(job.jobId)} · ${escapeHtml(job.accountLabel)}${job.errorCode ? ' · ' + escapeHtml(job.errorCode) : ''}</div><button data-id="${Number(job.jobId)}" ${locked ? 'disabled title="Resolva a pendência no painel antes de repetir."' : ''}>${action}</button>`
         const hide = document.createElement('button')
         hide.type = 'button'
         hide.className = 'hide-job'
         hide.textContent = '×'
         hide.title = locked ? 'Revise a execução no painel antes de retirar.' : 'Retirar da fila da extensão'
         hide.setAttribute('aria-label', 'Retirar trabalho #' + Number(job.jobId) + ' da extensão')
-        hide.disabled = locked
+        hide.disabled = Boolean(job.locked || job.publishUncertain)
         hide.onclick = () => void hideQueueJob(job.jobId, activeAccountId, hide)
         card.querySelector('.vehicle-top').appendChild(hide)
         if (!locked) {

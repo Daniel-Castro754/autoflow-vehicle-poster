@@ -40,3 +40,27 @@ export function sanitizeConsumerDiagnostic(value: unknown) {
     retryAfterSeconds: 86400000, httpStatus: 599,
   })
 }
+
+// Last observed consumer state is advisory, scoped to this server/database.
+// A restart or stale heartbeat means unknown, never permission to publish.
+const consumerStates = new WeakMap<object, Map<string, { enabled: boolean; reportedAt: number }>>()
+export function recordConsumerState(db: object, org: number, accountId: number, value: unknown, now = Date.now()) {
+  let states = consumerStates.get(db)
+  if (!states) {
+    states = new Map()
+    consumerStates.set(db, states)
+  }
+  const key = org + ':' + accountId
+  for (const [id, state] of states) if (now - state.reportedAt > 300000) states.delete(id)
+  if (typeof value !== 'boolean') {
+    states.delete(key)
+    return
+  }
+  states.set(key, { enabled: value, reportedAt: now })
+}
+export function consumerState(db: object, org: number, accountId: number, now = Date.now()) {
+  const state = consumerStates.get(db)?.get(org + ':' + accountId)
+  return state && now - state.reportedAt <= 300000
+    ? { state: state.enabled ? 'enabled' : 'paused', reportedAt: new Date(state.reportedAt).toISOString() }
+    : { state: 'unknown', reportedAt: null }
+}
