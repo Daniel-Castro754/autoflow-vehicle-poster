@@ -28,6 +28,13 @@ import {
 
 type ApiFn = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
 
+type PilotReason = { code: string; message: string }
+type PilotDiagnostic = {
+  totalVehicles: number; previewCandidateCount: number; passingInitialChecks: number
+  recurringEnabled: boolean; nextRunAt: string | null; lastStatus: string | null; lastJobsCreated: number | null
+  profiles: Array<{ id: number; label: string; queuedToday: number; dailyLimit: number; canSchedule: boolean; reasons: PilotReason[] }>
+  vehicles: Array<{ id: number; title: string; status: string; photoCount: number; previewCandidate: boolean; previewReasons: PilotReason[]; executionReasons: PilotReason[]; blockingJobs: Array<{ id: number; status: string; accountLabel: string; visible: number; paused: number }> }>
+}
 interface InventoryAudit {
   healthScore: number
   totalVehicles: number
@@ -143,6 +150,8 @@ export function AiCenterView({
   const [loadingAudit, setLoadingAudit] = useState(true)
   const [runningAutopilot, setRunningAutopilot] = useState(false)
   const [autopilotResult, setAutopilotResult] = useState<AutopilotResult | null>(null)
+  const [pilotDiagnostic, setPilotDiagnostic] = useState<PilotDiagnostic | null>(null)
+  const [pilotError, setPilotError] = useState('')
 
   // Command Console state
   const [commandText, setCommandText] = useState('')
@@ -241,15 +250,19 @@ export function AiCenterView({
   async function handleRunAutopilot() {
     setRunningAutopilot(true)
     setAutopilotResult(null)
+    setPilotDiagnostic(null)
+    setPilotError('')
     try {
       const preview = await api<{
         previewId: string | null
         connectedProfiles: number
         potentialVehicles: Array<{ id: number; title: string }>
         note: string
+        diagnostics?: PilotDiagnostic
       }>('/ai/autopilot/preview')
+      setPilotDiagnostic(preview.diagnostics ?? null)
       if (!preview.previewId) {
-        setMessage('Nenhum veículo e perfil conectados disponíveis para a prévia de agendamento.')
+        setPilotError('Nenhum agendamento criado. Confira o diagnóstico.')
         return
       }
       const list = preview.potentialVehicles.slice(0, 8).map((v) => v.title + ' (#' + v.id + ')')
@@ -281,7 +294,7 @@ export function AiCenterView({
       await loadAudit()
       await reloadVehicles()
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Erro ao executar piloto automático.')
+      setPilotError(err instanceof Error ? err.message : 'Erro ao executar piloto automático.')
     } finally {
       setRunningAutopilot(false)
     }
@@ -719,6 +732,33 @@ export function AiCenterView({
                 {optimizingBatch ? 'Preparando prévia...' : 'Revisar descrições com IA'}
               </button>
             </div>
+
+            {pilotError && <p role="status">{pilotError}</p>}
+            {pilotDiagnostic && (
+              <section className="ai-result-box" aria-label="Diagnóstico do piloto automático">
+                <strong>Diagnóstico da prévia</strong>
+                <p>Estoque: {pilotDiagnostic.totalVehicles} · Candidatos: {pilotDiagnostic.previewCandidateCount} · Passaram nas verificações iniciais: {pilotDiagnostic.passingInitialChecks}</p>
+                <p>Agendamento recorrente: {pilotDiagnostic.recurringEnabled ? 'Ativo' : 'Desativado'}</p>
+                {pilotDiagnostic.recurringEnabled && pilotDiagnostic.nextRunAt && <p>Próxima rodada prevista (UTC): {pilotDiagnostic.nextRunAt}</p>}
+                {pilotDiagnostic.lastStatus && <p>Última rodada: {pilotDiagnostic.lastStatus} · Trabalhos criados: {pilotDiagnostic.lastJobsCreated ?? 0}</p>}
+                <strong>Veículos analisados</strong>
+                {pilotDiagnostic.vehicles.map(v => (
+                  <div key={v.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--line, #ccc)' }}>
+                    <strong>{v.title} (#{v.id})</strong>
+                    <p>{v.status} · {v.photoCount} foto(s) · {v.previewCandidate && !v.executionReasons.length ? 'Passou nas verificações iniciais' : 'Requer revisão'}</p>
+                    {[...v.previewReasons, ...v.executionReasons].map(r => <p key={r.code}>{r.message}</p>)}
+                    {v.blockingJobs.map(j => <p key={j.id}>Trabalho #{j.id} · {j.status} · {j.accountLabel}{!j.visible && ' · Oculto da extensão'}{Boolean(j.paused) && ' · Pausado'}</p>)}
+                  </div>
+                ))}
+                <strong>Perfis</strong>
+                {pilotDiagnostic.profiles.map(p => (
+                  <div key={p.id}><p>{p.label} · {p.queuedToday}/{p.dailyLimit} trabalhos hoje · {p.canSchedule ? 'Disponível para agendamento' : 'Indisponível'}</p>
+                    {p.reasons.map(r => <p key={r.code}>{r.message}</p>)}
+                  </div>
+                ))}
+                <p>Diagnóstico informativo; a execução revalida todos os requisitos.</p>
+              </section>
+            )}
 
             {descriptionPreview && descriptionPreview.proposals.length > 0 && (
               <div
