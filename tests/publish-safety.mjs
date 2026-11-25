@@ -33,7 +33,13 @@ for (const legacy of [true, false]) {
   }
   applyMigrations(migrationDb)
   applyMigrations(migrationDb)
-  assert.equal(migrationDb.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 27)
+  // Keep the expected schema explicit: missing or unexpected migrations must fail.
+  const versions = migrationDb.prepare('SELECT version FROM schema_migrations ORDER BY version').all()
+  assert.deepEqual(versions.map(row => row.version), Array.from({ length: 29 }, (_, i) => i + 1))
+  const consumerColumn = migrationDb.prepare('PRAGMA table_info(social_accounts)').all()
+    .find(column => column.name === 'last_consumer_auto_run')
+  assert.equal(consumerColumn?.type, 'INTEGER')
+  assert.equal(consumerColumn?.notnull, 0)
   if (legacy)
     assert.equal(
       migrationDb.prepare('SELECT publish_attempt_at FROM publication_jobs WHERE id=1').get()
@@ -48,6 +54,35 @@ for (const legacy of [true, false]) {
       originalChecksums,
     )
   migrationDb.close()
+}
+
+// Exercise the upgrade from schema 28 independently. Existing accounts must
+// start with unknown consumer state; an explicitly recorded pause must survive
+// reopening the schema, with every prior migration checksum unchanged.
+{
+  const db = new DatabaseSync(':memory:')
+  try {
+    initializeBaseSchema(db)
+    applyMigrations(db)
+    db.exec(`
+      DELETE FROM schema_migrations WHERE version=29;
+      ALTER TABLE social_accounts DROP COLUMN last_consumer_auto_run;
+      INSERT INTO organizations(id,name) VALUES(1,'Upgrade');
+      INSERT INTO users(id,organization_id,name,email,password_hash)
+        VALUES(1,1,'Owner','upgrade@example.local','fixture');
+      INSERT INTO social_accounts(id,organization_id,user_id,label) VALUES(1,1,1,'Legacy');
+    `)
+    const before = db.prepare('SELECT version,checksum FROM schema_migrations ORDER BY version').all()
+    applyMigrations(db)
+    assert.equal(db.prepare('SELECT last_consumer_auto_run value FROM social_accounts WHERE id=1').get().value,null)
+    assert.deepEqual(db.prepare('SELECT version,checksum FROM schema_migrations WHERE version<=28 ORDER BY version').all(),before)
+    db.exec('UPDATE social_accounts SET last_consumer_auto_run=0 WHERE id=1')
+    applyMigrations(db)
+    assert.equal(db.prepare('SELECT last_consumer_auto_run value FROM social_accounts WHERE id=1').get().value,0)
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count,29)
+  } finally {
+    db.close()
+  }
 }
 
 const port = await pickFreePort()
