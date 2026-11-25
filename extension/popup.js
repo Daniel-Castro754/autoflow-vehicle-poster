@@ -377,7 +377,7 @@ async function showConsumerDiagnostic() {
   const last = history.at(-1)
   const {pendingResults} = await chrome.storage.local.get('pendingResults')
   if (accountId !== activeAccountId) return
-  const conflicts = Object.values(pendingResults || {}).filter(entry=>entry.rejectedAt && (!entry.accountId || entry.accountId===accountId))
+  const conflicts = Object.values(pendingResults || {}).filter(entry=>entry.rejectedAt && !entry.resolvedAt && (!entry.accountId || entry.accountId===accountId))
   $('consumerDiagnostic').textContent = conflicts.length
     ? 'Resultado(s) em conflito: '+conflicts.map(entry=>'#'+Number(entry.jobId)).join(', ')+'. Evidências preservadas. Confira Publicações e o Facebook.'
     : last
@@ -391,7 +391,7 @@ $('exportDiagnostics').onclick = async () => {
   const {pendingResults} = await chrome.storage.local.get('pendingResults')
   if(accountId!==activeAccountId)return
   const conflicts=Object.values(pendingResults||{}).filter(entry=>entry.rejectedAt && (!entry.accountId || entry.accountId===accountId)).map(entry=>({
-    jobId:entry.jobId,accountId:entry.accountId||null,rejectedAt:entry.rejectedAt,conflictCode:entry.conflictCode,
+    jobId:entry.jobId,accountId:entry.accountId||null,rejectedAt:entry.rejectedAt,conflictCode:entry.conflictCode,conflictId:entry.conflictId||null,resolvedAt:entry.resolvedAt||null,resolution:entry.resolution||null,
     reportedPublished:entry.payload?.published===true,reportedPublishAttempted:entry.payload?.publishAttempted===true,
   }))
   const url = URL.createObjectURL(new Blob([JSON.stringify({history,conflicts}, null, 2)], { type: 'application/json' }))

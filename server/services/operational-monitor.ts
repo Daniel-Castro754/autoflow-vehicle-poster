@@ -2,12 +2,13 @@ import type { DatabaseSync } from 'node:sqlite'
 import { consumerState, latestConsumerDecision } from './execution-diagnostics.ts'
 import { profileCapacity, parseSqliteTimestamp } from './profile-capacity.ts'
 import { publicationReviewKind } from './publication-evidence.ts'
+import { listOpenResultConflicts } from './result-conflicts.ts'
 
 const eventGroups = {
   scheduling: ['autopilot_scheduled','created','scheduled','smart_scheduled','batch_scheduled','schedule_removed'],
   recovery: ['stalled_recovered','auto_retry_scheduled','retry_requested'],
   transfer: ['reassigned'],
-  attention: ['fill_error','stalled_exhausted','stalled_publish_ambiguous','publish_result_unknown','duplicate_blocked','selector_circuit_breaker_opened','job_nearly_stuck','filled_waiting_confirmation','fill_result_conflict','paused','hidden_from_extension'],
+  attention: ['fill_error','stalled_exhausted','stalled_publish_ambiguous','publish_result_unknown','duplicate_blocked','selector_circuit_breaker_opened','job_nearly_stuck','filled_waiting_confirmation','fill_result_conflict','fill_result_conflict_resolved','paused','hidden_from_extension'],
   execution: ['filling_started','auto_published','late_publish_confirmed','confirmed_published','canceled','marked_removed','resumed','shown_in_extension'],
 } as const
 type Category = keyof typeof eventGroups
@@ -87,6 +88,6 @@ export function operationalMonitor(db: DatabaseSync, org: number, filters: Retur
     WHERE (?=0 OR a.id=? OR src.id=? OR dst.id=?)
     ORDER BY t.id DESC LIMIT ?`).all(org,'-'+filters.hours+' hours',filters.beforeId,filters.beforeId,
       filters.vehicleId,filters.vehicleId,...types,org,org,org,filters.accountId,filters.accountId,filters.accountId,filters.accountId,filters.limit+1) as Array<{id:number;eventType:string;[key:string]:unknown}>
-  return {timestamp:new Date(now).toISOString(),filters,profiles,reviews,reviewCount,activity:events.slice(0,filters.limit),
+  return {timestamp:new Date(now).toISOString(),filters,profiles,reviews,reviewCount,conflicts:listOpenResultConflicts(db,org),activity:events.slice(0,filters.limit),
     nextBeforeId:events.length>filters.limit?events[filters.limit-1].id:null}
 }

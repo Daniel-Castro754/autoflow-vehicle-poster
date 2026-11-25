@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
+import { resultConflict, terminalConflictOutcome } from '../services/result-conflicts.ts'
 
 type Auth = { userId: number; organizationId: number }
 type Deps = {
@@ -22,6 +23,24 @@ export async function handleInterventionsRoute(
   { db, send, jsonBody, isAdmin }: Deps,
 ): Promise<boolean> {
   if (!url.pathname.startsWith('/api/operations/')) return false
+  const conflictMatch=/^\/api\/operations\/conflicts\/(\d+)$/.exec(url.pathname)
+  if(req.method==='PATCH'&&conflictMatch){
+    res.setHeader('Cache-Control','no-store')
+    if(!isAdmin(auth)){send(res,403,{error:'Somente administradores podem reconciliar conflitos.'});return true}
+    const body=await jsonBody(req) as Record<string,unknown>
+    const id=Number(conflictMatch[1])
+    if(!Number.isSafeInteger(id)||id<1||body?.verifiedFacebook!==true||!['published','not_published','removed'].includes(String(body?.outcome))){send(res,400,{error:'Confirme a verificação do Facebook e o resultado final.'});return true}
+    db.exec('BEGIN IMMEDIATE')
+    try{
+      const conflict=resultConflict(db,auth.organizationId,id)
+      if(!conflict){db.exec('ROLLBACK');send(res,404,{error:'Conflito não encontrado.'});return true}
+      const outcome=terminalConflictOutcome(conflict.jobStatus)
+      if(!outcome||outcome!==body.outcome||conflict.currentAccountId!==conflict.accountId){db.exec('ROLLBACK');send(res,409,{error:'O estado final e o perfil precisam corresponder à verificação. Resolva em Publicações primeiro.'});return true}
+      if(conflict.outcome&&conflict.outcome!==outcome){db.exec('ROLLBACK');send(res,409,{error:'Este conflito já tem uma resolução diferente.'});return true}
+      if(!conflict.outcome)db.prepare("INSERT INTO publication_job_events(organization_id,publication_job_id,event_type,created_by,details) VALUES (?,?,'fill_result_conflict_resolved',?,?)").run(auth.organizationId,conflict.jobId,auth.userId,JSON.stringify({conflictId:id,accountId:conflict.accountId,outcome,verifiedFacebook:true}))
+      db.exec('COMMIT');send(res,200,{ok:true,conflictId:id,outcome,idempotent:Boolean(conflict.outcome)});return true
+    }catch(error){db.exec('ROLLBACK');throw error}
+  }
   if (
     !['/api/operations/incidents', '/api/operations/activity'].includes(url.pathname) &&
     !/^\/api\/operations\/incidents\/\d+(?:\/history)?$/.test(url.pathname)

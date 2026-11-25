@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { randomBytes } from 'node:crypto'
 import { logger } from '../lib/logger.ts'
+import { openResultConflict, recordResultConflict, resultConflict, resultFingerprint, terminalConflictOutcome } from '../services/result-conflicts.ts'
 import { sanitizeExecutionDiagnostics, sanitizeConsumerDiagnostic, recordConsumerState, recordConsumerDecision } from '../services/execution-diagnostics.ts'
 import { publicationMayExist, readPublicationReport, publicationReviewKind } from '../services/publication-evidence.ts'
 import { findBestAccountForVehicle } from '../services/session-manager.ts'
@@ -61,7 +62,7 @@ export function isExtensionRoute(req: IncomingMessage, url: URL) {
     ['/api/extension/accounts', '/api/extension/queue'].includes(url.pathname)
   )
     return true
-  if (req.method === 'POST' && url.pathname === '/api/extension/presence') return true
+  if (req.method === 'POST' && ['/api/extension/presence','/api/extension/conflicts/status'].includes(url.pathname)) return true
   const routes: Record<string, string[]> = {
     POST: [
       'prepare',
@@ -103,6 +104,18 @@ export async function handleExtensionRoute(
     imageVariantSecret,
   }: Dependencies,
 ): Promise<void> {
+  if(req.method==='POST' && url.pathname==='/api/extension/conflicts/status'){
+    const body=await jsonBody(req,4096) as Record<string,unknown>
+    const id=Number(body?.conflictId),jobId=Number(body?.jobId)
+    if(!Number.isSafeInteger(id)||id<1||!Number.isSafeInteger(jobId)||jobId<1||typeof body?.leaseToken!=='string'||!body.leaseToken)
+      return send(res,400,{error:'Identidade de conflito inválida.'})
+    const conflict=resultConflict(db,auth.organizationId,id)
+    if(!conflict||conflict.jobId!==jobId||!allowedExtensionAccount(conflict.accountId,auth)||
+      conflict.fingerprint!==resultFingerprint(body.leaseToken,body))
+      return send(res,404,{error:'Conflito não encontrado para esta execução.'})
+    const resolved=Boolean(conflict.outcome && conflict.outcome===terminalConflictOutcome(conflict.jobStatus))
+    return send(res,200,{conflictId:id,jobId,resolved,outcome:resolved?conflict.outcome:null})
+  }
   if (req.method === 'POST' && url.pathname === '/api/extension/presence') {
     // Presence is only a signal from the extension, never proof of a valid
     // Facebook session or permission to publish. Paused profiles may report
@@ -197,7 +210,7 @@ export async function handleExtensionRoute(
       } catch {
         /* relatório antigo */
       }
-      job.publishUncertain = publicationMayExist({ publishAttemptAt: job.publishAttemptAt, fillReport: report })
+      job.publishUncertain = publicationMayExist({ publishAttemptAt: job.publishAttemptAt, fillReport: report }) || openResultConflict(db,auth.organizationId,Number(job.jobId))
       job.reviewKind = publicationReviewKind({ status: String(job.jobStatus), publishAttemptAt: job.publishAttemptAt, fillReport: report })
       delete job.publishAttemptAt
       delete job.fillReport
@@ -357,6 +370,7 @@ export async function handleExtensionRoute(
     if (!job) return send(res, 404, { error: 'Trabalho não encontrado para este perfil.' })
     if (jobsIncludeSoldVehicle([job.id], auth.organizationId))
       return send(res, 409, { error: 'Veículos vendidos não podem ser publicados.' })
+    if(openResultConflict(db,auth.organizationId,job.id)) return send(res,409,{error:'Resultado em conflito. Resolva a ocorrência antes de nova execução.'})
     if (job.paused) return send(res, 409, { error: 'Este trabalho está pausado no painel.' })
     if (!job.extensionVisible)
       return send(res, 409, { error: 'Este trabalho foi retirado da fila da extensão.' })
@@ -467,6 +481,7 @@ export async function handleExtensionRoute(
     try {
       // Enforce capacity after BEGIN IMMEDIATE as well: two API processes cannot
       // claim two jobs between the preflight capacity check and the lease update.
+      if(openResultConflict(db,auth.organizationId,job.id)){db.exec('COMMIT');return send(res,409,{error:'Resultado em conflito. Resolva a ocorrência antes de nova execução.'})}
       const currentCapacity = profileCapacity(db, auth.organizationId, accountId)
       if (currentCapacity.blockedByDailyLimit || currentCapacity.retryAfterSeconds > 0) {
         db.exec('COMMIT')
@@ -827,14 +842,8 @@ export async function handleExtensionRoute(
       identityMatches
     // Bounded audit signal for an authorized job, never proof of publication.
     const rejectResult = (conflictCode: string) => {
-      const recorded = db.prepare(
-        "SELECT 1 FROM publication_job_events WHERE organization_id=? AND publication_job_id=? AND event_type='fill_result_conflict' AND json_valid(details) AND json_extract(details,'$.conflictCode')=? LIMIT 1",
-      ).get(auth.organizationId,job.id,conflictCode)
-      if (!recorded) recordJobEvent(auth.organizationId,job.id,'fill_result_conflict',null,{
-        conflictCode,accountId:job.accountId,jobStatus:job.status,
-        reportedPublished:b.published===true,reportedPublishAttempted:b.publishAttempted===true,
-      })
-      return send(res,409,{error:'Resultado em conflito. Preserve as evidências e revise o trabalho em Publicações.',conflictCode})
+      const conflictId=recordResultConflict(db,auth.organizationId,job.id,job.accountId,job.status,conflictCode,incomingLeaseToken,b)
+      return send(res,409,{error:'Resultado em conflito. Preserve as evidências e revise o trabalho em Publicações.',conflictCode,conflictId})
     }
     if (incomingLeaseToken && job.lastLeaseToken === incomingLeaseToken && identityMatches && !latePublished) {
       if (b.published === true && !(previousReport.published === true && ['completed','removed'].includes(job.status)))

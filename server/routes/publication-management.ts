@@ -1,5 +1,6 @@
 import { randomInt } from 'node:crypto'
 import { publicationMayExist } from '../services/publication-evidence.ts'
+import { openResultConflict } from '../services/result-conflicts.ts'
 import { organizationScheduleHistory } from '../services/schedule-history.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
@@ -717,6 +718,8 @@ export async function handlePublicationManagementRoute(
     if (!canManageJobs([Number(publication[1])], auth))
       return send(res, 403, { error: 'Você não pode alterar trabalhos de outro perfil.' })
     const nextStatus = String(b.status)
+    const unresolvedConflict=openResultConflict(db,auth.organizationId,Number(publication[1]))
+    if(unresolvedConflict && nextStatus==='pending') return send(res,409,{error:'Trabalho com conflito não pode voltar à fila. Verifique o anúncio e encerre o conflito.'})
     if (
       nextStatus === 'pending' &&
       jobsIncludeSoldVehicle([Number(publication[1])], auth.organizationId)
@@ -728,7 +731,7 @@ export async function handlePublicationManagementRoute(
       })
     if (
       (nextStatus === 'pending' || nextStatus === 'canceled') &&
-      (job.status === 'awaiting_confirmation' || publicationMayExist(job)) &&
+      (job.status === 'awaiting_confirmation' || publicationMayExist(job) || unresolvedConflict) &&
       b.confirmNoPublication !== true
     )
       return send(res, 409, {

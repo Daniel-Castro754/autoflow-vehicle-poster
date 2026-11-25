@@ -132,8 +132,12 @@ async function runConsumer(queue, network = {}, settings = {}) {
     if (String(url).includes('/fill-result')) {
       const outcome = network.fillResults?.shift()
       if (outcome instanceof Error) throw outcome
-      if(outcome===409)return {ok:false,status:409,json:async()=>({error:'Conflito',conflictCode:'lease_expired'})}
+      if(outcome===409)return {ok:false,status:409,json:async()=>({error:'Conflito',conflictCode:'lease_expired',conflictId:71})}
       return { ok: true, status: 200, json: async () => ({ ok: true, status: 'completed' }) }
+    }
+    if(String(url).includes('/extension/conflicts/status')){
+      const body=JSON.parse(options.body)
+      return {ok:true,status:200,json:async()=>({conflictId:body.conflictId,jobId:body.jobId,resolved:network.conflictResolved===true,outcome:network.conflictResolved?'published':null})}
     }
     if (String(url).includes('/publish-check')) {
       const status = network.publishStatus || 200
@@ -465,7 +469,8 @@ console.log('✓ Fechamento de aba preserva evidências e resultados; alarme ún
 
 {
   const queue={automation:{autonomousMode:true},jobs:[{jobId:22,jobStatus:'pending'}]}
-  const result=await runConsumer(queue,{fillResults:[409]})
+  const network={fillResults:[409],conflictResolved:false}
+  const result=await runConsumer(queue,network)
   const job=result.stored.pendingJob
   result.stored.pendingPublishes={22:{...job,report:{publishAttempted:true}}}
   const response=await new Promise(resolve=>result.listeners.message({
@@ -490,5 +495,16 @@ console.log('✓ Fechamento de aba preserva evidências e resultados; alarme ún
   await new Promise(resolve=>result.listeners.message({type:'AUTOFLOW_RUN_QUEUE'},{},resolve))
   assert.equal(result.createdTabs.length,1,'Explicit consumer resume cannot replay quarantined job')
   assert(result.stored.pendingResults['22:lease-22'])
+  result.stored.autoRun=false
+  result.stored.autoRunManuallyPaused=true
+  network.conflictResolved=true
+  result.listeners.alarm({name:'autoflow-heartbeat'})
+  for(let i=0;i<50;i++)await new Promise(resolve=>setImmediate(resolve))
+  const archived=result.stored.pendingResults['22:lease-22']
+  assert(archived.resolvedAt)
+  assert.equal(archived.resolution,'published')
+  assert.equal(archived.payload.published,true)
+  assert.equal(result.stored.autoRun,false)
+  assert.equal(result.requests.filter(r=>r.url.includes('/fill-result')).length,1)
   console.log('✓ HTTP 409 preserves local evidence and excludes the quarantined job.')
 }
