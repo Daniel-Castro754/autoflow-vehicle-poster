@@ -92,6 +92,14 @@ root.querySelectorAll = () => [unrelated, actual]
 assert.equal(finder.findTransmission(), actual)
 root.querySelectorAll = () => [actual, { ...actual }]
 assert.equal(finder.findTransmission(), null)
+const label = { textContent: 'Câmbio' }
+const selectedValue = { textContent: 'Automático' }
+validation.document = { getElementById: id => id === 'field-label' ? label : selectedValue }
+const accessible = { ...control('Câmbio'), getAttribute: key => key === 'aria-labelledby' ? 'field-label selected-value' : '' }
+assert(validation.confirm(accessible, 'Automático'))
+assert(!validation.confirm(accessible, 'Manual'))
+const conflicting = { ...accessible, innerText: 'Câmbio Manual' }
+assert(!validation.confirm(conflicting, 'Automático'))
 const actionStart = content.indexOf('  function actionButton(')
 const actionEnd = content.indexOf('  function firePointerClick(', actionStart)
 assert(actionStart >= 0 && actionEnd > actionStart)
