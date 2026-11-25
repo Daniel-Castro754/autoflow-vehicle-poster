@@ -8,6 +8,7 @@ import {
   type VehicleInput,
 } from './description-generator.ts'
 import { generateVehicleHashtags } from './trending-hashtags.ts'
+import { autopilotDiagnostics } from './autopilot-diagnostics.ts'
 
 type Operation = 'manual_autopilot' | 'batch_descriptions'
 type Vehicle = {
@@ -240,6 +241,7 @@ function autopilotSnapshot(db: DatabaseSync, org: number) {
 
 export function prepareAutopilotPreview(db: DatabaseSync, org: number, user: number) {
   const current = autopilotSnapshot(db, org)
+  const diagnostics = autopilotDiagnostics(db, org)
   const candidates = current.candidates.slice(0, 20)
   const previewId =
     current.connected && candidates.length
@@ -250,6 +252,7 @@ export function prepareAutopilotPreview(db: DatabaseSync, org: number, user: num
     previewId,
     expiresInMinutes: 15,
     connectedProfiles: current.connected,
+    diagnostics,
     potentialVehicles: candidates.map((v) => ({
       id: v.id,
       title: v.year + ' ' + v.make + ' ' + v.model,
