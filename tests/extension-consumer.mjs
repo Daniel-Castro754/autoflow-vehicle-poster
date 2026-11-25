@@ -107,7 +107,11 @@ async function runConsumer(queue, network = {}, settings = {}) {
   const fetch = async (url, options = {}) => {
     requests.push({ url: String(url), options })
     if (String(url).includes('/extension/queue')) {
+      if (network.queueOffline) throw new Error('offline')
       return { ok: true, status: 200, json: async () => queue }
+    }
+    if (String(url).includes('/extension/presence')) {
+      return { ok: true, status: 200, json: async () => ({ ok: true }) }
     }
     if (String(url).includes('/prepare')) {
       return {
@@ -216,6 +220,7 @@ async function runConsumer(queue, network = {}, settings = {}) {
   )
   assert.equal(failed.stored.autoRun, false, 'The consumer must pause after a rejected dispatch')
   assert.equal(failed.stored.pendingJob?.jobId, 22, 'A reserved job must not be discarded')
+  assert.equal(failed.stored.autoRunManuallyPaused, true, 'Dispatch failure requires explicit resume')
   assert.match(failed.stored.lastManualLaunchError?.message || '', /Content script unavailable/)
 }
 
@@ -295,6 +300,30 @@ async function runConsumer(queue, network = {}, settings = {}) {
   )
   assert.equal(blocked.stored.autoRun, false)
   assert.equal(blocked.stored.facebookSession.ready, false)
+  assert.equal(blocked.stored.autoRunManuallyPaused, true)
+}
+{
+  const queue = { automation: { autonomousMode: true }, jobs: [{jobId:22,jobStatus:'pending'}] }
+  const blocked = await runConsumer(queue, { marketplaceReady:false, marketplaceBlocked:true })
+  blocked.listeners.startup()
+  blocked.listeners.alarm({ name:'autoflow-heartbeat' })
+  for(let i=0;i<30;i++) await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(blocked.stored.autoRun,false,'Startup and alarm cannot override login/challenge pause')
+  assert.equal(blocked.createdTabs.length,1)
+  assert.equal(blocked.requests.filter(r=>r.url.includes('/prepare')).length,0)
+}
+{
+  const network = {queueOffline:true}
+  const result = await runConsumer({ jobs:[{jobId:22,jobStatus:'pending'}] }, network)
+  assert.equal(result.stored.autoRun,true,'Network outage must not set a permanent pause')
+  assert.equal(result.createdTabs.length,0)
+  network.queueOffline=false
+  result.listeners.startup()
+  result.listeners.alarm({ name:'autoflow-heartbeat' })
+  for(let i=0;i<40;i++) await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(result.createdTabs.length,1,'Overlapping startup/alarm recover only once')
+  assert.equal(result.requests.filter(r=>r.url.includes('/prepare')).length,1)
+  assert.equal(result.requests.filter(r=>r.url.includes('/heartbeat')).length,0)
 }
 
 {

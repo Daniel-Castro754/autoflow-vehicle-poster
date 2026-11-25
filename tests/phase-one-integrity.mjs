@@ -198,6 +198,13 @@ try {
   } finally {
     other.close()
   }
+  // Recovery must preserve an explicit operator pause and hidden state.
+  db.prepare("UPDATE publication_jobs SET status='filling',paused=1,extension_visible=0,started_at=datetime('now','-60 minutes'),lease_expires_at=datetime('now','-1 minute'),publish_attempt_at=NULL,fill_report='',retry_count=0 WHERE id=?").run(firstJob.id)
+  await runHealthCheck(db, { autoRecover: true })
+  const preserved = db.prepare('SELECT status,paused,extension_visible visible FROM publication_jobs WHERE id=?').get(firstJob.id)
+  assert.equal(preserved.status,'pending')
+  assert.equal(preserved.paused,1)
+  assert.equal(preserved.visible,0)
   console.log('✓ Phase 1: independent jobs, daily capacity and stale lease fencing')
 } finally {
   db.close()
