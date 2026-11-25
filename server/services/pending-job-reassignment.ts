@@ -44,6 +44,7 @@ export function redistributeOfflinePendingJobs(
         AND COALESCE(j.fill_report,'')='' AND COALESCE(j.result_url,'')='' AND COALESCE(j.error_code,'')=''
         AND datetime(j.scheduled_at)<=datetime('now','-15 minutes')
         AND a.automation_paused=0 AND a.last_consumer_auto_run=1
+        AND (a.next_publication_allowed_at IS NULL OR datetime(a.next_publication_allowed_at)<=CURRENT_TIMESTAMP)
         AND datetime(a.last_seen_at)<=datetime('now','-15 minutes')
         AND v.status='Pronto' AND v.sold_at IS NULL
         AND (SELECT COUNT(*) FROM publication_job_events e
@@ -58,6 +59,9 @@ export function redistributeOfflinePendingJobs(
     ).all(org) as Candidate[]
     for (const job of candidates) {
       if (consumerState(db, org, job.accountId).state !== 'unknown') continue
+      // Offline reassignment is not a way around a limit or safety cooldown.
+      const sourceCapacity = profileCapacity(db, org, job.accountId)
+      if (sourceCapacity.blockedByDailyLimit || sourceCapacity.retryAfterSeconds > 0) continue
       const vehicle = db.prepare(
         `SELECT v.year,v.make,v.model,v.price,v.km,v.location,v.description,v.vehicle_type vehicleType,
         v.transmission,v.fuel_type fuelType,v.body_type bodyType,v.exterior_color exteriorColor,

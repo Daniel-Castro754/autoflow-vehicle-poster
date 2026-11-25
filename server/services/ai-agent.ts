@@ -74,6 +74,7 @@ export interface AutopilotResult {
     window: string
   }>
   message: string
+  transfers?: ReturnType<typeof redistributeOfflinePendingJobs>
 }
 
 export interface AgentCommandResult {
@@ -471,7 +472,7 @@ export async function runAutopilotPipeline(
     })
     const result = await planAutopilotJobs(db, organizationId, userId, automatic, ownsLease)
     return transfers.length
-      ? { ...result, message: result.message + ' Trabalhos redistribuídos: ' + transfers.length + '.' }
+      ? { ...result, message: result.message + ' Trabalhos redistribuídos: ' + transfers.length + '.', transfers }
       : result
   })
 }
