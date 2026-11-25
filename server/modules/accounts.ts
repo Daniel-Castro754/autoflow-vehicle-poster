@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
+import { consumerState } from '../services/execution-diagnostics.ts'
 
 // Shared account selection, independent of Facebook extension transport.
 
@@ -11,12 +12,22 @@ export interface AvailableAccount {
   todayCount: number
   dailyLimit: number
   score: number
+  pendingCount?: number
+  consumer?: string
+}
+
+export type RoutingMode = 'default' | 'autopilot_manual' | 'autopilot_recurring'
+
+export function consumerRoutingEligible(state: string, mode: RoutingMode) {
+  return mode === 'default' || state === 'enabled' ||
+    (mode === 'autopilot_manual' && state === 'unknown')
 }
 
 export function findBestAccountForVehicle(
   db: DatabaseSync,
   organizationId: number,
   vehicleId: number,
+  mode: RoutingMode = 'default',
 ): AvailableAccount | null {
   const settings = db
     .prepare('SELECT daily_limit dailyLimit FROM organization_settings WHERE organization_id = ?')
@@ -35,6 +46,8 @@ export function findBestAccountForVehicle(
             AND autoflow_day(j.created_at) = autoflow_day(CURRENT_TIMESTAMP)
             AND j.status != 'canceled'
         ), 0) todayCount,
+        (SELECT COUNT(*) FROM publication_jobs backlog WHERE backlog.organization_id=a.organization_id
+          AND backlog.social_account_id=a.id AND backlog.status IN ('pending','filling','error','awaiting_confirmation')) pendingCount,
         EXISTS (SELECT 1 FROM publication_jobs busy WHERE busy.organization_id=a.organization_id
           AND busy.social_account_id=a.id AND busy.vehicle_id=?
           AND busy.status IN ('pending','filling','error','awaiting_confirmation')) busy
@@ -53,6 +66,7 @@ export function findBestAccountForVehicle(
     todayCount: number
     profileDailyLimit: number
     busy: number
+    pendingCount: number
   }>
 
   if (!accounts.length) return null
@@ -65,6 +79,8 @@ export function findBestAccountForVehicle(
     if (acc.todayCount >= limit) continue
 
     if (acc.busy) continue
+    const consumer = consumerState(db, organizationId, acc.id).state
+    if (!consumerRoutingEligible(consumer, mode)) continue
 
     // Calcula score: menor volume hoje e maior recência ganham prioridade
     const capacityRemaining = limit - acc.todayCount
@@ -86,10 +102,21 @@ export function findBestAccountForVehicle(
       ...acc,
       dailyLimit: limit,
       score,
+      consumer,
     })
   }
 
   if (!eligible.length) return null
-  eligible.sort((a, b) => b.score - a.score)
+  eligible.sort((a, b) => {
+    if (mode !== 'default') {
+      // Prefer an explicitly active consumer, then balance all outstanding work,
+      // including jobs created on earlier dates. Keep deterministic tie breaking.
+      const active = Number(b.consumer === 'enabled') - Number(a.consumer === 'enabled')
+      if (active) return active
+      const backlog = (a.pendingCount ?? 0) - (b.pendingCount ?? 0)
+      if (backlog) return backlog
+    }
+    return b.score - a.score || a.id - b.id
+  })
   return eligible[0]
 }

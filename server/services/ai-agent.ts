@@ -12,7 +12,8 @@ import { generateVehicleHashtags } from './trending-hashtags.ts'
 import { calculateOptimalSchedule } from './smart-scheduler.ts'
 import { profileCapacity, profileLimits, lastProfileActivityAt } from './profile-capacity.ts'
 import { organizationScheduleHistory } from './schedule-history.ts'
-import { findBestAccountForVehicle } from '../modules/accounts.ts'
+import { consumerRoutingEligible, findBestAccountForVehicle } from '../modules/accounts.ts'
+import { consumerState } from './execution-diagnostics.ts'
 import { coordinateAutopilot, skippedAutopilot } from './autopilot-coordinator.ts'
 import { previewGroupCuration } from './group-curation-worker.ts'
 import { publicationDuplicateRisk, publicationReadinessIssues } from './publication-policy.ts'
@@ -480,6 +481,8 @@ async function planAutopilotJobs(
     )
     .get(organizationId) as { dailyLimit?: number; executionIntervalMinutes?: number } | undefined
   const dailyLimit = Math.max(1, Number(settings?.dailyLimit) || 10)
+  const routingMode = automatic ? 'autopilot_recurring' : 'autopilot_manual'
+  const eligibleConsumer = (id: number) => consumerRoutingEligible(consumerState(db, organizationId, id).state, routingMode)
   const accountCapacity = db
     .prepare(
       `SELECT a.id,MAX(0,MIN(COALESCE(a.daily_limit_override,?),?)-COALESCE(SUM(CASE WHEN autoflow_day(j.created_at)=autoflow_day(CURRENT_TIMESTAMP) AND j.status!='canceled' THEN 1 ELSE 0 END),0)) remaining
@@ -488,7 +491,7 @@ async function planAutopilotJobs(
       AND a.last_seen_at IS NOT NULL AND datetime(a.last_seen_at)>=datetime('now','-5 minutes') GROUP BY a.id`,
     )
     .all(dailyLimit, dailyLimit, organizationId) as Array<{ id: number; remaining: number }>
-  const remainingCapacity = accountCapacity.reduce(
+  const remainingCapacity = accountCapacity.filter(account => eligibleConsumer(account.id)).reduce(
     (total, account) => total + Math.max(0, Number(account.remaining) || 0),
     0,
   )
@@ -507,15 +510,17 @@ async function planAutopilotJobs(
     status: string
   }>
 
-  if (!accounts.length) {
+  const eligibleAccounts = accounts.filter(account => eligibleConsumer(account.id))
+  if (!eligibleAccounts.length) {
     return {
-      ok: false,
+      ok: true,
       processedCount: 0,
       jobsCreated: 0,
       descriptionsOptimized: 0,
       assignments: [],
-      message:
-        'Não há perfis Brave ativos com comunicação recente. Abra a extensão do perfil e verifique a conexão antes de rodar o piloto automático.',
+      message: automatic
+        ? 'Nenhum perfil conectado confirmou consumo automático ativo. A rodada não criou trabalhos.'
+        : 'Nenhum perfil conectado elegível: confira a conexão e o estado do consumo na extensão.',
     }
   }
 
@@ -574,7 +579,7 @@ async function planAutopilotJobs(
       (vehicle) => publicationReadinessIssues(vehicle, vehicle.imageCount, false).length === 0,
     )
     .filter((vehicle) => !publicationDuplicateRisk(db, organizationId, vehicle.id))
-    .filter((vehicle) => findBestAccountForVehicle(db, organizationId, vehicle.id) !== null)
+    .filter((vehicle) => findBestAccountForVehicle(db, organizationId, vehicle.id, routingMode) !== null)
     .slice(0, automatic ? Math.min(20, remainingCapacity) : remainingCapacity)
   if (!eligibleVehicles.length) {
     return {
@@ -638,6 +643,8 @@ async function planAutopilotJobs(
         )
       }
     }
+    // Refresh all connected accounts' pacing; the final selection rechecks
+    // consumer state and capacity inside the transaction.
     for (const account of accounts) {
       const lastActivity = lastProfileActivityAt(db, organizationId, account.id)
       const pacing = profileCapacity(db, organizationId, account.id)
@@ -708,7 +715,7 @@ async function planAutopilotJobs(
         )
         .get(organizationId, vehicle.id)
       if (active) continue
-      const best = findBestAccountForVehicle(db, organizationId, vehicle.id)
+      const best = findBestAccountForVehicle(db, organizationId, vehicle.id, routingMode)
       if (!best) continue
       const targetAccountId = best.id
       const targetAccountLabel = best.label
@@ -774,6 +781,10 @@ async function planAutopilotJobs(
           window: optimal.window,
           automated: true,
           trigger: automatic ? 'recurring' : 'manual',
+          routingMode,
+          consumer: best.consumer,
+          pendingCount: best.pendingCount,
+          queuedToday: best.todayCount,
         }),
       )
 

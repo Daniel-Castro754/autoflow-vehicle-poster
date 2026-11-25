@@ -18,6 +18,7 @@ import { calculateOptimalSchedule } from '../server/services/smart-scheduler.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { curateMarketplaceGroups, evaluateGroupScore } from '../server/services/group-curator.ts'
 import { findBestAccountForVehicle } from '../server/services/session-manager.ts'
+import { recordConsumerState } from '../server/services/execution-diagnostics.ts'
 import { runHealthCheck } from '../server/services/health-monitor.ts'
 import { parseVehicleRawText } from '../server/services/ai-agent.ts'
 import { isRetryableExtensionFailureCode } from '../server/services/publication-policy.ts'
@@ -267,6 +268,25 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
 
   const bestAccount = findBestAccountForVehicle(memDb, 1, 50)
   assert.equal(bestAccount?.id, 2, 'Deve selecionar perfil 2 com menor utilização hoje')
+  assert.equal(findBestAccountForVehicle(memDb, 1, 50, 'autopilot_recurring'), null, 'Recorrente aguarda sinal ativo')
+  assert.equal(findBestAccountForVehicle(memDb, 1, 50, 'autopilot_manual')?.id, 2, 'Prévia manual preserva compatibilidade com extensão antiga')
+  recordConsumerState(memDb, 1, 1, true)
+  recordConsumerState(memDb, 1, 2, false)
+  assert.equal(findBestAccountForVehicle(memDb, 1, 50, 'autopilot_recurring')?.id, 1)
+  assert.equal(findBestAccountForVehicle(memDb, 1, 50, 'autopilot_manual')?.id, 1)
+  assert.equal(findBestAccountForVehicle(memDb, 1, 50)?.id, 2, 'Roteamento manual existente não mudou')
+  recordConsumerState(memDb, 1, 2, true)
+  assert.equal(findBestAccountForVehicle(memDb, 1, 50, 'autopilot_recurring')?.id, 2)
+  memDb.exec("INSERT INTO publication_jobs VALUES (106,1,2,996,'pending',datetime('now','-1 day'))")
+  assert.equal(findBestAccountForVehicle(memDb, 1, 50, 'autopilot_recurring')?.id, 1, 'Considera fila de dias anteriores')
+  memDb.exec("UPDATE social_accounts SET daily_limit_override=5 WHERE id=1")
+  assert.equal(findBestAccountForVehicle(memDb, 1, 50, 'autopilot_recurring')?.id, 2, 'Não ultrapassa limite')
+  recordConsumerState(memDb, 1, 2, true, Date.now()-301000)
+  assert.equal(findBestAccountForVehicle(memDb, 1, 50, 'autopilot_recurring'), null, 'Sinal expirado não autoriza nova atribuição')
+  assert.equal(findBestAccountForVehicle(memDb, 1, 50, 'autopilot_manual')?.id, 2, 'Manual pode agendar com sinal desconhecido')
+  recordConsumerState(memDb, 1, 2, false)
+  assert.equal(findBestAccountForVehicle(memDb, 1, 50, 'autopilot_manual'), null, 'Pausado não recebe novos trabalhos do piloto')
+  assert.equal(memDb.prepare('SELECT COUNT(*) count FROM publication_jobs').get().count, 6, 'Seleção não modifica trabalhos existentes')
   console.log('✓ Roteador de contas e balanceamento autônomo validado.')
 }
 

@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { findBestAccountForVehicle } from '../modules/accounts.ts'
+import { consumerRoutingEligible, findBestAccountForVehicle } from '../modules/accounts.ts'
 import { publicationDuplicateRisk, publicationReadinessIssues } from './publication-policy.ts'
 import { profileCapacity } from './profile-capacity.ts'
 import { publicationReviewKind } from './publication-evidence.ts'
@@ -20,15 +20,21 @@ export function autopilotDiagnostics(db: DatabaseSync, org: number, automatic = 
     CASE WHEN last_seen_at IS NOT NULL AND datetime(last_seen_at)>=datetime('now','-5 minutes') THEN 1 ELSE 0 END recent
     FROM social_accounts WHERE organization_id=? ORDER BY id`,
   ).all(org) as Array<{ id: number; label: string; status: string; paused: number; recent: number }>
+  const routingMode = automatic ? 'autopilot_recurring' : 'autopilot_manual'
   const profiles = accounts.map((a) => {
     const c = profileCapacity(db, org, a.id)
     const reasons: Reason[] = []
     if (a.status !== 'connected') reasons.push({ code: 'profile_disconnected', message: 'Perfil desconectado.' })
     if (a.paused) reasons.push({ code: 'profile_paused', message: 'Automação pausada no servidor.' })
     if (!a.recent) reasons.push({ code: 'profile_stale', message: 'Sem comunicação nos últimos cinco minutos.' })
+    const consumer = consumerState(db, org, a.id)
+    if (!consumerRoutingEligible(consumer.state, routingMode)) reasons.push({
+      code: consumer.state === 'paused' ? 'consumer_paused' : 'consumer_unknown',
+      message: consumer.state === 'paused' ? 'Consumo pausado na extensão.' : 'Aguardando confirmação recente de consumo ativo.',
+    })
     if (c.queuedToday >= c.dailyLimit) reasons.push({ code: 'queue_daily_limit', message: 'Limite diário de agendamentos atingido.' })
     return { id: a.id, label: a.label, status: a.status, queuedToday: c.queuedToday, dailyLimit: c.dailyLimit,
-      used: c.used, nextAllowedAt: c.nextAllowedAt, consumer: consumerState(db, org, a.id), canSchedule: reasons.length === 0, reasons }
+      used: c.used, nextAllowedAt: c.nextAllowedAt, consumer, canSchedule: reasons.length === 0, reasons }
   })
   const stock = db.prepare(
     `SELECT v.id,v.year,v.make,v.model,v.price,v.km,v.status,v.description,v.sold_at soldAt,
@@ -62,7 +68,7 @@ export function autopilotDiagnostics(db: DatabaseSync, org: number, automatic = 
       if (missing.length) executionReasons.push({ code: 'incomplete_vehicle', message: 'Cadastro: ' + missing.join(', ') })
       const duplicate = publicationDuplicateRisk(db, org, v.id)
       if (duplicate) executionReasons.push({ code: duplicate.type, message: duplicate.message })
-      if (!findBestAccountForVehicle(db, org, v.id)) executionReasons.push({ code: 'no_eligible_profile', message: 'Nenhum perfil atende às regras atuais de agendamento.' })
+      if (!findBestAccountForVehicle(db, org, v.id, routingMode)) executionReasons.push({ code: 'no_eligible_profile', message: 'Nenhum perfil atende às regras atuais de agendamento.' })
     }
     return { id: v.id, title: v.year + ' ' + v.make + ' ' + v.model, status: v.status, photoCount: v.imageCount,
       previewCandidate: !previewReasons.length, previewReasons, executionReasons, blockingJobs }
