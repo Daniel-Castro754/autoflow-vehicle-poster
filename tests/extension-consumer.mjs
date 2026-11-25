@@ -132,6 +132,7 @@ async function runConsumer(queue, network = {}, settings = {}) {
     if (String(url).includes('/fill-result')) {
       const outcome = network.fillResults?.shift()
       if (outcome instanceof Error) throw outcome
+      if(outcome===409)return {ok:false,status:409,json:async()=>({error:'Conflito',conflictCode:'lease_expired'})}
       return { ok: true, status: 200, json: async () => ({ ok: true, status: 'completed' }) }
     }
     if (String(url).includes('/publish-check')) {
@@ -460,4 +461,34 @@ console.log('✓ Fechamento de aba preserva evidências e resultados; alarme ún
     !result.requests.some((request) => request.url.includes('/heartbeat')),
     'A liveness probe is not a lease heartbeat',
   )
+}
+
+{
+  const queue={automation:{autonomousMode:true},jobs:[{jobId:22,jobStatus:'pending'}]}
+  const result=await runConsumer(queue,{fillResults:[409]})
+  const job=result.stored.pendingJob
+  result.stored.pendingPublishes={22:{...job,report:{publishAttempted:true}}}
+  const response=await new Promise(resolve=>result.listeners.message({
+    type:'AUTOFLOW_FILL_RESULT',jobId:22,document:job.document,report:{published:true,publishAttempted:true},
+  },{tab:{id:job.tabId},frameId:0,url:'https://www.facebook.com'+job.document,documentId:job.documentId},resolve))
+  assert.equal(response.ok,false)
+  const conflict=result.stored.pendingResults['22:lease-22']
+  assert(conflict.rejectedAt)
+  assert.equal(conflict.conflictCode,'lease_expired')
+  assert.equal(conflict.payload.published,true)
+  assert(result.stored.pendingPublishes[22])
+  assert.equal(result.stored.autoRun,false)
+  assert.equal(result.stored.autoRunManuallyPaused,true)
+  conflict.lastAttemptAt=0
+  result.listeners.startup()
+  result.listeners.alarm({name:'autoflow-heartbeat'})
+  for(let i=0;i<40;i++)await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(result.requests.filter(r=>r.url.includes('/fill-result')).length,1)
+  assert.equal(result.createdTabs.length,1)
+  result.stored.autoRun=true
+  result.stored.autoRunManuallyPaused=false
+  await new Promise(resolve=>result.listeners.message({type:'AUTOFLOW_RUN_QUEUE'},{},resolve))
+  assert.equal(result.createdTabs.length,1,'Explicit consumer resume cannot replay quarantined job')
+  assert(result.stored.pendingResults['22:lease-22'])
+  console.log('✓ HTTP 409 preserves local evidence and excludes the quarantined job.')
 }

@@ -7,7 +7,7 @@ const eventGroups = {
   scheduling: ['autopilot_scheduled','created','scheduled','smart_scheduled','batch_scheduled','schedule_removed'],
   recovery: ['stalled_recovered','auto_retry_scheduled','retry_requested'],
   transfer: ['reassigned'],
-  attention: ['fill_error','stalled_exhausted','stalled_publish_ambiguous','publish_result_unknown','duplicate_blocked','selector_circuit_breaker_opened','job_nearly_stuck','filled_waiting_confirmation','paused','hidden_from_extension'],
+  attention: ['fill_error','stalled_exhausted','stalled_publish_ambiguous','publish_result_unknown','duplicate_blocked','selector_circuit_breaker_opened','job_nearly_stuck','filled_waiting_confirmation','fill_result_conflict','paused','hidden_from_extension'],
   execution: ['filling_started','auto_published','late_publish_confirmed','confirmed_published','canceled','marked_removed','resumed','shown_in_extension'],
 } as const
 type Category = keyof typeof eventGroups
@@ -67,7 +67,10 @@ export function operationalMonitor(db: DatabaseSync, org: number, filters: Retur
         e.from_account_id fromAccountId,e.to_account_id toAccountId,
         CASE WHEN json_valid(e.details) THEN CASE WHEN json_type(e.details,'$.accountId')='integer'
           THEN json_extract(e.details,'$.accountId') END END eventAccountId,
-        CASE WHEN json_valid(e.details) THEN (json_extract(e.details,'$.automatic')=1 OR json_extract(e.details,'$.trigger')='recurring') ELSE 0 END automatic
+        CASE WHEN json_valid(e.details) THEN (json_extract(e.details,'$.automatic')=1 OR json_extract(e.details,'$.trigger')='recurring') ELSE 0 END automatic,
+        CASE WHEN e.event_type='fill_result_conflict' AND json_valid(e.details) THEN CASE
+          WHEN json_extract(e.details,'$.conflictCode') IN ('lease_mismatch','identity_mismatch','lease_expired','status_changed','result_conflict')
+          THEN json_extract(e.details,'$.conflictCode') END END conflictCode
       FROM publication_job_events e
       JOIN publication_jobs j ON j.id=e.publication_job_id AND j.organization_id=e.organization_id
       JOIN vehicles v ON v.id=j.vehicle_id AND v.organization_id=j.organization_id
@@ -75,7 +78,7 @@ export function operationalMonitor(db: DatabaseSync, org: number, filters: Retur
         AND (?=0 OR e.id<?) AND (?=0 OR j.vehicle_id=?)
         AND e.event_type IN (${types.map(()=>'?').join(',')})
     )
-    SELECT t.id,t.eventType,t.createdAt,t.jobId,t.vehicleId,t.title,t.automatic,
+    SELECT t.id,t.eventType,t.createdAt,t.jobId,t.vehicleId,t.title,t.automatic,t.conflictCode,
       a.id accountId,a.label accountLabel,src.id fromAccountId,src.label fromLabel,dst.id toAccountId,dst.label toLabel
     FROM timeline t
     LEFT JOIN social_accounts a ON a.id=t.eventAccountId AND a.organization_id=?

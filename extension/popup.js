@@ -375,15 +375,26 @@ async function showConsumerDiagnostic() {
   const history = await localDiagnostics()
   if (accountId !== activeAccountId) return
   const last = history.at(-1)
-  $('consumerDiagnostic').textContent = last
-    ? (consumerDiagnosticLabels[last.code] || last.code) + ' · ' + new Date(last.at).toLocaleString('pt-BR')
-    : 'Nenhuma verificação registrada.'
+  const {pendingResults} = await chrome.storage.local.get('pendingResults')
+  if (accountId !== activeAccountId) return
+  const conflicts = Object.values(pendingResults || {}).filter(entry=>entry.rejectedAt && (!entry.accountId || entry.accountId===accountId))
+  $('consumerDiagnostic').textContent = conflicts.length
+    ? 'Resultado(s) em conflito: '+conflicts.map(entry=>'#'+Number(entry.jobId)).join(', ')+'. Evidências preservadas. Confira Publicações e o Facebook.'
+    : last
+      ? (consumerDiagnosticLabels[last.code] || last.code) + ' · ' + new Date(last.at).toLocaleString('pt-BR')
+      : 'Nenhuma verificação registrada.'
 }
 $('exportDiagnostics').onclick = async () => {
   const accountId = activeAccountId
   const history = await localDiagnostics()
   if (!accountId || accountId !== activeAccountId) return
-  const url = URL.createObjectURL(new Blob([JSON.stringify(history, null, 2)], { type: 'application/json' }))
+  const {pendingResults} = await chrome.storage.local.get('pendingResults')
+  if(accountId!==activeAccountId)return
+  const conflicts=Object.values(pendingResults||{}).filter(entry=>entry.rejectedAt && (!entry.accountId || entry.accountId===accountId)).map(entry=>({
+    jobId:entry.jobId,accountId:entry.accountId||null,rejectedAt:entry.rejectedAt,conflictCode:entry.conflictCode,
+    reportedPublished:entry.payload?.published===true,reportedPublishAttempted:entry.payload?.publishAttempted===true,
+  }))
+  const url = URL.createObjectURL(new Blob([JSON.stringify({history,conflicts}, null, 2)], { type: 'application/json' }))
   const link = document.createElement('a')
   link.href = url
   link.download = 'autoflow-perfil-' + accountId + '-diagnostico.json'

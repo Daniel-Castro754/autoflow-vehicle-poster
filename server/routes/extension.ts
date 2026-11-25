@@ -825,7 +825,20 @@ export async function handleExtensionRoute(
       publicationMayExist(job) &&
       job.lastLeaseToken === incomingLeaseToken &&
       identityMatches
-    if (job.lastLeaseToken === incomingLeaseToken && identityMatches && !latePublished) {
+    // Bounded audit signal for an authorized job, never proof of publication.
+    const rejectResult = (conflictCode: string) => {
+      const recorded = db.prepare(
+        "SELECT 1 FROM publication_job_events WHERE organization_id=? AND publication_job_id=? AND event_type='fill_result_conflict' AND json_valid(details) AND json_extract(details,'$.conflictCode')=? LIMIT 1",
+      ).get(auth.organizationId,job.id,conflictCode)
+      if (!recorded) recordJobEvent(auth.organizationId,job.id,'fill_result_conflict',null,{
+        conflictCode,accountId:job.accountId,jobStatus:job.status,
+        reportedPublished:b.published===true,reportedPublishAttempted:b.publishAttempted===true,
+      })
+      return send(res,409,{error:'Resultado em conflito. Preserve as evidências e revise o trabalho em Publicações.',conflictCode})
+    }
+    if (incomingLeaseToken && job.lastLeaseToken === incomingLeaseToken && identityMatches && !latePublished) {
+      if (b.published === true && !(previousReport.published === true && ['completed','removed'].includes(job.status)))
+        return rejectResult('result_conflict')
       return send(res, 200, { ok: true, status: job.status, idempotent: true })
     }
     // A venda interrompe a execução, mas conserva a identidade para reconciliar um resultado tardio.
@@ -841,10 +854,10 @@ export async function handleExtensionRoute(
       identityMatches &&
       Boolean(job.leaseExpiresAt) &&
       Date.parse(job.leaseExpiresAt!.replace(' ', 'T') + 'Z') > Date.now()
-    if (!activeLease && !soldInterrupted && !latePublished)
-      return send(res, 409, {
-        error: 'A execução perdeu o bloqueio exclusivo. Reabra o trabalho pela extensão.',
-      })
+    if (!incomingLeaseToken || (!activeLease && !soldInterrupted && !latePublished)) {
+      const knownLease = Boolean(incomingLeaseToken) && (job.leaseToken===incomingLeaseToken || job.lastLeaseToken===incomingLeaseToken)
+      return rejectResult(!knownLease?'lease_mismatch':!identityMatches?'identity_mismatch':job.status==='filling'?'lease_expired':'status_changed')
+    }
     const diagnostics = sanitizeExecutionDiagnostics(b.diagnostics)
     if (diagnostics.length) {
       recordJobEvent(auth.organizationId, job.id, 'execution_diagnostics', null, {
