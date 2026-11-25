@@ -9,7 +9,7 @@ type Profile = {
 }
 type Review = {id:number;vehicleId:number;accountId:number|null;title:string;status:string;reviewKind:string|null;paused:boolean;visible:boolean}
 type Event = {id:number;jobId:number;vehicleId:number;title:string;eventType:string;createdAt:string;accountLabel:string|null;fromLabel:string|null;toLabel:string|null;automatic:number|null}
-type Snapshot = {timestamp:string;profiles:Profile[];reviews:Review[];reviewCount:number;activity:Event[];nextBeforeId:number|null}
+type Snapshot = {timestamp:string;filters:{accountId:number;vehicleId:number;hours:number;category:string;beforeId:number;limit:number};profiles:Profile[];reviews:Review[];reviewCount:number;activity:Event[];nextBeforeId:number|null}
 const labels:Record<string,string> = {
  offline:'Sem sinal recente',server_paused:'Pausa no servidor',consumer_paused:'Consumo pausado',consumer_unknown:'Consumo sem sinal recente',daily_limit:'Limite de execuções',queue_daily_limit:'Limite de agendamentos',operational_interval:'Intervalo operacional',
  enabled:'Ativo',paused:'Pausado',unknown:'Desconhecido',
@@ -55,7 +55,7 @@ export function OperationalMonitor({api}:{api:<T>(path:string)=>Promise<T>}) {
     link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
   }
   return <article className="module-card operational-health">
-    <div className="module-head"><div><h2>Monitoramento operacional</h2><span>Último sinal e decisões da extensão; histórico de trabalhos</span></div></div>
+    <div className="module-head"><div><h2>Monitoramento operacional</h2><span>Último sinal e decisões da extensão; histórico selecionado de trabalhos</span></div></div>
     <p className="health-note">Sinal recente não comprova login no Facebook. Eventos antigos sem perfil registrado não são atribuídos ao perfil atual. Horários de Brasília.</p>
     <div className="intervention-filter">
       <label>Perfil <select value={account} onChange={e=>{setAccount(e.target.value);reset()}}><option value="">Todos</option>{data?.profiles.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}{account&&!data&&<option value={account}>#{account}</option>}</select></label>
@@ -66,16 +66,17 @@ export function OperationalMonitor({api}:{api:<T>(path:string)=>Promise<T>}) {
       <button type="button" disabled={!data||Boolean(error)} onClick={download}>Exportar página JSON</button>
     </div>
     {error&&<p role="status" className="health-error">{error}</p>}
+    {!data&&!error&&<p role="status">Consultando monitoramento…</p>}
     {data&&<>
       <p className="health-note">Atualizado: {date(data.timestamp)} · {cursor?'Página anterior (sem atualização automática)':'Atualização a cada 30 segundos'}</p>
       <div className="health-table-wrap"><table className="health-table"><caption>Perfis e capacidade diária — todos os perfis</caption><thead><tr><th>Perfil</th><th>Conexão / consumo</th><th>Execuções / agendamentos</th><th>Fila pendente</th><th>Última decisão / bloqueios</th></tr></thead><tbody>{data.profiles.map(p=><tr key={p.id}>
       <th scope="row">{p.label}</th><td>{p.online?'Sinal recente':'Sem sinal recente'} · {label(p.consumer.state)}<small className="job-report">{date(p.lastSeenAt)}</small></td>
       <td>{p.capacity.used}/{p.capacity.dailyLimit} executadas · {p.capacity.queuedToday} criadas<small className="job-report">Próximo permitido: {date(p.capacity.nextAllowedAt)}</small></td>
       <td>{p.queue.pending} ({p.queue.restricted} pausadas/ocultas)</td>
-      <td>{p.decision?label(p.decision.code)+(p.decision.jobId?' · #'+p.decision.jobId:'')+(p.decision.httpStatus?' · HTTP '+p.decision.httpStatus:''):'Sem decisão recente'}<small className="job-report">{p.reasons.map(label).join(' · ')||'Sem bloqueio detectado'}</small></td>
+      <td>{p.decision?label(p.decision.code)+(p.decision.jobId?' · #'+p.decision.jobId:'')+(p.decision.httpStatus?' · HTTP '+p.decision.httpStatus:''):'Sem decisão recente'}<small className="job-report">{p.reasons.map(label).join(' · ')||'Sem restrição de perfil detectada'}</small></td>
       </tr>)}</tbody></table></div>
       <div className="health-table-wrap"><table className="health-table"><caption>Trabalhos para revisão — {data.reviews.length} de {data.reviewCount} (estado atual, independente do período)</caption><thead><tr><th>Trabalho</th><th>Veículo</th><th>Perfil</th><th>Motivo</th></tr></thead><tbody>{data.reviews.map(j=><tr key={j.id}><td>#{j.id}</td><td>#{j.vehicleId} · {j.title}</td><td>{data.profiles.find(p=>p.id===j.accountId)?.label||'—'}</td><td>{label(j.reviewKind||j.status)}{j.paused?' · pausado':''}{!j.visible?' · oculto':''}</td></tr>)}</tbody></table></div>
-      <div className="health-table-wrap"><table className="health-table"><caption>Histórico filtrado — {data.activity.length} eventos</caption><thead><tr><th>Horário</th><th>Trabalho / veículo</th><th>Evento</th><th>Perfil registrado</th></tr></thead><tbody>{data.activity.map(e=><tr key={e.id}><td>{date(e.createdAt)}</td><td>#{e.jobId} · #{e.vehicleId} {e.title}</td><td>{label(e.eventType)}{e.automatic?' · automático':''}</td><td>{e.fromLabel||e.toLabel?(e.fromLabel||'—')+' → '+(e.toLabel||'—'):e.accountLabel||'Não registrado'}</td></tr>)}</tbody></table></div>
+      <div className="health-table-wrap"><table className="health-table"><caption>Histórico filtrado — {data.activity.length} eventos (tipos operacionais selecionados)</caption><thead><tr><th>Horário</th><th>Trabalho / veículo</th><th>Evento</th><th>Perfil registrado</th></tr></thead><tbody>{data.activity.map(e=><tr key={e.id}><td>{date(e.createdAt)}</td><td>#{e.jobId} · #{e.vehicleId} {e.title}</td><td>{label(e.eventType)}{e.automatic?' · automático':''}</td><td>{e.fromLabel||e.toLabel?(e.fromLabel||'—')+' → '+(e.toLabel||'—'):e.accountLabel||'Não registrado'}</td></tr>)}</tbody></table></div>
       {!data.activity.length&&<p className="health-note">Sem eventos para os filtros selecionados.</p>}
       <div className="intervention-filter"><button type="button" disabled={!cursor} onClick={()=>{setCursor(null);setData(null)}}>Mais recentes</button><button type="button" disabled={!data.nextBeforeId} onClick={()=>{setCursor(data.nextBeforeId);setData(null)}}>Eventos anteriores</button></div>
     </>}
