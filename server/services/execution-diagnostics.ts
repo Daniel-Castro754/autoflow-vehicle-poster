@@ -5,7 +5,7 @@ const executionCodes = new Set([
   'photo_identity_unverified', 'photo_previous_pending', 'photo_input_missing',
   'photo_address_rejected', 'photo_download_failed', 'photo_downloaded',
   'photo_count_unverified', 'photo_accepted', 'photo_accept_timeout', 'photos_retry',
-  'advanced', 'advance_failed', 'groups_checked', 'publication_confirmed',
+  'advanced', 'advance_failed', 'groups_checked', 'publication_confirmed', 'transmission_checked',
   'publication_uncertain', 'publication_not_clicked', 'form_finished',
 ])
 const consumerCodes = new Set([
@@ -31,6 +31,7 @@ export function sanitizeExecutionDiagnostics(value: unknown) {
   return value.slice(0, 100)
     .map((entry) => sanitizeEntry(entry, executionCodes, {
       elapsedMs: 86400000, index: 20, count: 100, expected: 100, httpStatus: 599,
+      expectedKind: 2, observedKind: 3, controlFound: 1, matched: 1,
     }))
     .filter((entry) => entry !== null)
 }

@@ -347,46 +347,132 @@
     return scrollable.scrollTop !== before
   }
 
+  const transmissionSelector =
+    'select,[role="combobox"],[aria-haspopup="listbox"],input[aria-autocomplete]'
+  const transmissionLabelPrefix =
+    /^(?:(?:tipo de |tipo da |type of )?(?:cambio|transmissao|transmission type|transmission|transmision))(?: |$)/
+
   function transmissionKind(value) {
-    const text = normalize(value).replace(/^(?:tipo de )?(?:cambio|transmissao|transmission|transmision) /, '')
-    if (['automatico', 'automatica', 'automatic', 'automatic transmission'].includes(text)) return 'automatic'
+    let text = normalize(value)
+    // The accessible name and selected value may both repeat the field label.
+    text = text.replace(/(?: obrigatorio| required| opcional| optional)$/, '')
+    while (transmissionLabelPrefix.test(text)) text = text.replace(transmissionLabelPrefix, '')
+    if (['automatico', 'automatica', 'automatic', 'automatic transmission'].includes(text))
+      return 'automatic'
     if (['manual', 'manual transmission'].includes(text)) return 'manual'
     return ''
   }
 
-  function transmissionConfirmed(control, value) {
-    const wanted = transmissionKind(value)
-    if (!wanted || !control) return false
-    const evidence =
-      control instanceof HTMLSelectElement
-        ? [control.selectedOptions[0]?.textContent || control.value]
-        : control instanceof HTMLInputElement
-          ? [control.value]
-          : [
-              control.getAttribute('aria-valuetext'),
-              control.getAttribute('data-value'),
-              control.innerText,
-              control.textContent,
-            ]
-    const recognized = evidence.map(transmissionKind).filter(Boolean)
-    // Only the actual labeled form control is evidence, not the preview or
-    // the mere existence of a matching option. Contradictory evidence fails.
-    return recognized.length > 0 && recognized.every((kind) => kind === wanted)
+  function transmissionLabel(value) {
+    const text = normalize(value).replace(/(?: obrigatorio| required| opcional| optional)$/, '')
+    return text === 'transmissiontype' ||
+      (transmissionLabelPrefix.test(text) &&
+        (!text.replace(transmissionLabelPrefix, '') || Boolean(transmissionKind(text))))
   }
 
-  async function confirmTransmission(labels, value, selector) {
+  function transmissionLabelReferences(control) {
+    return String(control.getAttribute?.('aria-labelledby') || '')
+      .split(/\s+/).filter(Boolean)
+      .map(id => document.getElementById(id)?.textContent || '')
+  }
+
+  function findTransmissionControl() {
+    const root = rootScope()
+    const controls = [...root.querySelectorAll(transmissionSelector)].filter(visible)
+    const directlyLabeled = controls.filter(control => [
+      control.getAttribute('aria-label'),
+      control.getAttribute('name'),
+      ...(control.labels ? [...control.labels].map(label => label.textContent) : []),
+      ...transmissionLabelReferences(control),
+    ].some(transmissionLabel))
+    if (directlyLabeled.length) return directlyLabeled.length === 1 ? directlyLabeled[0] : null
+    // A compact field wrapper with one control and an exact label is evidence.
+    // Do not use a label from a distant preview or nearest-control geometry.
+    const candidates = controls.filter(control => {
+      let node = control
+      for (let depth = 0; node && node !== root && depth < 4; depth++, node = node.parentElement) {
+        const contained = controls.filter(item => node.contains(item))
+        if (contained.length !== 1) break
+        const labels = [...node.querySelectorAll('label,span,div')].filter(label =>
+          visible(label) && !label.closest('[role="option"],[role="listbox"],[aria-hidden="true"]') &&
+          transmissionLabel(label.textContent),
+        )
+        if (labels.length) return true
+      }
+      return false
+    })
+    return candidates.length === 1 ? candidates[0] : null
+  }
+
+  function transmissionObservation(control) {
+    if (!control || control.getAttribute?.('aria-expanded') === 'true') return ''
+    let evidence
+    if (control instanceof HTMLSelectElement) {
+      const selected = [...(control.selectedOptions || [])]
+      if (selected.length !== 1) return ''
+      evidence = [selected[0].textContent, selected[0].value]
+    } else if (control instanceof HTMLInputElement) {
+      // Typed text alone in an editable autocomplete is not a selection.
+      const committed = control.readOnly || control.getAttribute('aria-readonly') === 'true'
+      if (!committed) return ''
+      evidence = [control.value, control.getAttribute('aria-valuetext')]
+    } else {
+      // An open dropdown or option list is not a selected value.
+      if (control.querySelector?.('[role="option"],[role="listbox"]')) return ''
+      evidence = [
+        control.getAttribute('aria-valuetext'),
+        control.getAttribute('data-value'),
+        control.getAttribute('aria-label'),
+        control.innerText,
+      ]
+      // Avoid using hidden textContent to establish a positive result.
+      // Still reject contradictory content when both values are present.
+      if (!control.innerText) return ''
+    }
+    const recognized = new Set(evidence.map(transmissionKind).filter(Boolean))
+    // Multiple choices, or an explicit conflicting value, must fail closed.
+    for (const value of evidence) {
+      const text = normalize(value)
+      if (/\b(?:automatico|automatica|automatic)\b/.test(text) && /\bmanual\b/.test(text))
+        return 'conflict'
+    }
+    if (recognized.size > 1) return 'conflict'
+    return [...recognized][0] || ''
+  }
+
+  function transmissionConfirmed(control, value) {
+    const wanted = transmissionKind(value)
+    return Boolean(wanted && transmissionObservation(control) === wanted)
+  }
+
+  async function confirmTransmission(_labels, value, _selector) {
     return Boolean(await waitForDom(() => {
-      const control = findField(labels, selector)
+      const control = findTransmissionControl()
       return control && transmissionConfirmed(control, value)
     }, 2200))
   }
 
+  async function waitTransmissionControl() {
+    return waitForDom(findTransmissionControl, 6000)
+  }
+
+  function transmissionOptions(trigger) {
+    const id = trigger.getAttribute('aria-controls') || trigger.getAttribute('aria-owns')
+    const controlled = id && document.getElementById(id)
+    const roots = controlled
+      ? [controlled].filter(visible)
+      : trigger.getAttribute('aria-expanded') === 'true'
+        ? [...document.querySelectorAll('[role="listbox"],[role="menu"]')].filter(visible)
+        : []
+    if (roots.length !== 1) return []
+    return [...roots[0].querySelectorAll('[role="option"],[role="menuitemradio"],[role="menuitem"]')].filter(visible)
+  }
+
   async function selectCustom(labels, value, { strictTransmission = false } = {}) {
     if (value === undefined || value === null || value === '') return false
-    const trigger = await waitField(
-      labels,
-      'select,[role="combobox"],[aria-haspopup="listbox"],input[aria-autocomplete]',
-    )
+    const trigger = strictTransmission
+      ? await waitTransmissionControl()
+      : await waitField(labels, transmissionSelector)
     if (!trigger) {
       lastFieldNotFound = true
       return false
@@ -396,7 +482,9 @@
     if (strictTransmission && transmissionConfirmed(trigger, value)) return true
     if (trigger instanceof HTMLSelectElement) {
       const option = [...trigger.options].find((item) =>
-        wanted.some((candidate) => fuzzyMatch(item.textContent, candidate)),
+        strictTransmission
+          ? Boolean(transmissionKind(value) && transmissionKind(item.textContent) === transmissionKind(value))
+          : wanted.some((candidate) => fuzzyMatch(item.textContent, candidate)),
       )
       if (!option) return false
       trigger.value = option.value
@@ -414,15 +502,16 @@
     trigger.click()
     await sleep(420)
     for (let attempt = 0; attempt < 36; attempt++) {
-      const options = optionCandidates(trigger)
+      const options = strictTransmission ? transmissionOptions(trigger) : optionCandidates(trigger)
       const exact = options.find((option) =>
-        wanted.some((candidate) => normalize(option.textContent) === normalize(candidate)),
+        strictTransmission
+          ? Boolean(transmissionKind(value) && transmissionKind(option.innerText) === transmissionKind(value))
+          : wanted.some((candidate) => normalize(option.textContent) === normalize(candidate)),
       )
-      const match =
-        exact ||
-        options.find((option) =>
-          wanted.some((candidate) => fuzzyMatch(option.textContent, candidate)),
-        )
+      const match = exact || (!strictTransmission
+        ? options.find((option) =>
+          wanted.some((candidate) => fuzzyMatch(option.textContent, candidate)))
+        : null)
       if (match) {
         match.scrollIntoView({ block: 'nearest', behavior: 'auto' })
         firePointerClick(match)
@@ -439,14 +528,15 @@
           match.getAttribute('aria-selected') === 'true' ||
           match.getAttribute('aria-checked') === 'true'
         if (checked && !strictTransmission) return true
+        if (strictTransmission && trigger.getAttribute('aria-expanded') !== 'true') break
       }
-      if (attempt > 0 && attempt % 3 === 0) scrollOpenList(trigger)
+      if (!strictTransmission && attempt > 0 && attempt % 3 === 0) scrollOpenList(trigger)
       await sleep(140)
     }
     trigger.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }),
     )
-    if (trigger instanceof HTMLInputElement) {
+    if (!strictTransmission && trigger instanceof HTMLInputElement) {
       trigger.focus()
       setNative(trigger, wanted[0])
       await sleep(500)
@@ -861,7 +951,7 @@
     return 'unknown'
   }
 
-  async function advanceToGroups(repair) {
+  async function advanceToGroups(repair, beforeAdvance) {
     if (marketplaceStage() === 'groups') return true
     for (let attempt = 0; attempt < 3; attempt++) {
       let button = await waitForDom(
@@ -875,6 +965,7 @@
       if (!button) continue
       button.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' })
       await sleep(350)
+      if (beforeAdvance) await beforeAdvance()
       firePointerClick(button)
       const advanced = await waitForDom(() => marketplaceStage() === 'groups', 9000)
       if (advanced) return true
@@ -1232,7 +1323,22 @@
       publishAttempted = false
     const flowIssues = []
     if (automation.autoAdvance) {
-      advanced = await advanceToGroups(repairFields)
+      const recheckTransmission = async () => {
+        const control = findTransmissionControl()
+        const expected = transmissionKind(vehicle.transmission)
+        const observed = transmissionObservation(control)
+        const ok = Boolean(expected && observed === expected)
+        resultMap.set('Câmbio', ['Câmbio', ok, !control])
+        const kindCode = kind => ({ manual: 1, automatic: 2, conflict: 3 }[kind] || 0)
+        trace('transmission_checked', {
+          expectedKind: kindCode(expected), observedKind: kindCode(observed),
+          controlFound: control ? 1 : 0, matched: ok ? 1 : 0,
+        })
+      }
+      // Do not carry stale success into the audience page. Recheck immediately
+      // before the transition; the preview alone never establishes success.
+      resultMap.set('Câmbio', ['Câmbio', false, true])
+      advanced = await advanceToGroups(repairFields, recheckTransmission)
       trace(advanced ? 'advanced' : 'advance_failed')
       if (!advanced)
         flowIssues.push(
