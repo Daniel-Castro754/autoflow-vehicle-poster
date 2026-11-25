@@ -28,3 +28,6 @@ recordConsumerState(stateDb,1,2,true,2000)
 assert.equal(consumerState(stateDb,1,2,2001).state,'enabled')
 recordConsumerState(stateDb,1,2,undefined,2002)
 assert.equal(consumerState(stateDb,1,2,2003).state,'unknown')
+
+assert.deepEqual(sanitizeExecutionDiagnostics([{ code: 'transmission_checked', expectedKind: 2, observedKind: 3, controlFound: 1, matched: 0, rawText: 'private' }]), [{ code: 'transmission_checked', expectedKind: 2, observedKind: 3, controlFound: 1, matched: 0 }])
+assert.deepEqual(sanitizeExecutionDiagnostics([{ code: 'transmission_checked', expectedKind: 3, observedKind: 4, controlFound: 2, matched: -1 }]), [{ code: 'transmission_checked' }])

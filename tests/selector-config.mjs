@@ -44,7 +44,7 @@ console.log('✓ Seletores: mapa versionado PT/EN/ES cobre fixtures e campos cr�
 
 // Exercise the production validation helpers against realistic localized values.
 const content = await readFile(new URL('../extension/content.js', import.meta.url), 'utf8')
-const transmissionStart = content.indexOf('  function transmissionKind(')
+const transmissionStart = content.indexOf('  const transmissionSelector =')
 const transmissionEnd = content.indexOf('  async function confirmTransmission(', transmissionStart)
 assert(transmissionStart >= 0 && transmissionEnd > transmissionStart)
 class Select {}
@@ -58,6 +58,48 @@ assert(!validation.confirm(control('Manual'), 'Automático'))
 assert(!validation.confirm(control('Manual Automático'), 'Automático'))
 assert(!validation.confirm(control('Automático', 'Manual'), 'Automático'))
 assert(!validation.confirm(control('Selecione o câmbio'), 'Automático'))
+assert(validation.confirm(control('Tipo de câmbio: Câmbio automático'), 'Automatic'))
+assert(validation.confirm(control('Transmisión automática'), 'Automático'))
+assert(validation.confirm(control('Transmission type: Manual'), 'Manual'))
+assert(!validation.confirm(control('Automatizado'), 'Automático'))
+assert(!validation.confirm(control('Manual ou automático'), 'Automático'))
+assert(!validation.confirm(control('Automático', 'Manual'), 'Automático'))
+const open = { ...control('Automático'), getAttribute: key => key === 'aria-expanded' ? 'true' : '' }
+assert(!validation.confirm(open, 'Automático'))
+assert(!validation.confirm({ ...control('Automático'), querySelector: () => ({}) }, 'Automático'))
+assert(!validation.confirm({ ...control(''), textContent: 'Automático' }, 'Automático'))
+const native = new Select()
+native.selectedOptions = [{ textContent: 'Automático', value: 'automatic' }]
+assert(validation.confirm(native, 'Automático'))
+native.selectedOptions = [{ textContent: 'Manual', value: 'automatic' }]
+assert(!validation.confirm(native, 'Automático'))
+native.selectedOptions = []
+assert(!validation.confirm(native, 'Automático'))
+const typed = new Input()
+typed.value = 'Automático'
+typed.getAttribute = () => ''
+assert(!validation.confirm(typed, 'Automático'))
+typed.readOnly = true
+assert(validation.confirm(typed, 'Automático'))
+// A nearby preview label cannot authorize an unrelated control.
+const unrelated = { ...control('Automático'), getAttribute: key => key === 'aria-label' ? 'Combustível' : '', contains: () => false, querySelectorAll: () => [] }
+const actual = { ...unrelated, getAttribute: key => key === 'aria-label' ? 'Tipo de câmbio' : '' }
+const root = { querySelectorAll: () => [unrelated] }
+const finder = { normalize, HTMLSelectElement: Select, HTMLInputElement: Input, rootScope: () => root, visible: () => true, document: { getElementById: () => null } }
+vm.runInNewContext(content.slice(transmissionStart, transmissionEnd) + '\nthis.findTransmission = findTransmissionControl', finder)
+assert.equal(finder.findTransmission(), null)
+root.querySelectorAll = () => [unrelated, actual]
+assert.equal(finder.findTransmission(), actual)
+root.querySelectorAll = () => [actual, { ...actual }]
+assert.equal(finder.findTransmission(), null)
+const label = { textContent: 'Câmbio' }
+const selectedValue = { textContent: 'Automático' }
+validation.document = { getElementById: id => id === 'field-label' ? label : selectedValue }
+const accessible = { ...control('Câmbio'), getAttribute: key => key === 'aria-labelledby' ? 'field-label selected-value' : '' }
+assert(validation.confirm(accessible, 'Automático'))
+assert(!validation.confirm(accessible, 'Manual'))
+const conflicting = { ...accessible, innerText: 'Câmbio Manual' }
+assert(!validation.confirm(conflicting, 'Automático'))
 const actionStart = content.indexOf('  function actionButton(')
 const actionEnd = content.indexOf('  function firePointerClick(', actionStart)
 assert(actionStart >= 0 && actionEnd > actionStart)
