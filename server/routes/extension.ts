@@ -650,6 +650,7 @@ export async function handleExtensionRoute(
       return send(res, 409, {
         error: 'Esta execução não está mais autorizada a publicar nesta aba.',
       })
+    if(openResultConflict(db,auth.organizationId,job.id))return send(res,409,{error:'Resultado em conflito; revisão obrigatória.'})
     if (jobsIncludeSoldVehicle([job.id], auth.organizationId))
       return send(res, 409, { error: 'O veículo foi vendido. A publicação foi interrompida.' })
     return send(res, 200, { ok: true })
@@ -685,6 +686,7 @@ export async function handleExtensionRoute(
       Date.parse(job.leaseExpiresAt.replace(' ', 'T') + 'Z') <= Date.now()
     )
       return send(res, 409, { error: 'A execução perdeu o bloqueio exclusivo.' })
+    if(openResultConflict(db,auth.organizationId,job.id))return send(res,409,{error:'Resultado em conflito; revisão obrigatória.'})
     if (jobsIncludeSoldVehicle([job.id], auth.organizationId))
       return send(res, 409, { error: 'O veículo foi vendido. A publicação foi interrompida.' })
     let report: Record<string, unknown> = {}
@@ -705,12 +707,16 @@ export async function handleExtensionRoute(
       publishPhase: 'click_pending',
       published: false,
     }
-    db.prepare(
-      'UPDATE publication_jobs SET fill_report=?,publish_attempt_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?',
-    ).run(JSON.stringify(nextReport), job.id, auth.organizationId)
-    recordJobEvent(auth.organizationId, job.id, 'publish_attempted', null, {
-      publishAttempted: true,
-    })
+    db.exec('BEGIN IMMEDIATE')
+    try{
+      if(openResultConflict(db,auth.organizationId,job.id)){db.exec('ROLLBACK');return send(res,409,{error:'Resultado em conflito; revisão obrigatória.'})}
+      const updated=db.prepare(
+        "UPDATE publication_jobs SET fill_report=?,publish_attempt_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status='filling' AND lease_token=? AND execution_tab_id=? AND execution_document=? AND execution_document_id=? AND paused=0 AND extension_visible=1 AND datetime(lease_expires_at)>CURRENT_TIMESTAMP",
+      ).run(JSON.stringify(nextReport), job.id, auth.organizationId, String(b.leaseToken||''), Number(b.tabId),String(b.document||''),String(b.documentId||''))
+      if(updated.changes!==1){db.exec('ROLLBACK');return send(res,409,{error:'A execução perdeu o bloqueio exclusivo.'})}
+      recordJobEvent(auth.organizationId, job.id, 'publish_attempted', null, {publishAttempted:true})
+      db.exec('COMMIT')
+    }catch(error){db.exec('ROLLBACK');throw error}
     return send(res, 200, { ok: true })
   }
   const extensionHeartbeat = url.pathname.match(/^\/api\/extension\/jobs\/(\d+)\/heartbeat$/)

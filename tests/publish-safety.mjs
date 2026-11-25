@@ -418,7 +418,7 @@ try {
   assert.equal((await resolve()).ok,true)
   assert.equal((await resolve()).idempotent,true)
   const statusRequest=body=>call('/extension/conflicts/status',adminToken,{method:'POST',body:JSON.stringify(body)})
-  const identity={conflictId,jobId:conflictJob.id,leaseToken:conflictPrepared.leaseToken}
+  const identity={conflictId,jobId:conflictJob.id,leaseToken:conflictPrepared.leaseToken,tabId:conflictPrepared.tabId,document:conflictPrepared.document,documentId:conflictPrepared.documentId}
   assert.equal((await statusRequest(identity)).resolved,true)
   await expectStatus(404,()=>statusRequest({...identity,leaseToken:'wrong-lease'}))
   await expectStatus(404,()=>statusRequest({...identity,jobId:conflictJob.id+1}))

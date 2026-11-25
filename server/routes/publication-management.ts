@@ -348,6 +348,7 @@ export async function handlePublicationManagementRoute(
       return send(res, 400, { error: 'Um ou mais trabalhos não pertencem a esta empresa.' })
     if (!canManageJobs(ids, auth))
       return send(res, 403, { error: 'Você não pode reprocessar trabalhos de outro perfil.' })
+    if (ids.some(id=>openResultConflict(db,auth.organizationId,id))) return send(res,409,{error:'Há resultados em conflito. Reconcilie antes de reprocessar.'})
     if (jobs.some((job) => job.status !== 'error'))
       return send(res, 409, {
         error: 'O reprocessamento em lote aceita somente trabalhos no estado Erro.',
@@ -379,8 +380,9 @@ export async function handlePublicationManagementRoute(
         })
     }
 
-    db.exec('BEGIN')
+    db.exec('BEGIN IMMEDIATE')
     try {
+      if(ids.some(id=>openResultConflict(db,auth.organizationId,id))){db.exec('ROLLBACK');return send(res,409,{error:'Há resultados em conflito. Reconcilie antes de reprocessar.'})}
       db.prepare(
         `UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,
           error_code=NULL,fill_report='',publish_attempt_at=NULL,last_lease_token=NULL,
@@ -752,8 +754,12 @@ export async function handlePublicationManagementRoute(
       if (duplicateRisk)
         return send(res, 409, { error: duplicateRisk.message, duplicate: duplicateRisk })
     }
-    db.exec('BEGIN')
+    db.exec('BEGIN IMMEDIATE')
     try {
+      const conflictNow=openResultConflict(db,auth.organizationId,Number(publication[1]))
+      if(conflictNow&&(nextStatus==='pending'||(nextStatus==='canceled'&&b.confirmNoPublication!==true))){
+        db.exec('ROLLBACK');return send(res,409,{error:'Há resultado em conflito. Verifique o Facebook antes de alterar o trabalho.'})
+      }
       if (nextStatus === 'pending')
         db.prepare(
           "UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',publish_attempt_at=NULL,last_lease_token=NULL,started_at=NULL,filled_at=NULL,removed_at=NULL,retry_count=retry_count+1,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",

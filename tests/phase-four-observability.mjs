@@ -208,6 +208,17 @@ try {
   assert(paged.nextBeforeId)
   const older=await admin('/operations/monitor?limit=1&beforeId='+paged.nextBeforeId)
   assert(older.activity.every(e=>e.id<paged.nextBeforeId))
+  const conflictId=Number(db.prepare("INSERT INTO publication_job_events(organization_id,publication_job_id,event_type,details) VALUES (?,?,'fill_result_conflict',?)").run(orgId,jobId,JSON.stringify({fingerprint:'fixture-digest',accountId:target,conflictCode:'lease_expired',reportedPublished:true})).lastInsertRowid)
+  const resolve=(api,body)=>api('/operations/conflicts/'+conflictId,{method:'PATCH',body:JSON.stringify(body)})
+  const verified={verifiedFacebook:true,outcome:'not_published'}
+  await denies(()=>resolve(seller,verified),403)
+  await denies(()=>resolve(external,verified),404)
+  await denies(()=>resolve(admin,{outcome:'not_published'}),400)
+  await denies(()=>resolve(admin,verified),409)
+  const monitor=await admin('/operations/monitor')
+  assert(monitor.conflicts.rows.some(c=>c.id===conflictId))
+  assert(!JSON.stringify(monitor).includes('fixture-digest'))
+  assert(!(await external('/operations/monitor')).conflicts.rows.some(c=>c.id===conflictId))
   console.log(
     '✓ Phase 4: persistent incidents, dedup/reopen, RBAC, isolation, audit and publish safety',
   )
