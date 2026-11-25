@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import type { AutopilotResult } from './ai-agent.ts'
 import { logger } from '../lib/logger.ts'
+import { autopilotDiagnostics, summarizeAutopilotDiagnostics } from './autopilot-diagnostics.ts'
 
 export function skippedAutopilot(message: string): AutopilotResult {
   return {
@@ -81,6 +82,14 @@ export async function coordinateAutopilot(
   let status = 'error',
     jobsCreated = 0
   try {
+    try {
+      const diagnostic = autopilotDiagnostics(db, organizationId, automatic)
+      logger.info('Autopilot', 'Diagnóstico antes do agendamento', {
+        organizationId, automatic, ...summarizeAutopilotDiagnostics(diagnostic),
+      })
+    } catch {
+      logger.warn('Autopilot', 'Não foi possível coletar o diagnóstico da rodada', { organizationId })
+    }
     const result = await run(ownsLease)
     jobsCreated = result.jobsCreated
     status = result.ok ? (jobsCreated ? 'completed' : 'idle') : 'error'
