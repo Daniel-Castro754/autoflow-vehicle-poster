@@ -347,7 +347,41 @@
     return scrollable.scrollTop !== before
   }
 
-  async function selectCustom(labels, value) {
+  function transmissionKind(value) {
+    const text = normalize(value).replace(/^(?:tipo de )?(?:cambio|transmissao|transmission|transmision) /, '')
+    if (['automatico', 'automatica', 'automatic', 'automatic transmission'].includes(text)) return 'automatic'
+    if (['manual', 'manual transmission'].includes(text)) return 'manual'
+    return ''
+  }
+
+  function transmissionConfirmed(control, value) {
+    const wanted = transmissionKind(value)
+    if (!wanted || !control) return false
+    const evidence =
+      control instanceof HTMLSelectElement
+        ? [control.selectedOptions[0]?.textContent || control.value]
+        : control instanceof HTMLInputElement
+          ? [control.value]
+          : [
+              control.getAttribute('aria-valuetext'),
+              control.getAttribute('data-value'),
+              control.innerText,
+              control.textContent,
+            ]
+    const recognized = evidence.map(transmissionKind).filter(Boolean)
+    // Only the actual labeled form control is evidence, not the preview or
+    // the mere existence of a matching option. Contradictory evidence fails.
+    return recognized.length > 0 && recognized.every((kind) => kind === wanted)
+  }
+
+  async function confirmTransmission(labels, value, selector) {
+    return Boolean(await waitForDom(() => {
+      const control = findField(labels, selector)
+      return control && transmissionConfirmed(control, value)
+    }, 2200))
+  }
+
+  async function selectCustom(labels, value, { strictTransmission = false } = {}) {
     if (value === undefined || value === null || value === '') return false
     const trigger = await waitField(
       labels,
@@ -358,6 +392,8 @@
       return false
     }
     const wanted = valuesFor(value)
+    const verify = strictTransmission ? confirmTransmission : confirmField
+    if (strictTransmission && transmissionConfirmed(trigger, value)) return true
     if (trigger instanceof HTMLSelectElement) {
       const option = [...trigger.options].find((item) =>
         wanted.some((candidate) => fuzzyMatch(item.textContent, candidate)),
@@ -367,7 +403,7 @@
       trigger.dispatchEvent(new Event('input', { bubbles: true }))
       trigger.dispatchEvent(new Event('change', { bubbles: true }))
       trigger.dispatchEvent(new Event('blur', { bubbles: true }))
-      return confirmField(
+      return verify(
         labels,
         value,
         'select,[role="combobox"],[aria-haspopup="listbox"],input[aria-autocomplete]',
@@ -392,7 +428,7 @@
         firePointerClick(match)
         await sleep(420)
         if (
-          await confirmField(
+          await verify(
             labels,
             value,
             'select,[role="combobox"],[aria-haspopup="listbox"],input[aria-autocomplete]',
@@ -402,7 +438,7 @@
         const checked =
           match.getAttribute('aria-selected') === 'true' ||
           match.getAttribute('aria-checked') === 'true'
-        if (checked) return true
+        if (checked && !strictTransmission) return true
       }
       if (attempt > 0 && attempt % 3 === 0) scrollOpenList(trigger)
       await sleep(140)
@@ -424,7 +460,7 @@
         new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }),
       )
       if (
-        await confirmField(
+        await verify(
           labels,
           value,
           'select,[role="combobox"],[aria-haspopup="listbox"],input[aria-autocomplete]',
@@ -670,7 +706,7 @@
     )
   }
 
-  function actionButton(names) {
+  function actionButton(names, exactOnly = false) {
     const keys = names.map(normalize)
     const candidates = [
       ...document.querySelectorAll(
@@ -681,9 +717,9 @@
       bestScore = -Infinity
     for (const button of candidates) {
       const text = controlText(button) || normalize(button.value)
-      const exact = keys.some((key) => text === key)
+      const exact = keys.some((key) => [text, button.innerText, button.textContent, button.value, button.getAttribute?.('aria-label'), button.getAttribute?.('title')].some((value) => normalize(value) === key))
       const contained = keys.some((key) => exactOrPrefix(text, key) || text.includes(key))
-      if (!exact && !contained) continue
+      if (!exact && (exactOnly || !contained)) continue
       const box = button.getBoundingClientRect()
       let score = exact ? 1000 : 500
       if (box.left < window.innerWidth * 0.42) score += 180
@@ -818,7 +854,7 @@
     if (
       text.includes('anunciar em mais locais') ||
       text.includes('anunciar nos seus grupos') ||
-      actionButton(['Publicar', 'Publish'])
+      actionButton(['Publicar', 'Postar', 'Publish'], true)
     )
       return 'groups'
     if (actionButton(['Avançar', 'Next'])) return 'details'
@@ -971,14 +1007,14 @@
   async function publishListing(beforeClick, checkPermission, jobId, documentId) {
     if (hasHumanChallenge()) return { clicked: false, confirmed: false }
     if (marketplaceStage() !== 'groups') return { clicked: false, confirmed: false }
-    const button = await waitForDom(() => actionButton(['Publicar', 'Publish']), 18000)
+    const button = await waitForDom(() => actionButton(['Publicar', 'Postar', 'Publish'], true), 18000)
     if (!button || marketplaceStage() !== 'groups') return { clicked: false, confirmed: false }
     const initialUrl = location.href
     button.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' })
     await sleep(400)
     if (hasHumanChallenge()) return { clicked: false, confirmed: false }
-    const current = actionButton(['Publicar', 'Publish']) || button
-    if (!controlEnabled(current)) return { clicked: false, confirmed: false }
+    const current = actionButton(['Publicar', 'Postar', 'Publish'], true)
+    if (!current || !controlEnabled(current)) return { clicked: false, confirmed: false }
     try {
       if (checkPermission) await checkPermission()
       if (!controlEnabled(current) || hasHumanChallenge())
@@ -1101,6 +1137,7 @@
           selectCustom(
             fieldLabels('transmission', ['cambio', 'transmissao', 'transmission']),
             vehicle.transmission,
+            { strictTransmission: true },
           ),
         critical: true,
       },
@@ -1371,6 +1408,7 @@
           ? 'Grupos não encontrados: ' + flow.missingGroups.join(', ') + '.'
           : `${flow.selectedGroups.length} grupo(s) selecionado(s).`,
       )
+    else if (flow.advanced) details.push('Seleção automática de grupos desativada.')
     if (flow.automation.autoPublish)
       details.push(
         flow.published

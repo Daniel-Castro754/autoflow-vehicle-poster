@@ -512,6 +512,12 @@ export async function handleExtensionRoute(
         recordJobEvent(auth.organizationId, job.id, 'filling_started', null, {
           accountId,
           instanceId,
+          automation: {
+            autoAdvance: Boolean(settings?.autoAdvance),
+            fillGroups: Boolean(settings?.fillGroups),
+            autoPublish: Boolean(settings?.autoPublish),
+            configuredGroupCount: Math.min(targetGroups.length, 20),
+          },
         })
       db.exec('COMMIT')
     } catch (error) {
