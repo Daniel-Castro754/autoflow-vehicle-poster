@@ -183,6 +183,31 @@ try {
     (await admin(`/operations/activity?jobId=${jobId}`)).activity.every((e) => e.jobId === jobId),
     true,
   )
+  // Administrative monitoring remains read-only and tenant isolated.
+  await denies(()=>anon('/operations/monitor'),401)
+  await denies(()=>seller('/operations/monitor'),403)
+  await denies(()=>admin('/operations/monitor?hours=999'),400)
+  await denies(()=>admin('/operations/monitor?category=invalid'),400)
+  await denies(()=>admin('/operations/monitor?accountId=-1'),400)
+  const account=Number(db.prepare("INSERT INTO social_accounts(organization_id,user_id,label,status,last_seen_at) VALUES (?,?, 'Monitor fixture','connected',CURRENT_TIMESTAMP)").run(orgId,primary.id).lastInsertRowid)
+  const target=Number(db.prepare("INSERT INTO social_accounts(organization_id,user_id,label,status,last_seen_at) VALUES (?,?, 'Destino','connected',CURRENT_TIMESTAMP)").run(orgId,primary.id).lastInsertRowid)
+  await admin('/extension/presence',{method:'POST',body:JSON.stringify({accountId:account,autoRun:true,diagnostic:{code:'queue_empty',queueSize:0,secret:'DO_NOT_EXPORT'}})})
+  db.prepare("UPDATE publication_jobs SET social_account_id=? WHERE id=?").run(target,jobId)
+  db.prepare("INSERT INTO publication_job_events(organization_id,publication_job_id,event_type,from_account_id,to_account_id,details) VALUES (?,?,'reassigned',?,?,?)").run(orgId,jobId,account,target,JSON.stringify({automatic:true,secret:'DO_NOT_EXPORT'}))
+  const snapshot=await admin('/operations/monitor?category=transfer&accountId='+account)
+  assert.equal(snapshot.profiles.find(p=>p.id===account).consumer.state,'enabled')
+  assert.equal(snapshot.profiles.find(p=>p.id===account).decision.code,'queue_empty')
+  assert.equal(snapshot.activity.length,1)
+  assert.equal(snapshot.activity[0].fromAccountId,account)
+  assert.equal(snapshot.activity[0].toAccountId,target)
+  assert(!JSON.stringify(snapshot).includes('DO_NOT_EXPORT'))
+  assert(!(await external('/operations/monitor')).profiles.some(p=>p.id===account))
+  assert(!(await external('/operations/monitor')).activity.some(e=>e.jobId===jobId))
+  const paged=await admin('/operations/monitor?limit=1')
+  assert.equal(paged.activity.length,1)
+  assert(paged.nextBeforeId)
+  const older=await admin('/operations/monitor?limit=1&beforeId='+paged.nextBeforeId)
+  assert(older.activity.every(e=>e.id<paged.nextBeforeId))
   console.log(
     '✓ Phase 4: persistent incidents, dedup/reopen, RBAC, isolation, audit and publish safety',
   )

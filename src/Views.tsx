@@ -45,6 +45,7 @@ import {
 } from 'lucide-react'
 import { FieldLabel, HelpTip } from './HelpTip'
 import { OperationalHealth } from './OperationalHealth'
+import { OperationalMonitor } from './OperationalMonitor'
 import { InterventionCenter } from './InterventionCenter'
 import { SchedulingInsights } from './SchedulingInsights'
 import { DrawerFocusGuard } from './DrawerFocusGuard'
@@ -523,6 +524,7 @@ export function OverviewView({
         {monitoringOpen && (
           <div className="overview-monitoring-content">
             <OperationalHealth api={api} />
+            {canManage && <OperationalMonitor api={api} />}
             <InterventionCenter api={api} canManage={canManage} navigate={navigate} />
             <SchedulingInsights api={api} />
           </div>

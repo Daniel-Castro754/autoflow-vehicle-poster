@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { operationalHealth, prometheusMetrics } from '../services/operational-health.ts'
 import { organizationScheduleHistory } from '../services/schedule-history.ts'
 import { systemReadiness } from '../services/system-readiness.ts'
+import { monitorFilters, operationalMonitor } from '../services/operational-monitor.ts'
 
 export function handleOperationsRoute(
   req: IncomingMessage,
@@ -13,6 +14,15 @@ export function handleOperationsRoute(
   send: (res: ServerResponse, status: number, data: unknown) => void,
   isAdmin = false,
 ): boolean {
+  if (req.method === 'GET' && url.pathname === '/api/operations/monitor') {
+    res.setHeader('Cache-Control','no-store')
+    if (!isAdmin) { send(res,403,{error:'Somente administradores podem consultar o monitor.'}); return true }
+    let filters: ReturnType<typeof monitorFilters>
+    try { filters=monitorFilters(url.searchParams) }
+    catch { send(res,400,{error:'Filtros do monitor inválidos.'}); return true }
+    send(res,200,operationalMonitor(db,auth.organizationId,filters))
+    return true
+  }
   if (req.method === 'GET' && url.pathname === '/api/health/readiness') {
     res.setHeader('Cache-Control', 'no-store')
     if (!isAdmin) {

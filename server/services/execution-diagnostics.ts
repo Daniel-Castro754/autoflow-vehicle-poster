@@ -42,6 +42,24 @@ export function sanitizeConsumerDiagnostic(value: unknown) {
   })
 }
 
+// Latest sanitized consumer decision is ephemeral and scoped to this database.
+const consumerDecisions = new WeakMap<object, Map<string, { diagnostic: NonNullable<ReturnType<typeof sanitizeConsumerDiagnostic>>; receivedAt: number }>>()
+export function recordConsumerDecision(db: object, org: number, accountId: number, value: unknown, now = Date.now()) {
+  let entries = consumerDecisions.get(db)
+  if (!entries) { entries = new Map(); consumerDecisions.set(db, entries) }
+  for (const [key, entry] of entries) if (now-entry.receivedAt>300000) entries.delete(key)
+  const key = org + ':' + accountId
+  const diagnostic = sanitizeConsumerDiagnostic(value)
+  if (diagnostic) entries.set(key, { diagnostic, receivedAt: now })
+  else entries.delete(key)
+}
+export function latestConsumerDecision(db: object, org: number, accountId: number, now = Date.now()) {
+  const entry = consumerDecisions.get(db)?.get(org+':'+accountId)
+  return entry && now-entry.receivedAt<=300000
+    ? { ...entry.diagnostic, receivedAt: new Date(entry.receivedAt).toISOString() }
+    : null
+}
+
 // Last observed consumer state is advisory, scoped to this server/database.
 // A restart or stale heartbeat means unknown, never permission to publish.
 const consumerStates = new WeakMap<object, Map<string, { enabled: boolean; reportedAt: number }>>()
