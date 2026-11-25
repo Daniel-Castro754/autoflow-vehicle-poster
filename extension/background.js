@@ -675,7 +675,8 @@ async function acknowledgeResult(entry, rejected = false) {
     await chrome.storage.local.remove('pendingJob')
   if (entry.payload.published || rejected)
     removePendingPublish(entry.jobId, undefined, entry.leaseToken)
-  void consumeQueue()
+  // During recovery the serialized pass will consume only after the outbox.
+  if (!recoveryInFlight) void consumeQueue()
 }
 async function deliverResult(entry, token) {
   try {
