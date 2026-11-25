@@ -582,6 +582,14 @@ try {
     }),
   })
   assert(prepared.leaseToken, 'Deve gerar leaseToken exclusivo para a execução')
+  assert.equal(prepared.automation.autoAdvance, true)
+  assert.equal(prepared.automation.fillGroups, true)
+  assert.equal(prepared.automation.autoPublish, false)
+  assert(prepared.automation.targetGroups.length >= 2)
+  const timeline = await call(`/publications/${jobId}/timeline`, token)
+  const started = timeline.events.find((event) => event.eventType === 'filling_started')
+  assert.equal(started.details.automation.autoPublish, false)
+  assert.equal(started.details.automation.fillGroups, true)
   await call(`/extension/jobs/${jobId}/bind-document`, token, {
     method: 'POST',
     body: JSON.stringify({
