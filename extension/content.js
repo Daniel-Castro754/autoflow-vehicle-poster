@@ -423,6 +423,7 @@
         control.getAttribute('aria-valuetext'),
         control.getAttribute('data-value'),
         control.getAttribute('aria-label'),
+        ...transmissionLabelReferences(control),
         control.innerText,
       ]
       // Avoid using hidden textContent to establish a positive result.
@@ -431,11 +432,9 @@
     }
     const recognized = new Set(evidence.map(transmissionKind).filter(Boolean))
     // Multiple choices, or an explicit conflicting value, must fail closed.
-    for (const value of evidence) {
-      const text = normalize(value)
-      if (/\b(?:automatico|automatica|automatic)\b/.test(text) && /\bmanual\b/.test(text))
-        return 'conflict'
-    }
+    const combined = normalize(evidence.filter(Boolean).join(' '))
+    if (/\b(?:automatico|automatica|automatic)\b/.test(combined) && /\bmanual\b/.test(combined))
+      return 'conflict'
     if (recognized.size > 1) return 'conflict'
     return [...recognized][0] || ''
   }
