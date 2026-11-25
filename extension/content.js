@@ -444,7 +444,7 @@
     return Boolean(wanted && transmissionObservation(control) === wanted)
   }
 
-  async function confirmTransmission(_labels, value, _selector) {
+  async function confirmTransmission(_labels, value) {
     return Boolean(await waitForDom(() => {
       const control = findTransmissionControl()
       return control && transmissionConfirmed(control, value)
