@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { randomBytes } from 'node:crypto'
 import { logger } from '../lib/logger.ts'
-import { sanitizeExecutionDiagnostics, sanitizeConsumerDiagnostic, recordConsumerState } from '../services/execution-diagnostics.ts'
+import { sanitizeExecutionDiagnostics, sanitizeConsumerDiagnostic, recordConsumerState, recordConsumerDecision } from '../services/execution-diagnostics.ts'
 import { publicationMayExist, readPublicationReport, publicationReviewKind } from '../services/publication-evidence.ts'
 import { findBestAccountForVehicle } from '../services/session-manager.ts'
 import { calculateBackoff } from '../lib/retry.ts'
@@ -126,6 +126,7 @@ export async function handleExtensionRoute(
         'WHERE id=? AND organization_id=?',
     ).run('connected', typeof body?.autoRun === 'boolean' ? Number(body.autoRun) : null, accountId, auth.organizationId)
     recordConsumerState(db, auth.organizationId, accountId, body?.autoRun)
+    recordConsumerDecision(db, auth.organizationId, accountId, body?.diagnostic)
     const diagnostic = sanitizeConsumerDiagnostic(body?.diagnostic)
     if (diagnostic) logger.info('ExtensionConsumer', 'Estado operacional do perfil', {
       organizationId: auth.organizationId, accountId, autoRun: typeof body?.autoRun === 'boolean' ? body.autoRun : null, ...diagnostic,
