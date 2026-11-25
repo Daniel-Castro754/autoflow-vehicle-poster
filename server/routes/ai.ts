@@ -1,4 +1,6 @@
 import { getAiCredentials } from '../services/credential-vault.ts'
+import { logger } from '../lib/logger.ts'
+import { summarizeAutopilotDiagnostics } from '../services/autopilot-diagnostics.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import {
@@ -197,6 +199,9 @@ export async function handleAIRoute(
       null,
       preview.potentialVehicles.length,
     )
+    logger.info('Autopilot', 'Diagnóstico da prévia manual', {
+      organizationId: auth.organizationId, ...summarizeAutopilotDiagnostics(preview.diagnostics),
+    })
     send(res, 200, preview)
     return true
   }

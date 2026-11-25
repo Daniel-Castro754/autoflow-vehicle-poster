@@ -830,6 +830,12 @@ try {
 
   const pilotPreview = await call('/ai/autopilot/preview', token)
   assert(pilotPreview.previewId)
+  assert(pilotPreview.diagnostics.totalVehicles >= 3)
+  const diagnosticVehicle = (id) => pilotPreview.diagnostics.vehicles.find((v) => v.id === id)
+  assert(diagnosticVehicle(autopilotVehicle.id).previewCandidate)
+  assert.equal(diagnosticVehicle(autopilotVehicle.id).executionReasons.length, 0)
+  assert(diagnosticVehicle(incompleteAutopilotVehicle.id).executionReasons.some((r) => r.code === 'incomplete_vehicle'))
+  assert(diagnosticVehicle(duplicatePhotoVehicle.id).executionReasons.some((r) => r.code === 'shared_photo'))
   const autopilotRes = await call('/ai/autopilot/run', token, {
     method: 'POST',
     body: JSON.stringify({ previewId: pilotPreview.previewId }),
@@ -859,6 +865,21 @@ try {
       .get(autopilotVehicle.id)
       .description.trim().length > 0,
   )
+  const existing = await call('/ai/autopilot/preview', token)
+  const scheduled = existing.diagnostics.vehicles.find((v) => v.id === autopilotVehicle.id)
+  assert(scheduled.previewReasons.some((r) => r.code === 'existing_job'))
+  assert(scheduled.blockingJobs.length > 0)
+  testDb.prepare("UPDATE publication_jobs SET extension_visible=0 WHERE vehicle_id=?").run(autopilotVehicle.id)
+  const hidden = await call('/ai/autopilot/preview', token)
+  const hiddenVehicle = hidden.diagnostics.vehicles.find((v) => v.id === autopilotVehicle.id)
+  assert.equal(hiddenVehicle.previewCandidate, false)
+  assert(hiddenVehicle.blockingJobs.some((j) => !j.visible))
+  testDb.prepare("UPDATE vehicles SET status='Rascunho' WHERE id!=?").run(autopilotVehicle.id)
+  const empty = await call('/ai/autopilot/preview', token)
+  assert.equal(empty.previewId, null)
+  assert.deepEqual(empty.potentialVehicles, [])
+  assert.equal(empty.diagnostics.previewCandidateCount, 0)
+  assert(empty.diagnostics.totalVehicles >= 3)
   testDb.close()
   console.log(
     '✓ Piloto automático aplica os mesmos campos obrigatórios, fotos e proteção contra duplicidade da fila manual.',
