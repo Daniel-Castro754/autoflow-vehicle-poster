@@ -643,9 +643,12 @@ async function planAutopilotJobs(
         )
       }
     }
-    // Refresh all connected accounts' pacing; the final selection rechecks
-    // consumer state and capacity inside the transaction.
-    for (const account of accounts) {
+    // Refresh pacing for profiles that may have connected during description
+    // preparation. Final routing also rechecks eligibility in this transaction.
+    const currentAccounts = db.prepare(
+      'SELECT id FROM social_accounts WHERE organization_id=?',
+    ).all(organizationId) as Array<{ id: number }>
+    for (const account of currentAccounts) {
       const lastActivity = lastProfileActivityAt(db, organizationId, account.id)
       const pacing = profileCapacity(db, organizationId, account.id)
       const baseAllowed = lastActivity == null ? 0 : lastActivity + pacing.intervalMinutes * 60000

@@ -848,6 +848,17 @@ try {
     .prepare("UPDATE vehicles SET vehicle_type='' WHERE id=?")
     .run(incompleteAutopilotVehicle.id)
 
+  await call('/extension/presence', token, {
+    method: 'POST',
+    body: JSON.stringify({ accountId, autoRun: false }),
+  })
+  const pausedPreview = await call('/ai/autopilot/preview', token)
+  assert(pausedPreview.diagnostics.profiles.find(p => p.id === accountId).reasons.some(r => r.code === 'consumer_paused'))
+  assert(pausedPreview.diagnostics.vehicles.find(v => v.id === autopilotVehicle.id).executionReasons.some(r => r.code === 'no_eligible_profile'))
+  await call('/extension/presence', token, {
+    method: 'POST',
+    body: JSON.stringify({ accountId, autoRun: true }),
+  })
   const pilotPreview = await call('/ai/autopilot/preview', token)
   assert(pilotPreview.previewId)
   assert(pilotPreview.diagnostics.totalVehicles >= 3)
@@ -867,6 +878,7 @@ try {
     'O piloto deve agendar somente o veículo elegível sem risco de duplicidade',
   )
   assert.equal(autopilotRes.assignments[0].vehicleId, autopilotVehicle.id)
+  assert.equal(autopilotRes.assignments[0].accountId, accountId)
   assert.equal(
     testDb
       .prepare('SELECT COUNT(*) count FROM publication_jobs WHERE vehicle_id=?')

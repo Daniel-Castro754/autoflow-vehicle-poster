@@ -116,7 +116,7 @@ export function findBestAccountForVehicle(
       const backlog = (a.pendingCount ?? 0) - (b.pendingCount ?? 0)
       if (backlog) return backlog
     }
-    return b.score - a.score || a.id - b.id
+    return b.score - a.score || (mode === 'default' ? 0 : a.id - b.id)
   })
   return eligible[0]
 }
