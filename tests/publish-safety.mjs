@@ -397,6 +397,19 @@ try {
     assert.equal(duplicate.idempotent, true)
   }
 
+  // A positive report contradicting an already acknowledged non-publication is not idempotent.
+  const conflictVehicle=await createReadyVehicle(adminToken)
+  const conflictJob=await call('/publications',adminToken,{method:'POST',body:JSON.stringify({vehicleId:conflictVehicle.id,accountId:account.id})})
+  const conflictPrepared=await call('/extension/jobs/'+conflictJob.id+'/prepare',adminToken,{method:'POST',body:JSON.stringify({accountId:account.id,instanceId:'safety_conflict_instance'})})
+  await call('/extension/jobs/'+conflictJob.id+'/fill-result',adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:conflictPrepared.leaseToken,published:false,publishAttempted:false})})
+  for(let i=0;i<2;i++) await expectStatus(409,()=>call('/extension/jobs/'+conflictJob.id+'/fill-result',adminToken,{method:'PATCH',body:JSON.stringify({leaseToken:conflictPrepared.leaseToken,published:true,resultUrl:'https://www.facebook.com/marketplace/item/999999'})}))
+  assert.equal(jobRow(conflictJob.id).status,'awaiting_confirmation')
+  const conflictEvents=testDb.prepare("SELECT details FROM publication_job_events WHERE publication_job_id=? AND event_type='fill_result_conflict'").all(conflictJob.id)
+  assert.equal(conflictEvents.length,1)
+  assert.equal(JSON.parse(conflictEvents[0].details).conflictCode,'result_conflict')
+  assert(!conflictEvents[0].details.includes(conflictPrepared.leaseToken))
+  assert(!conflictEvents[0].details.includes('facebook.com'))
+
   // 3. Sem sinal de publish-check, a recuperação automática continua segura (volta para
   //    "pending"), mas passa a respeitar max_retries (via retry_count, não attempt_count) em
   //    vez de poder repetir para sempre. Uma recuperação não-esgotada também passa a contar

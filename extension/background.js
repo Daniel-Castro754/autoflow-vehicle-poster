@@ -137,7 +137,9 @@ async function launchManualJob(jobId, accountId, instanceId) {
       throw new Error('Trabalho ou perfil inválido.')
     if (!/^[a-zA-Z0-9_-]{12,100}$/.test(instanceId))
       throw new Error('Identificação local da extensão inválida. Reabra a extensão.')
-    const { pendingJob } = await chrome.storage.local.get('pendingJob')
+    const { pendingJob, pendingResults } = await chrome.storage.local.get(['pendingJob','pendingResults'])
+    if (hasQuarantinedResult(pendingResults, jobId))
+      throw new Error('Este trabalho possui resultado em conflito. Confira Publicações e o Facebook antes de qualquer nova execução.')
     if (pendingJob?.jobId)
       throw new Error(
         `O trabalho #${pendingJob.jobId} já está ativo. Conclua-o ou feche a aba anterior.`,
@@ -241,6 +243,7 @@ function sendFillResult(jobId, token, payload) {
     if (!response.ok) {
       const error = new Error(data.error || 'Falha ao atualizar o trabalho')
       error.status = response.status
+      error.conflictCode = data.conflictCode
       throw error
     }
     return data
@@ -398,6 +401,7 @@ async function consumeQueue() {
       'pendingJob',
       'pendingPublishes',
       'pendingPublish',
+      'pendingResults',
     ])
     accountId = Number(state.activeAccountId) || 0
     if (!accountId) return
@@ -442,7 +446,8 @@ async function consumeQueue() {
       return
     }
     const job = queue.jobs.find(
-      (item) => item.jobStatus === 'pending' && !item.locked && !item.publishUncertain,
+      (item) => item.jobStatus === 'pending' && !item.locked && !item.publishUncertain &&
+        !hasQuarantinedResult(state.pendingResults,item.jobId),
     )
     if (!job) {
       await recordConsumerDecision(accountId, queue.jobs.length ? 'no_eligible_job' : queue.nextScheduledAt ? 'scheduled_wait' : 'queue_empty', { queueSize: queue.jobs.length })
@@ -475,8 +480,8 @@ async function consumeQueue() {
       await chrome.storage.local.set({
         facebookSession: { accountId: state.activeAccountId, ready: true, checkedAt: Date.now() },
       })
-      const current = await chrome.storage.local.get(['activeAccountId','autoRun','autoRunManuallyPaused','authNeeded'])
-      if (current.activeAccountId !== state.activeAccountId || !current.autoRun || current.autoRunManuallyPaused || current.authNeeded) {
+      const current = await chrome.storage.local.get(['activeAccountId','autoRun','autoRunManuallyPaused','authNeeded','pendingResults'])
+      if (current.activeAccountId !== state.activeAccountId || !current.autoRun || current.autoRunManuallyPaused || current.authNeeded || hasQuarantinedResult(current.pendingResults,job.jobId)) {
         await chrome.tabs.remove(tab.id).catch(() => {})
         return
       }
@@ -665,35 +670,71 @@ function changePendingResults(change) {
   resultStoreOperation = operation.catch(() => {})
   return operation
 }
-async function acknowledgeResult(entry, rejected = false) {
+function hasQuarantinedResult(entries, jobId) {
+  return Object.values(entries || {}).some(entry => entry.rejectedAt && entry.jobId === jobId)
+}
+const conflictCodes = new Set(['lease_mismatch','identity_mismatch','lease_expired','status_changed','result_conflict'])
+async function quarantineResult(entry, error) {
   const key = `${entry.jobId}:${entry.leaseToken}`
-  await changePendingResults((entries) => {
-    if (entries[key]?.version === entry.version) delete entries[key]
+  const code = conflictCodes.has(error.conflictCode) ? error.conflictCode : 'unknown_conflict'
+  await changePendingResults(entries => {
+    const current = entries[key] || entry
+    // Preserve the original rejected report and any newer report in flight.
+    entries[key] = {...current,rejectedAt:current.rejectedAt || Date.now(),
+      conflictCode:code,firstRejectedPayload:current.firstRejectedPayload || entry.payload}
   })
+  const state = await chrome.storage.local.get(['pendingJob','activeAccountId'])
+  const sameExecution = state.pendingJob?.jobId === entry.jobId && state.pendingJob.leaseToken === entry.leaseToken
+  if (sameExecution) await clearPendingExecution(state.pendingJob)
+  if (sameExecution || (entry.accountId && entry.accountId === state.activeAccountId)) {
+    await chrome.storage.local.set({autoRun:false,autoRunManuallyPaused:true})
+  }
+  // Retain pendingPublishes and all evidence; do not retry the rejected lease.
+}
+async function acknowledgeResult(entry) {
+  const key = `${entry.jobId}:${entry.leaseToken}`
+  const acknowledged = await changePendingResults((entries) => {
+    if (entries[key]?.version !== entry.version || entries[key]?.rejectedAt) return false
+    delete entries[key]
+    return true
+  })
+  if (!acknowledged) return
   const { pendingJob } = await chrome.storage.local.get('pendingJob')
   if (pendingJob?.jobId === entry.jobId && pendingJob.leaseToken === entry.leaseToken)
-    await chrome.storage.local.remove('pendingJob')
-  if (entry.payload.published || rejected)
+    await clearPendingExecution(pendingJob)
+  if (entry.payload.published)
     removePendingPublish(entry.jobId, undefined, entry.leaseToken)
-  // During recovery the serialized pass will consume only after the outbox.
   if (!recoveryInFlight) void consumeQueue()
 }
 async function deliverResult(entry, token) {
+  const key = `${entry.jobId}:${entry.leaseToken}`
+  const {pendingResults} = await chrome.storage.local.get('pendingResults')
+  if (pendingResults?.[key]?.rejectedAt) throw new Error('Resultado em conflito, preservado para revisão.')
   try {
     const data = await sendFillResult(entry.jobId, token, entry.payload)
     await acknowledgeResult(entry)
     return data
   } catch (error) {
-    if (error.status === 409) await acknowledgeResult(entry, true)
+    if (error.status === 409) await quarantineResult(entry, error)
     throw error
   }
 }
 async function queueFillResult(jobId, token, payload) {
+  const {pendingJob,activeAccountId} = await chrome.storage.local.get(['pendingJob','activeAccountId'])
+  const accountId = pendingJob?.jobId === jobId && pendingJob.leaseToken === payload.leaseToken
+    ? Number(pendingJob.accountId || activeAccountId) || null : null
   const entry = await changePendingResults((entries) => {
     const key = `${jobId}:${payload.leaseToken}`
-    if (entries[key]?.payload.published && !payload.published) return entries[key]
+    const previous = entries[key]
+    if (previous?.rejectedAt) {
+      if (payload.published === true && previous.payload.published !== true)
+        entries[key] = {...previous,payload}
+      return entries[key]
+    }
+    if (previous?.payload.published && !payload.published) return previous
     const next = {
       jobId,
+      accountId:accountId || previous?.accountId || null,
       leaseToken: payload.leaseToken,
       payload,
       queuedAt: Date.now(),
@@ -714,6 +755,7 @@ async function flushPendingResults() {
     if (!token && !(await chrome.storage.local.get('refreshToken')).refreshToken) return
     const due = await changePendingResults((entries) =>
       Object.values(entries).filter((entry) => {
+        if (entry.rejectedAt) return false
         if (
           Date.now() - (entry.lastAttemptAt || entry.queuedAt || 0) <
           pendingResultRetryDelayMs(entry.attempts || 0)
