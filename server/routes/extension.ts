@@ -122,9 +122,9 @@ export async function handleExtensionRoute(
       return send(res, 403, { error: 'Perfil do Brave não autorizado.' })
     }
     db.prepare(
-      'UPDATE social_accounts SET last_seen_at=CURRENT_TIMESTAMP,status=? ' +
+      'UPDATE social_accounts SET last_seen_at=CURRENT_TIMESTAMP,status=?,last_consumer_auto_run=? ' +
         'WHERE id=? AND organization_id=?',
-    ).run('connected', accountId, auth.organizationId)
+    ).run('connected', typeof body?.autoRun === 'boolean' ? Number(body.autoRun) : null, accountId, auth.organizationId)
     recordConsumerState(db, auth.organizationId, accountId, body?.autoRun)
     const diagnostic = sanitizeConsumerDiagnostic(body?.diagnostic)
     if (diagnostic) logger.info('ExtensionConsumer', 'Estado operacional do perfil', {

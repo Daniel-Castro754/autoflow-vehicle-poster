@@ -92,8 +92,9 @@ export async function coordinateAutopilot(
     }
     const result = await run(ownsLease)
     jobsCreated = result.jobsCreated
-    status = result.ok ? (jobsCreated ? 'completed' : 'idle') : 'error'
-    logger.info('Autopilot', 'Rodada concluída', { organizationId, automatic, jobsCreated, status })
+    const jobsTransferred = result.transfers?.length ?? 0
+    status = result.ok ? (jobsCreated || jobsTransferred ? 'completed' : 'idle') : 'error'
+    logger.info('Autopilot', 'Rodada concluída', { organizationId, automatic, jobsCreated, jobsTransferred, status })
     return result
   } finally {
     clearInterval(heartbeat)

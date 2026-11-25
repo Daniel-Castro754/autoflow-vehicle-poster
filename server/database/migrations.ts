@@ -484,6 +484,11 @@ const migrations: Migration[] = [
       ON published_ads(organization_id,listing_hash)
       WHERE status IN ('queued','published');`,
   },
+  {
+    version: 29,
+    columns: [['social_accounts', 'last_consumer_auto_run', 'INTEGER']],
+    sql: '',
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

@@ -74,6 +74,16 @@ try {
   assert(fresh.lastSeen)
   assert.equal(findBestAccountForVehicle(db, owner.org, 12345)?.id, accountId)
 
+  // Persist the last explicit consumer signal without treating it as fresh.
+  for (const autoRun of [true,false,undefined]) {
+    await api('/extension/presence', {
+      method: 'POST',
+      body: JSON.stringify({ accountId, autoRun }),
+    })
+    const persisted = db.prepare('SELECT last_consumer_auto_run value FROM social_accounts WHERE id=?').get(accountId)
+    assert.equal(persisted.value, autoRun===undefined?null:Number(autoRun))
+  }
+
   // A paused profile may report liveness but must remain unavailable for scheduling.
   db.prepare(
     "UPDATE social_accounts SET automation_paused=1,last_seen_at=datetime('now','-20 minutes') WHERE id=?",
