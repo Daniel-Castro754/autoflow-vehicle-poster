@@ -342,7 +342,54 @@ async function openJob(jobId) {
     openingJob = false
   }
 }
+const consumerDiagnosticLabels = {
+  "consumer_paused": "Consumo pausado",
+  "execution_pending": "Execução anterior pendente",
+  "session_missing": "Sessão ausente",
+  "api_unauthorized": "API não autorizada",
+  "queue_http_error": "Falha ao consultar fila",
+  "daily_limit": "Limite diário atingido",
+  "operational_interval": "Aguardando intervalo",
+  "scheduled_wait": "Aguardando agendamento",
+  "no_eligible_job": "Nenhum trabalho elegível",
+  "queue_empty": "Fila vazia",
+  "job_selected": "Trabalho selecionado",
+  "facebook_not_ready": "Marketplace não disponível",
+  "prepare_rejected": "Preparação recusada",
+  "dispatch_confirmed": "Preenchimento entregue",
+  "dispatch_failed": "Falha ao entregar preenchimento",
+  "consumer_check_failed": "Falha ao verificar fila"
+}
+async function localDiagnostics() {
+  const accountId = activeAccountId
+  const { consumerDiagnostics } = await chrome.storage.local.get('consumerDiagnostics')
+  return (Array.isArray(consumerDiagnostics) ? consumerDiagnostics : []).filter(
+    (entry) => entry.accountId === accountId,
+  )
+}
+async function showConsumerDiagnostic() {
+  const accountId = activeAccountId
+  const history = await localDiagnostics()
+  if (accountId !== activeAccountId) return
+  const last = history.at(-1)
+  $('consumerDiagnostic').textContent = last
+    ? (consumerDiagnosticLabels[last.code] || last.code) + ' · ' + new Date(last.at).toLocaleString('pt-BR')
+    : 'Nenhuma verificação registrada.'
+}
+$('exportDiagnostics').onclick = async () => {
+  const accountId = activeAccountId
+  const history = await localDiagnostics()
+  if (!accountId || accountId !== activeAccountId) return
+  const url = URL.createObjectURL(new Blob([JSON.stringify(history, null, 2)], { type: 'application/json' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'autoflow-perfil-' + accountId + '-diagnostico.json'
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+setInterval(() => void showConsumerDiagnostic(), 5000)
 function showManualLaunchError() {
+  void showConsumerDiagnostic()
   chrome.storage.local.get('lastManualLaunchError', ({ lastManualLaunchError }) => {
     const notice = $('dispatchError')
     if (!notice) return
@@ -418,6 +465,7 @@ $('logout').onclick = async () => {
       'autoRunManaged',
       'autoRunManuallyPaused',
       'facebookSession',
+      'consumerDiagnostics',
     ],
     () => {
       token = ''

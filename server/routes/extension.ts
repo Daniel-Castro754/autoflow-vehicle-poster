@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { randomBytes } from 'node:crypto'
+import { logger } from '../lib/logger.ts'
+import { sanitizeExecutionDiagnostics, sanitizeConsumerDiagnostic } from '../services/execution-diagnostics.ts'
 import { publicationMayExist, readPublicationReport } from '../services/publication-evidence.ts'
 import { findBestAccountForVehicle } from '../services/session-manager.ts'
 import { calculateBackoff } from '../lib/retry.ts'
@@ -123,6 +125,10 @@ export async function handleExtensionRoute(
       'UPDATE social_accounts SET last_seen_at=CURRENT_TIMESTAMP,status=? ' +
         'WHERE id=? AND organization_id=?',
     ).run('connected', accountId, auth.organizationId)
+    const diagnostic = sanitizeConsumerDiagnostic(body?.diagnostic)
+    if (diagnostic) logger.info('ExtensionConsumer', 'Estado operacional do perfil', {
+      organizationId: auth.organizationId, accountId, ...diagnostic,
+    })
     return send(res, 200, { ok: true })
   }
   if (req.method === 'GET' && url.pathname === '/api/extension/accounts') {
@@ -830,6 +836,14 @@ export async function handleExtensionRoute(
       return send(res, 409, {
         error: 'A execução perdeu o bloqueio exclusivo. Reabra o trabalho pela extensão.',
       })
+    const diagnostics = sanitizeExecutionDiagnostics(b.diagnostics)
+    if (diagnostics.length) {
+      recordJobEvent(auth.organizationId, job.id, 'execution_diagnostics', null, {
+        accountId: job.accountId,
+        attemptCount: job.attemptCount || 0,
+        diagnostics,
+      })
+    }
     const error = String(b.error || '').slice(0, 240)
     if (error && soldInterrupted) {
       db.prepare(
@@ -1029,6 +1043,7 @@ export async function handleExtensionRoute(
       ).slice(0, 50),
       pageLocale: String(b.pageLocale || selectorHealth.pageLocale || '').slice(0, 20),
       selectorHealth,
+      diagnostics,
       accountAutomationPaused: false,
       ...(latePublished ? { lateConfirmation: true } : {}),
     }

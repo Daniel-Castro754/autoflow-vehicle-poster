@@ -279,16 +279,46 @@ function ensureHeartbeatAlarm() {
     if (!alarm) chrome.alarms.create(HEARTBEAT_ALARM, { delayInMinutes: 0.5, periodInMinutes: 1 })
   })
 }
+// Bounded local history; diagnostics must never change the consumer's decision.
+async function recordConsumerDecision(accountId, code, details = {}) {
+  if (!Number.isSafeInteger(accountId) || accountId <= 0) return
+  try {
+    const { consumerDiagnostics } = await chrome.storage.local.get('consumerDiagnostics')
+    const history = Array.isArray(consumerDiagnostics) ? consumerDiagnostics : []
+    const last = [...history].reverse().find((entry) => entry.accountId === accountId)
+    const data = { accountId, code }
+    for (const key of ['jobId', 'httpStatus', 'queueSize', 'retryAfterSeconds']) {
+      if (Number.isSafeInteger(details[key]) && details[key] >= 0) data[key] = details[key]
+    }
+    if (
+      last?.code === code &&
+      last.jobId === data.jobId &&
+      last.httpStatus === data.httpStatus &&
+      Date.now() - last.at < 300000
+    ) return
+    const entry = { ...data, at: Date.now() }
+    await chrome.storage.local.set({ consumerDiagnostics: [...history, entry].slice(-200) })
+    console.info('AutoFlow: decisão operacional', entry)
+  } catch {
+    // Telemetry is best-effort and never blocks a publication or recovery.
+  }
+}
+
 // This only reports that the local extension can reach AutoFlow.
 // It does not assert Facebook login, DOM readiness or a successful publication.
 async function reportExtensionPresence() {
-  const state = await chrome.storage.local.get(['activeAccountId', 'token', 'refreshToken'])
+  const state = await chrome.storage.local.get(['activeAccountId', 'token', 'refreshToken', 'consumerDiagnostics'])
   if (!state.activeAccountId || (!state.token && !state.refreshToken)) return
   try {
     await authorizedFetch(`${API}/extension/presence`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accountId: state.activeAccountId }),
+      body: JSON.stringify({
+        accountId: state.activeAccountId,
+        diagnostic: Array.isArray(state.consumerDiagnostics)
+          ? [...state.consumerDiagnostics].reverse().find((entry) => entry.accountId === state.activeAccountId)
+          : undefined,
+      }),
     })
   } catch {
     // A temporary outage does not change manual pause or authentication state.
@@ -345,6 +375,8 @@ async function synchronizeAutonomousConsumption() {
 async function consumeQueue() {
   if (queueConsumerRunning || manualLaunchRunning) return
   queueConsumerRunning = true
+  let accountId = 0
+  let currentJobId = 0
   try {
     const state = await chrome.storage.local.get([
       'autoRun',
@@ -356,8 +388,20 @@ async function consumeQueue() {
       'pendingPublishes',
       'pendingPublish',
     ])
-    if (!state.autoRun || !state.activeAccountId || state.pendingJob) return
-    if (!state.token && !state.refreshToken) return
+    accountId = Number(state.activeAccountId) || 0
+    if (!accountId) return
+    if (!state.autoRun) {
+      await recordConsumerDecision(accountId, 'consumer_paused')
+      return
+    }
+    if (state.pendingJob) {
+      await recordConsumerDecision(accountId, 'execution_pending', { jobId: state.pendingJob.jobId })
+      return
+    }
+    if (!state.token && !state.refreshToken) {
+      await recordConsumerDecision(accountId, 'session_missing')
+      return
+    }
     const response = await authorizedFetch(
       `${API}/extension/queue?accountId=${encodeURIComponent(state.activeAccountId)}`,
       {
@@ -368,20 +412,33 @@ async function consumeQueue() {
       const { authNeeded } = await chrome.storage.local.get('authNeeded')
       // An API outage during refresh is transient: retry on the next alarm.
       if (authNeeded) await chrome.storage.local.set({ autoRun: false })
+      await recordConsumerDecision(accountId, 'api_unauthorized', { httpStatus: 401 })
       return
+    }
+    if (!response.ok) {
+      await recordConsumerDecision(accountId, 'queue_http_error', { httpStatus: response.status })
     }
     if (!response.ok) throw new Error(`Falha ao consultar a fila: HTTP ${response.status}`)
     const queue = await response.json()
     if (queue.nextScheduledAt) scheduleConsumer(queue.nextScheduledAt)
-    if (queue.capacity?.blockedByDailyLimit) return
+    if (queue.capacity?.blockedByDailyLimit) {
+      await recordConsumerDecision(accountId, 'daily_limit')
+      return
+    }
     if (Number(queue.capacity?.retryAfterSeconds) > 0) {
       if (queue.capacity.nextAllowedAt) scheduleConsumer(queue.capacity.nextAllowedAt)
+      await recordConsumerDecision(accountId, 'operational_interval', { retryAfterSeconds: queue.capacity.retryAfterSeconds })
       return
     }
     const job = queue.jobs.find(
       (item) => item.jobStatus === 'pending' && !item.locked && !item.publishUncertain,
     )
-    if (!job) return
+    if (!job) {
+      await recordConsumerDecision(accountId, queue.jobs.length ? 'no_eligible_job' : queue.nextScheduledAt ? 'scheduled_wait' : 'queue_empty', { queueSize: queue.jobs.length })
+      return
+    }
+    currentJobId = job.jobId
+    await recordConsumerDecision(accountId, 'job_selected', { jobId: currentJobId, queueSize: queue.jobs.length })
     const tab = await chrome.tabs.create({
       url: 'https://www.facebook.com/marketplace/create/vehicle',
       active: true,
@@ -399,6 +456,7 @@ async function consumeQueue() {
           },
           autoRun: false,
         })
+        await recordConsumerDecision(accountId, 'facebook_not_ready', { jobId: currentJobId })
         // Keep the Facebook tab for the human to log in or complete a challenge.
         return
       }
@@ -417,6 +475,7 @@ async function consumeQueue() {
       })
       const prepared = await prepareResponse.json()
       if (!prepareResponse.ok) {
+        await recordConsumerDecision(accountId, 'prepare_rejected', { jobId: currentJobId, httpStatus: prepareResponse.status })
         if (prepareResponse.status === 409 && prepared.capacity?.retryAfterSeconds) {
           chrome.alarms.create(HEARTBEAT_ALARM, {
             delayInMinutes: Math.max(1, Math.ceil(prepared.capacity.retryAfterSeconds / 60)),
@@ -429,7 +488,9 @@ async function consumeQueue() {
       reserved = true
       // The automatic consumer must also wait for an acknowledged dispatch.
       await sendManualFill(tab.id, prepared)
+      await recordConsumerDecision(accountId, 'dispatch_confirmed', { jobId: currentJobId })
     } catch (error) {
+      if (reserved) await recordConsumerDecision(accountId, 'dispatch_failed', { jobId: currentJobId })
       if (!reserved) await chrome.tabs.remove(tab.id).catch(() => {})
       else
         await chrome.storage.local.set({
@@ -445,6 +506,7 @@ async function consumeQueue() {
       throw error
     }
   } catch (error) {
+    if (!currentJobId) await recordConsumerDecision(accountId, 'consumer_check_failed')
     console.warn(
       'AutoFlow: consumidor da fila pausado até a próxima verificação',
       error instanceof Error ? error.message : String(error),
@@ -978,6 +1040,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         ? {
             error: String(message.error || 'Falha no preenchimento'),
             failureCode: String(message.failureCode || ''),
+            diagnostics: message.diagnostics,
           }
         : message.report
     const payload = {

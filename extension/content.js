@@ -548,21 +548,26 @@
   }
 
   const imageUploads = new Map()
-  async function uploadImages(images) {
-    if (!Array.isArray(images) || !images.length) return 0
+  async function uploadImages(images, trace = () => {}) {
+    if (!Array.isArray(images) || !images.length) {
+      trace('photos_empty')
+      return 0
+    }
     const target = images.slice(0, 20)
     const key = JSON.stringify(target.map((image) => image.url))
     let state = imageUploads.get(key)
     const initial = photoCount() || 0
     // After reload, a count alone does not prove the identity of existing photos.
     // Never resume blindly or let auto-publish treat a partial previous upload as verified.
-    if (!state && initial > 0)
+    if (!state && initial > 0) {
+      trace('photo_identity_unverified', { count: initial })
       throw Object.assign(
         new Error(
           'Fotos já presentes sem identificação verificável. Revise o formulário antes de publicar.',
         ),
         { failureCode: 'photo_identity_unverified' },
       )
+    }
     if (initial >= target.length) return initial
     if (!state) {
       state = { completed: new Set(), awaiting: null }
@@ -572,7 +577,10 @@
       if (initial === state.awaiting.before + 1) {
         state.completed.add(state.awaiting.index)
         state.awaiting = null
-      } else return initial
+      } else {
+        trace('photo_previous_pending', { index: state.awaiting.index + 1, count: initial })
+        return initial
+      }
     }
     for (let index = 0; index < target.length; index++) {
       if (state.completed.has(index)) continue
@@ -581,16 +589,28 @@
         input = photoInput()
         if (!input) await sleep(250)
       }
-      if (!input) return photoCount() || 0
+      if (!input) {
+        trace('photo_input_missing', { index: index + 1 })
+        return photoCount() || 0
+      }
       let response
       try {
         response = await runtimeMessage({ type: 'AUTOFLOW_FETCH_IMAGE', url: target[index].url })
       } catch (error) {
         if (error.code === 'CONTEXT_INVALIDATED') throw error
+        const http = /^HTTP (\d{3})$/.exec(String(error.message || ''))
+        trace(error.message === 'Endereço de imagem inválido.' ? 'photo_address_rejected' : 'photo_download_failed', {
+          index: index + 1,
+          ...(http ? { httpStatus: Number(http[1]) } : {}),
+        })
         return photoCount() || 0
       }
+      trace('photo_downloaded', { index: index + 1 })
       const before = photoCount()
-      if (before === null || before !== state.completed.size) return before || 0
+      if (before === null || before !== state.completed.size) {
+        trace('photo_count_unverified', { index: index + 1, count: before ?? 0 })
+        return before || 0
+      }
       const transfer = new DataTransfer()
       transfer.items.add(
         fileFromBase64(
@@ -612,11 +632,18 @@
         if (accepted === before + 1) {
           state.completed.add(index)
           state.awaiting = null
+          trace('photo_accepted', { index: index + 1, count: accepted })
           break
         }
-        if (accepted !== null && accepted !== before) return accepted
+        if (accepted !== null && accepted !== before) {
+          trace('photo_count_unverified', { index: index + 1, count: accepted })
+          return accepted
+        }
       }
-      if (state.awaiting) return photoCount() || before
+      if (state.awaiting) {
+        trace('photo_accept_timeout', { index: index + 1, count: photoCount() || before })
+        return photoCount() || before
+      }
     }
     return photoCount() || 0
   }
@@ -1003,6 +1030,13 @@
     const vehicle = task.vehicle || task
     const jobId = task.jobId
     const automation = task.automation || {}
+    const diagnostics = []
+    task.diagnostics = diagnostics
+    const started = Date.now()
+    const trace = (code, details = {}) => {
+      if (diagnostics.length < 100) diagnostics.push({ code, elapsedMs: Date.now() - started, ...details })
+    }
+    trace('form_started')
     const fieldSteps = [
       {
         key: 'vehicleType',
@@ -1134,7 +1168,9 @@
       : 0
     const resultMap = new Map()
     for (const field of fieldSteps) resultMap.set(field.label, await step(field.label, field.run))
-    let imageCount = await uploadImages(vehicle.images)
+    trace('fields_checked', { count: [...resultMap.values()].filter((item) => item[1]).length, expected: fieldSteps.length })
+    trace('photos_started', { expected: expectedImageCount })
+    let imageCount = await uploadImages(vehicle.images, trace)
     resultMap.set('Fotos', ['Fotos', expectedImageCount > 0 && imageCount === expectedImageCount])
     const repairFields = async (attempt) => {
       const failed = fieldSteps.filter((field) => !resultMap.get(field.label)?.[1])
@@ -1144,7 +1180,8 @@
         if (retried[1]) resultMap.set(field.label, retried)
       }
       if (imageCount < expectedImageCount && attempt === 0) {
-        imageCount = await uploadImages(vehicle.images)
+        trace('photos_retry', { count: imageCount, expected: expectedImageCount })
+        imageCount = await uploadImages(vehicle.images, trace)
         resultMap.set('Fotos', [
           'Fotos',
           expectedImageCount > 0 && imageCount === expectedImageCount,
@@ -1159,6 +1196,7 @@
     const flowIssues = []
     if (automation.autoAdvance) {
       advanced = await advanceToGroups(repairFields)
+      trace(advanced ? 'advanced' : 'advance_failed')
       if (!advanced)
         flowIssues.push(
           'O Facebook não liberou a segunda etapa após as tentativas de preenchimento e correção.',
@@ -1172,6 +1210,7 @@
           const groupResult = await selectConfiguredGroups(configuredGroups)
           selectedGroups = groupResult.selected
           missingGroups = groupResult.missing
+          trace('groups_checked', { count: selectedGroups.length, expected: configuredGroups.length })
           if (missingGroups.length)
             flowIssues.push('A seleção de todos os grupos não foi confirmada.')
         }
@@ -1195,6 +1234,7 @@
           missingGroups: [],
           flowIssues: [],
           publishAttempted: true,
+          diagnostics: [...diagnostics],
         }
         const publication = await publishListing(
           () =>
@@ -1212,6 +1252,7 @@
         )
         publishAttempted = publication.clicked
         published = publication.confirmed
+        trace(published ? 'publication_confirmed' : publishAttempted ? 'publication_uncertain' : 'publication_not_clicked')
         if (publication.clicked && !published) {
           flowIssues.push(
             'O clique em Publicar foi enviado, mas o Facebook não confirmou o resultado. A tentativa foi preservada para reconciliação; não será repetida automaticamente.',
@@ -1271,6 +1312,7 @@
       flowIssues,
     })
     if (!jobId) return true
+    trace('form_finished', { count: imageCount, expected: expectedImageCount })
     return reportResult({
       type: 'AUTOFLOW_FILL_RESULT',
       jobId,
@@ -1294,6 +1336,7 @@
         selectorConfigVersion: selectorHealth.configVersion,
         pageLocale: selectorHealth.pageLocale,
         selectorHealth,
+        diagnostics,
       },
     })
   }
@@ -1408,6 +1451,7 @@
           document: location.pathname,
           documentId: boundTask.documentId,
           error: error.message || String(error),
+          diagnostics: boundTask.diagnostics,
           failureCode:
             error.failureCode ||
             (task?.startupError === 'O formulário do Marketplace não ficou disponível.'

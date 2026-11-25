@@ -297,6 +297,14 @@ async function runConsumer(queue, network = {}, settings = {}) {
   assert.equal(blocked.stored.facebookSession.ready, false)
 }
 
+{
+  const waiting = await runConsumer({ jobs: [], capacity: { retryAfterSeconds: 60 } })
+  assert.equal(waiting.stored.consumerDiagnostics.at(-1).code, 'operational_interval')
+  assert.equal(waiting.createdTabs.length, 0)
+  const empty = await runConsumer({ jobs: [] })
+  assert.equal(empty.stored.consumerDiagnostics.at(-1).code, 'queue_empty')
+  assert.equal(JSON.stringify(empty.stored.consumerDiagnostics).includes('extension-token'), false)
+}
 console.log('✓ Queue consumer ignores non-retryable errors and uncertain publications.')
 
 {
