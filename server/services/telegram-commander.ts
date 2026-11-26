@@ -5,11 +5,12 @@ import { sendTelegramOperational } from './telegram-monitor.ts'
 import { parseSqliteTimestamp } from './profile-capacity.ts'
 import { logger } from '../lib/logger.ts'
 import { answerCommanderQuestion, commanderUsage } from './commander-conversation.ts'
+import { clearCommanderMemory, commanderMemoryCount, rememberCommanderQueries, type MemoryScope } from './commander-memory.ts'
 
 type Credentials = { telegramBotToken: string; telegramChatId: string }
 type Row = {
   organization_id: number; enabled: number; user_ids: string; bot_hash: string; destination_hash: string
-  ai_enabled: number; revision: number; activated_at: number; next_offset: number; last_update_at: number
+  ai_enabled: number; memory_enabled: number; revision: number; activated_at: number; next_offset: number; last_update_at: number
   lease_owner: string; lease_until: number; last_poll_at: number; last_status: string
 }
 type Result = { ok: true; result: unknown } | { ok: false; status: string }
@@ -38,12 +39,13 @@ export function telegramCommanderSettings(db:DatabaseSync,org:number,credentials
   const bound=configured(c)&&row?.destination_hash===destinationHash(c)
   return {enabled:Boolean(row?.enabled&&bound),userIds:bound?ids(row):[],
     aiEnabled:Boolean(row?.enabled&&bound&&row.ai_enabled),usage:commanderUsage(db,org),
+    memoryEnabled:Boolean(row?.enabled&&bound&&row.ai_enabled&&row.memory_enabled),memoryCount:bound?commanderMemoryCount(db,org):0,
     configured:configured(c),requiresRebind:Boolean(row?.enabled&&!bound),
     lastPollAt:row?.last_poll_at?new Date(row.last_poll_at).toISOString():null,
     lastStatus:row?.enabled&&!bound?'destination_changed':row?.last_status||'idle'}
 }
 export function saveTelegramCommanderSettings(db:DatabaseSync,org:number,input:unknown,credentials:(db:DatabaseSync,org:number)=>Credentials=getAlertCredentials,now=Date.now()){
-  const value=input as {enabled?:unknown;userIds?:unknown;acknowledgeGroup?:unknown;aiEnabled?:unknown;acknowledgeDeepseek?:unknown}|null
+  const value=input as {enabled?:unknown;userIds?:unknown;acknowledgeGroup?:unknown;aiEnabled?:unknown;acknowledgeDeepseek?:unknown;memoryEnabled?:unknown;acknowledgeMemory?:unknown}|null
   if(!value||typeof value.enabled!=='boolean'||!Array.isArray(value.userIds)||value.userIds.length>10||
     value.userIds.some(id=>typeof id!=='string'||!/^[1-9]\d{0,15}$/.test(id)||!Number.isSafeInteger(Number(id))))
     throw new Error('Informe IDs numéricos válidos (até 10).')
@@ -51,6 +53,9 @@ export function saveTelegramCommanderSettings(db:DatabaseSync,org:number,input:u
   if(value.aiEnabled!==undefined&&typeof value.aiEnabled!=='boolean')throw new Error('Configuração de IA inválida.')
   const aiEnabled=value.enabled&&value.aiEnabled===true
   if(aiEnabled&&(!userIds.length||value.acknowledgeDeepseek!==true))throw new Error('Autorize usuários e confirme o envio de dados ao DeepSeek.')
+  if(value.memoryEnabled!==undefined&&typeof value.memoryEnabled!=='boolean')throw new Error('Configuração de memória inválida.')
+  const memoryEnabled=aiEnabled&&value.memoryEnabled===true
+  if(memoryEnabled&&value.acknowledgeMemory!==true)throw new Error('Confirme a retenção e reutilização das referências de consultas.')
   const c=credentials(db,org)
   if(value.enabled&&(!configured(c)||value.acknowledgeGroup!==true))
     throw new Error('Configure o bot/grupo e confirme que as respostas serão visíveis aos membros.')
@@ -61,12 +66,13 @@ export function saveTelegramCommanderSettings(db:DatabaseSync,org:number,input:u
     const hash=configured(c)?botHash(c):''
     if(value.enabled&&db.prepare('SELECT 1 FROM telegram_commander WHERE bot_hash=? AND enabled=1 AND organization_id!=?').get(hash,org))
       throw new Error('Este bot já possui um receptor ativo. Use um bot exclusivo.')
-    if(!old||old.enabled!==Number(value.enabled)||old.ai_enabled!==Number(aiEnabled)||old.destination_hash!==fingerprint||JSON.stringify(ids(old))!==JSON.stringify(userIds)){
+    if(!old||old.enabled!==Number(value.enabled)||old.ai_enabled!==Number(aiEnabled)||old.memory_enabled!==Number(memoryEnabled)||old.destination_hash!==fingerprint||JSON.stringify(ids(old))!==JSON.stringify(userIds)){
       // Keep the cursor for the same bot, even when enabling/disabling or changing the allowlist.
       // The activation timestamp rejects queued commands from prior authorizations.
       const sameBot=old?.bot_hash===hash
-      db.prepare('INSERT INTO telegram_commander(organization_id,enabled,user_ids,bot_hash,destination_hash,ai_enabled,revision,activated_at,next_offset,last_update_at,last_status) VALUES(?,?,?,?,?,?,1,?,?,?,?) ON CONFLICT(organization_id) DO UPDATE SET enabled=excluded.enabled,ai_enabled=excluded.ai_enabled,user_ids=excluded.user_ids,bot_hash=excluded.bot_hash,destination_hash=excluded.destination_hash,revision=telegram_commander.revision+1,activated_at=excluded.activated_at,next_offset=excluded.next_offset,last_update_at=excluded.last_update_at,last_status=excluded.last_status')
-        .run(org,Number(value.enabled),JSON.stringify(userIds),hash,fingerprint,Number(aiEnabled),now,sameBot?old.next_offset:0,sameBot?old.last_update_at:0,value.enabled?'idle':'disabled')
+      db.prepare('INSERT INTO telegram_commander(organization_id,enabled,user_ids,bot_hash,destination_hash,ai_enabled,memory_enabled,revision,activated_at,next_offset,last_update_at,last_status) VALUES(?,?,?,?,?,?,?,1,?,?,?,?) ON CONFLICT(organization_id) DO UPDATE SET enabled=excluded.enabled,ai_enabled=excluded.ai_enabled,memory_enabled=excluded.memory_enabled,user_ids=excluded.user_ids,bot_hash=excluded.bot_hash,destination_hash=excluded.destination_hash,revision=telegram_commander.revision+1,activated_at=excluded.activated_at,next_offset=excluded.next_offset,last_update_at=excluded.last_update_at,last_status=excluded.last_status')
+        .run(org,Number(value.enabled),JSON.stringify(userIds),hash,fingerprint,Number(aiEnabled),Number(memoryEnabled),now,sameBot?old.next_offset:0,sameBot?old.last_update_at:0,value.enabled?'idle':'disabled')
+      clearCommanderMemory(db,org)
     }
     db.exec('COMMIT')
   }catch(error){db.exec('ROLLBACK');throw error}
@@ -97,7 +103,7 @@ function statusText(db:DatabaseSync,org:number,now:number){
     ...profiles.map(p=>{const seen=parseSqliteTimestamp(p.seen);return clean(p.label)+': '+(p.status==='connected'&&seen!==null&&seen<=now+60000&&now-seen<=300000?'online':'offline')}),
     'Presença recente não garante que o Facebook esteja autenticado.'].join('\n')
 }
-function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,update:Update,now:number):string|{question:string}|null{
+function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,update:Update,now:number):string|{question:string;userId:string}|null{
   const m=update.message
   if(!m||m.sender_chat||m.from?.is_bot!==false||!Number.isSafeInteger(m.from.id)||
     !Number.isSafeInteger(m.chat?.id)||String(m.chat?.id)!==c.telegramChatId||
@@ -109,16 +115,20 @@ function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,update:U
   if(ai){
     if((ai[1]&&ai[1].toLowerCase()!==username.toLowerCase())||!ids(row).includes(String(m.from.id)))return null
     if(!row.ai_enabled)return 'Perguntas com DeepSeek desativadas. Ative no painel.'
-    return {question:ai[2].trim()}
+    return {question:ai[2].trim(),userId:String(m.from.id)}
   }
-  const match=m.text.trim().match(/^\/(meu_id|ajuda|status)(?:@([A-Za-z0-9_]+))?$/i)
+  const match=m.text.trim().match(/^\/(meu_id|ajuda|status|limpar_memoria)(?:@([A-Za-z0-9_]+))?$/i)
   if(!match||(match[2]&&match[2].toLowerCase()!==username.toLowerCase()))return null
   const command=match[1].toLowerCase()
   const user=String(m.from.id)
   // Setup mode can identify the caller, but never disclose operational data.
   if(command==='meu_id')return 'Seu ID numérico: '+user+'. Cadastre-o no painel do AutoFlow.'
   if(!ids(row).includes(user))return null
-  if(command==='ajuda')return 'AutoFlow AI Commander — consulta somente leitura\n/status — situação do sistema\n/meu_id — seu identificador\n/ajuda — comandos\n/ia pergunta — consulta DeepSeek, se ativada no painel. Nenhuma ação de alteração está habilitada.'
+  if(command==='limpar_memoria'){
+    clearCommanderMemory(db,row.organization_id,user)
+    return 'Suas referências de consultas foram limpas no AutoFlow. O histórico do Telegram, backups e diagnósticos operacionais não foram alterados.'
+  }
+  if(command==='ajuda')return 'AutoFlow AI Commander — consulta somente leitura\n/status — situação do sistema\n/meu_id — seu identificador\n/ajuda — comandos\n/ia pergunta — consulta DeepSeek, se ativada no painel.\n/limpar_memoria — limpa suas referências locais. Nenhuma ação de alteração está habilitada.'
   return statusText(db,row.organization_id,now)
 }
 
@@ -171,8 +181,15 @@ export async function sweepTelegramCommander(db:DatabaseSync,deps:Dependencies={
             if(!await send(reply,c))status='reply_failed'
           }else{
             const authorized=()=>Boolean(current()?.ai_enabled&&sameDestination())
-            const result=await (deps.answer||answerCommanderQuestion)(db,org,reply.question,authorized)
-            if(authorized()&&!await send(result.text,c))status='reply_failed'
+            const memory:MemoryScope|undefined=r.memory_enabled?{userId:reply.userId,destinationHash:r.destination_hash,revision:r.revision}:undefined
+            const result=await (deps.answer||answerCommanderQuestion)(db,org,reply.question,authorized,{memory})
+            if(authorized()){
+              if(!await send(result.text,c))status='reply_failed'
+              else if(memory&&result.status==='answered'&&authorized()){
+                try{rememberCommanderQueries(db,org,memory,result.references,now())}
+                catch{logger.warn('TelegramCommander','Falha ao registrar referências de consulta',{organizationId:org})}
+              }
+            }
             // One AI question per lease. Later messages remain for the next poll.
             break
           }

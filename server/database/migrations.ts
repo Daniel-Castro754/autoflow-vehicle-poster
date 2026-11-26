@@ -603,6 +603,21 @@ const migrations: Migration[] = [
     CREATE INDEX IF NOT EXISTS idx_commander_diagnostic_recent ON commander_diagnostic_history(organization_id,job_id,family,claimed_at);
     CREATE INDEX IF NOT EXISTS idx_commander_diagnostic_age ON commander_diagnostic_history(claimed_at);`,
   },
+  {
+    version: 36,
+    columns: [['telegram_commander','memory_enabled','INTEGER NOT NULL DEFAULT 0 CHECK(memory_enabled IN (0,1))']],
+    sql: `CREATE TABLE IF NOT EXISTS commander_memory (
+      id INTEGER PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      telegram_user_id TEXT NOT NULL,
+      destination_hash TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      traces TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_commander_memory_scope ON commander_memory(organization_id,telegram_user_id,destination_hash,revision,id DESC);
+    CREATE INDEX IF NOT EXISTS idx_commander_memory_age ON commander_memory(created_at);`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

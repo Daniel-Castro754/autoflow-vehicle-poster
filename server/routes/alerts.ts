@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
+import { clearAllCommanderMemory } from '../services/commander-memory.ts'
 import { sendCriticalAlert } from '../services/alerting.ts'
 import { getAlertCredentials } from '../services/credential-vault.ts'
 import { commanderDiagnosticSettings, saveCommanderDiagnosticSettings } from '../services/commander-incident-diagnostics.ts'
@@ -21,6 +22,14 @@ export async function handleAlertRoute(
   auth: AuthContext,
   { db, send, isAdmin, jsonBody }: Dependencies,
 ): Promise<boolean> {
+  if (url.pathname === '/api/alerts/commander-memory/clear' && req.method==='POST') {
+    if(!isAdmin(auth)){send(res,403,{error:'Somente administradores podem limpar a memória da empresa.'});return true}
+    const body=await jsonBody(req,4096) as {confirm?:unknown}|null
+    if(body?.confirm!==true){send(res,400,{error:'Confirmação necessária.'});return true}
+    res.setHeader('Cache-Control','no-store')
+    send(res,200,{removed:clearAllCommanderMemory(db,auth.organizationId)})
+    return true
+  }
   if (url.pathname === '/api/alerts/commander-diagnostics' && ['GET','PATCH'].includes(req.method || '')) {
     if (!isAdmin(auth)) {send(res,403,{error:'Somente administradores podem configurar diagnósticos.'});return true}
     res.setHeader('Cache-Control','no-store')
