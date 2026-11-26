@@ -65,6 +65,10 @@ try {
   const granted=await api('/alerts/commander-permissions',{method:'PATCH',body:JSON.stringify({enabled:true,grants:[grant],acknowledge:true})})
   assert.equal(granted.enabled,true)
   assert.deepEqual(granted.grants,[grant])
+  const realGrant={userId:'123',action:'pausar_trabalho_real'}
+  await assert.rejects(api('/alerts/commander-permissions',{method:'PATCH',body:JSON.stringify({enabled:true,grants:[realGrant],acknowledge:true})}),err=>err.status===400)
+  const realPolicy=await api('/alerts/commander-permissions',{method:'PATCH',body:JSON.stringify({enabled:true,grants:[realGrant],acknowledge:true,acknowledgeLive:true})})
+  assert.deepEqual(realPolicy.grants,[realGrant])
   assert(!JSON.stringify(granted).includes(telegram))
   await api('/alerts/telegram-commander',{method:'PATCH',body:JSON.stringify({enabled:false,userIds:[]})})
   assert.equal((await api('/alerts/commander-permissions')).enabled,false)

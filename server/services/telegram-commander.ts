@@ -5,7 +5,7 @@ import { sendTelegramOperational } from './telegram-monitor.ts'
 import { parseSqliteTimestamp } from './profile-capacity.ts'
 import { logger } from '../lib/logger.ts'
 import { answerCommanderQuestion, commanderUsage } from './commander-conversation.ts'
-import { proposeCommanderPause, decideCommanderAction } from './commander-permissions.ts'
+import { proposeCommanderPause, proposeCommanderAction, parseCommanderSchedule, decideCommanderAction } from './commander-permissions.ts'
 import { clearCommanderMemory, commanderMemoryCount, rememberCommanderQueries, type MemoryScope } from './commander-memory.ts'
 
 type Credentials = { telegramBotToken: string; telegramChatId: string }
@@ -112,6 +112,15 @@ function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,update:U
     !Number.isSafeInteger(m.date)||Number(m.date)*1000<Math.floor(row.activated_at/1000)*1000||
     now-Number(m.date)*1000>120000||Number(m.date)*1000>now+30000||
     typeof m.text!=='string'||m.text.length>1100||m.forward_origin)return null
+  const live=m.text.trim().match(/^\/(pausar|adiar|cancelar_trabalho)(?:@([A-Za-z0-9_]+))?\s+([1-9]\d{0,15})(?:\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}-03:00))?$/i)
+  if(live){
+    if((live[2]&&live[2].toLowerCase()!==username.toLowerCase())||!ids(row).includes(String(m.from.id)))return null
+    const actor={userId:String(m.from.id),destinationHash:row.destination_hash,receiverRevision:row.revision}
+    const verb=live[1].toLowerCase()
+    const scheduledAt=live[4]?parseCommanderSchedule(live[4]):null
+    if((verb==='adiar'&&!scheduledAt)||(verb!=='adiar'&&live[4]))return 'Use /adiar ID AAAA-MM-DDTHH:MM-03:00 ou /pausar ID ou /cancelar_trabalho ID.'
+    return proposeCommanderAction(db,row.organization_id,actor,verb==='pausar'?'pausar_trabalho_real':verb==='adiar'?'adiar_trabalho':'cancelar_trabalho_pendente',Number(live[3]),scheduledAt,c,now)
+  }
   const action=m.text.trim().match(/^\/(solicitar_pausa|autorizar|recusar)(?:@([A-Za-z0-9_]+))?\s+([a-zA-Z0-9]+)$/i)
   if(action){
     if((action[2]&&action[2].toLowerCase()!==username.toLowerCase())||!ids(row).includes(String(m.from.id)))return null
@@ -139,7 +148,7 @@ function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,update:U
     clearCommanderMemory(db,row.organization_id,user)
     return 'Suas referências de consultas foram limpas no AutoFlow. O histórico do Telegram, backups e diagnósticos operacionais não foram alterados.'
   }
-  if(command==='ajuda')return 'AutoFlow AI Commander — consulta somente leitura\n/status — situação do sistema\n/meu_id — seu identificador\n/ajuda — comandos\n/ia pergunta — consulta DeepSeek, se ativada no painel.\n/limpar_memoria — limpa suas referências locais. /solicitar_pausa ID — demonstração de autorização, se permitida.\n/autorizar CÓDIGO ou /recusar CÓDIGO — decidir proposta. Nenhuma ação operacional está habilitada.'
+  if(command==='ajuda')return 'AutoFlow AI Commander — consulta somente leitura\n/status — situação do sistema\n/meu_id — seu identificador\n/ajuda — comandos\n/ia pergunta — consulta DeepSeek, se ativada no painel.\n/limpar_memoria — limpa suas referências locais. /solicitar_pausa ID — demonstração de autorização, se permitida.\n/autorizar CÓDIGO ou /recusar CÓDIGO — decidir proposta. /pausar ID, /adiar ID AAAA-MM-DDTHH:MM-03:00, /cancelar_trabalho ID — propostas reais se autorizadas. Não publica nem retira anúncios.'
   return statusText(db,row.organization_id,now)
 }
 
