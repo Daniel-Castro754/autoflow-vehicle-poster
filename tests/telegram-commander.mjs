@@ -4,6 +4,7 @@ import { initializeBaseSchema } from '../server/database/schema.ts'
 import { applyMigrations } from '../server/database/migrations.ts'
 import { telegramCommanderSettings, saveTelegramCommanderSettings, sweepTelegramCommander } from '../server/services/telegram-commander.ts'
 import { formatCommanderReply, sendCommanderReply } from '../server/services/commander-telegram-reply.ts'
+import { buildCommanderMenu, verifyCommanderMenu } from '../server/services/commander-inline-menu.ts'
 const db=new DatabaseSync(':memory:')
 initializeBaseSchema(db);applyMigrations(db)
 db.exec("INSERT INTO organizations(id,name) VALUES(1,'One'),(2,'Other'); INSERT INTO organization_settings(organization_id) VALUES(1),(2); INSERT INTO users(id,organization_id,name,email,password_hash) VALUES(1,1,'Owner','one@local','fixture'),(2,2,'Owner','two@local','fixture'); INSERT INTO social_accounts(id,organization_id,user_id,label,status,last_seen_at) VALUES(1,1,1,'Mae','connected',CURRENT_TIMESTAMP),(2,2,2,'Foreign profile','connected',CURRENT_TIMESTAMP); INSERT INTO vehicles(id,organization_id,year,make,model) VALUES(1,1,2022,'VW','Nivus'),(2,2,2022,'Private','Other');")
@@ -20,8 +21,11 @@ assert.throws(()=>saveTelegramCommanderSettings(db,2,{enabled:true,userIds:['100
 const messages=[]
 let updates=[]
 let lastOffset=0
+const callbacks=[]
 const request=async(_token,method,payload)=>{
   if(method==='getMe')return {ok:true,result:{is_bot:true,username:'AutoFlowVeiculosBot',id:123}}
+  if(method==='answerCallbackQuery'){callbacks.push(payload);return {ok:true,result:true}}
+  assert.deepEqual(payload.allowed_updates,['message','callback_query'])
   lastOffset=payload.offset
   return {ok:true,result:updates}
 }
@@ -76,8 +80,48 @@ messages.pop()
 updates=[update(22,'/menu',101),update(23,'/menu',100,-999),update(24,'/menu@OtherBot'),update(25,'/menu@AutoFlowVeiculosBot',100,-123,Math.floor(now/1000),{message_id:42})]
 await naturalSweep()
 assert.equal(messages.length,3)
-assert.deepEqual(messages.at(-1).options.menu,{messageId:42,username:'AutoFlowVeiculosBot',aiEnabled:true})
+const keyboard=messages.at(-1).options.menu.keyboard
+assert.equal(messages.at(-1).options.menu.messageId,42)
+assert.equal(keyboard.flat().length,9)
+assert(keyboard.flat().every(button=>Buffer.byteLength(button.callback_data)<=64&&!button.text.startsWith('/')))
+const data=action=>keyboard.flat().find(button=>button.callback_data.startsWith('ac1:'+action+':')).callback_data
 messages.pop()
+const scope={organizationId:1,chatId:'-123',userId:'100',revision:db.prepare('SELECT revision FROM telegram_commander WHERE organization_id=1').get().revision,token:c.telegramBotToken}
+assert.equal(verifyCommanderMenu(data('status'),scope,true,now).action,'status')
+for(const changed of [{userId:'101'},{organizationId:2},{chatId:'-999'},{revision:scope.revision+1},{token:'different'}]){
+  assert.equal(verifyCommanderMenu(data('status'),{...scope,...changed},true,now),null)
+}
+assert.equal(verifyCommanderMenu(data('stock'),scope,false,now),null)
+assert.equal(verifyCommanderMenu(data('status'),scope,true,now+300001),null)
+assert.equal(verifyCommanderMenu(data('status').replace(':status:',':cancel:'),scope,true,now),null)
+assert.equal(buildCommanderMenu(scope,false,now).flat().length,3)
+const menuDate=Math.floor(now/1000)
+const click=(id,action,user=100,chat=-123,bot=123,extra={})=>({update_id:id,callback_query:{id:'click-'+id,data:data(action),from:{id:user,is_bot:false},message:{message_id:43,date:menuDate,from:{id:bot,is_bot:true},chat:{id:chat,type:'group'}},...extra}})
+updates=[click(26,'status',101),click(27,'status',100,-999),click(28,'status',100,-123,999),click(29,'status',100,-123,123,{data:'cancel:1'}),click(30,'status')]
+await naturalSweep()
+assert.equal(callbacks.length,5)
+assert(callbacks.slice(0,4).every(x=>x.text.includes('não autorizado')))
+assert.equal(messages.length,3)
+assert(messages.at(-1).text.includes('não marcados como vendidos: 1'))
+messages.pop()
+await naturalSweep()
+assert.equal(callbacks.length,5)
+assert.equal(messages.length,2)
+updates=[click(31,'stock')]
+await naturalSweep()
+assert.equal(natural.at(-1),'Quantos veículos estão em estoque? Resuma os disponíveis.')
+assert.equal(messages.at(-1).options.format,true)
+messages.pop()
+updates=[click(32,'chat'),click(33,'memory')]
+await naturalSweep()
+assert(messages.at(-2).text.includes('Responder nesta mensagem'))
+assert(messages.at(-1).text.includes('Nenhuma alteração'))
+messages.splice(-2)
+now+=301000
+updates=[click(34,'status')]
+await naturalSweep()
+assert.equal(messages.length,2)
+assert(callbacks.at(-1).text.includes('vencido'))
 const escaped=formatCommanderReply('**A < B & C** e <a href="https://example.test">link</a> e '+String.fromCharCode(96)+'x>y'+String.fromCharCode(96))
 assert.equal(escaped.html,'<b>A &lt; B &amp; C</b> e &lt;a href="https://example.test"&gt;link&lt;/a&gt; e <code>x&gt;y</code>')
 assert.equal(escaped.plain,'A < B & C e <a href="https://example.test">link</a> e x>y')
@@ -90,11 +134,11 @@ try{
   assert.equal(sent[0].text,'<b>Teste</b>')
   assert.equal(sent[1].parse_mode,undefined)
   assert.equal(sent[1].text,'Teste')
-  await sendCommanderReply('Menu',c,{menu:{messageId:42,username:'AutoFlowVeiculosBot',aiEnabled:true}})
+  await sendCommanderReply('Menu',c,{menu:{messageId:42,keyboard}})
   const menu=sent.at(-1)
-  assert.equal(menu.reply_markup.selective,true)
+  assert.equal(menu.reply_markup.keyboard,undefined)
   assert.equal(menu.reply_parameters.message_id,42)
-  assert(menu.reply_markup.keyboard.flat().every(button=>/^\/(status|ajuda|ia)@AutoFlowVeiculosBot(?: |$)/.test(button.text)))
+  assert.deepEqual(menu.reply_markup.inline_keyboard,keyboard)
   let networkAttempts=0
   globalThis.fetch=async()=>{networkAttempts++;throw new Error('network failure')}
   assert.equal(await sendCommanderReply('**Teste**',c,{format:true}),false)
@@ -113,4 +157,4 @@ save(['100'],false)
 await sweep()
 assert.equal(messages.length,2)
 db.close()
-console.log('Telegram Commander: explicit authorization, tenant and destination isolation, stale/bot/foreign rejection, persistent offset and read-only replies.')
+console.log('Telegram Commander: explicit authorization, tenant and destination isolation, stale/bot/foreign rejection, persistent offset, signed inline callbacks, expiry, scope and read-only replies.')
