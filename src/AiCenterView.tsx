@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { CommanderQueryCatalog } from './CommanderQueryCatalog'
 import {
   Sparkles,
   Bot,
@@ -706,6 +707,7 @@ export function AiCenterView({
           )}
         </div>
       </article>
+      <CommanderQueryCatalog api={api} />
       {/* Main Grid: Autopilot + Command Agent */}
       <div className="ai-two-column-grid">
         {/* Left Column: Autopilot Console & Quick Actions */}
