@@ -95,10 +95,10 @@ try{
   assert.equal(menu.reply_markup.selective,true)
   assert.equal(menu.reply_parameters.message_id,42)
   assert(menu.reply_markup.keyboard.flat().every(button=>/^\/(status|ajuda|ia)@AutoFlowVeiculosBot(?: |$)/.test(button.text)))
-  const count=sent.length
-  globalThis.fetch=async()=>{throw new Error('network failure')}
+  let networkAttempts=0
+  globalThis.fetch=async()=>{networkAttempts++;throw new Error('network failure')}
   assert.equal(await sendCommanderReply('**Teste**',c,{format:true}),false)
-  assert.equal(sent.length,count)
+  assert.equal(networkAttempts,1)
 }finally{globalThis.fetch=originalFetch}
 assert.equal(settings().memoryEnabled,false)
 assert.throws(()=>saveTelegramCommanderSettings(db,1,{enabled:true,userIds:['100'],acknowledgeGroup:true,aiEnabled:true,acknowledgeDeepseek:true,memoryEnabled:true},credentials,now))
