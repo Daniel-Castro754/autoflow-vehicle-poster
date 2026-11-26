@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { sendCriticalAlert } from '../services/alerting.ts'
 import { getAlertCredentials } from '../services/credential-vault.ts'
 import { telegramMonitorSettings, saveTelegramMonitorSettings } from '../services/telegram-monitor.ts'
+import { telegramCommanderSettings, saveTelegramCommanderSettings } from '../services/telegram-commander.ts'
 
 type AuthContext = { userId: number; organizationId: number }
 type Dependencies = {
@@ -19,6 +20,14 @@ export async function handleAlertRoute(
   auth: AuthContext,
   { db, send, isAdmin, jsonBody }: Dependencies,
 ): Promise<boolean> {
+  if (url.pathname === '/api/alerts/telegram-commander' && ['GET','PATCH'].includes(req.method || '')) {
+    if (!isAdmin(auth)) {send(res,403,{error:'Somente administradores podem configurar o receptor.'});return true}
+    if (req.method==='GET') {send(res,200,telegramCommanderSettings(db,auth.organizationId));return true}
+    const body=await jsonBody(req,4096)
+    try{send(res,200,saveTelegramCommanderSettings(db,auth.organizationId,body))}
+    catch{send(res,400,{error:'Configuração inválida, bot já utilizado ou grupo não confirmado.'})}
+    return true
+  }
   if (url.pathname === '/api/alerts/telegram-monitor' && ['GET','PATCH'].includes(req.method || '')) {
     if (!isAdmin(auth)) { send(res,403,{error:'Somente administradores podem configurar notificações.'}); return true }
     if (req.method==='GET') { send(res,200,telegramMonitorSettings(db,auth.organizationId)); return true }

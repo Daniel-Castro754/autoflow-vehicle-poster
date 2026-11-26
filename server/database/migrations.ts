@@ -546,6 +546,27 @@ const migrations: Migration[] = [
     columns: [['organization_settings', 'deepseek_api_key', "TEXT NOT NULL DEFAULT ''"]],
     sql: '',
   },
+  {
+    version: 33,
+    columns: [],
+    sql: `CREATE TABLE IF NOT EXISTS telegram_commander (
+      organization_id INTEGER PRIMARY KEY REFERENCES organizations(id),
+      enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),
+      user_ids TEXT NOT NULL DEFAULT '[]',
+      bot_hash TEXT NOT NULL DEFAULT '',
+      destination_hash TEXT NOT NULL DEFAULT '',
+      revision INTEGER NOT NULL DEFAULT 0,
+      activated_at INTEGER NOT NULL DEFAULT 0,
+      next_offset INTEGER NOT NULL DEFAULT 0,
+      last_update_at INTEGER NOT NULL DEFAULT 0,
+      lease_owner TEXT NOT NULL DEFAULT '',
+      lease_until INTEGER NOT NULL DEFAULT 0,
+      last_poll_at INTEGER NOT NULL DEFAULT 0,
+      last_status TEXT NOT NULL DEFAULT 'idle'
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_telegram_commander_bot
+      ON telegram_commander(bot_hash) WHERE enabled=1;`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

@@ -32,6 +32,7 @@ import { createGoogleSignIn } from './services/google-sign-in.ts'
 import { createAutomationStatements, handleDashboardRoute } from './routes/dashboard.ts'
 import { createVehiclePageStatements } from './routes/vehicles.ts'
 import { handleAlertRoute } from './routes/alerts.ts'
+import { createTelegramCommanderWorker } from './services/telegram-commander.ts'
 import { handleIntegrationRoute, isIntegrationRoute } from './routes/integration.ts'
 import { handleIntegrationCredentialsRoute } from './routes/integration-credentials.ts'
 import { handleListingExpiryRoute } from './routes/listing-expiry.ts'
@@ -429,10 +430,12 @@ const queueModule = createPublicationQueueModule({
   scheduling: { db, send, jsonBody, canManageJobs, recordJobEvent },
 })
 const autopilotScheduler = queueModule.scheduler
+const telegramCommanderWorker = createTelegramCommanderWorker(db)
 
 if (!restoreBootProbe) {
   startHealthMonitor(db, 60000)
   startGroupCurationWorker(db)
+  telegramCommanderWorker.start()
 }
 if (!restoreBootProbe) autopilotScheduler.start()
 
@@ -615,6 +618,7 @@ const server = createServer((req, res) => {
 server.on('close', () => {
   autopilotScheduler.stop()
   stopHealthMonitor()
+  telegramCommanderWorker.stop()
 })
 server.requestTimeout = 30_000
 server.headersTimeout = 10_000
