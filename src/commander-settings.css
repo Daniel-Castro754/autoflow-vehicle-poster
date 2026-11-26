@@ -63,3 +63,45 @@
 .app-shell .settings-page .commander-section details p {
   margin: 4px 0 8px;
 }
+
+/* Compact feature groups and live, saved-state summaries. */
+.commander-section .commander-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+.commander-section .commander-heading h3,
+.commander-section .commander-heading h4 { margin: 0; }
+.commander-section .commander-metric {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--af-muted);
+  font-variant-numeric: tabular-nums;
+}
+.commander-section .commander-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.commander-section .commander-group {
+  min-width: 0;
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius-sm);
+  padding: 10px;
+}
+.commander-section .commander-group-wide { grid-column: 1 / -1; }
+.commander-section .commander-group h4 {
+  font-size: 14px;
+  margin: 0 0 6px;
+  color: var(--af-text);
+}
+.commander-section .commander-state {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+  color: var(--af-muted);
+}
+@media (max-width: 1050px) {
+  .commander-section .commander-grid { grid-template-columns: minmax(0, 1fr); }
+}
