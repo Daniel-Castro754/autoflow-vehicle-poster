@@ -42,6 +42,21 @@ assert(messages[1].text.includes('não marcados como vendidos: 1'))
 await sweep()
 assert.equal(messages.length,2)
 assert.equal(lastOffset,11)
+assert.throws(()=>saveTelegramCommanderSettings(db,1,{enabled:true,userIds:['100'],acknowledgeGroup:true,aiEnabled:true},credentials,now))
+saveTelegramCommanderSettings(db,1,{enabled:true,userIds:['100'],acknowledgeGroup:true,aiEnabled:true,acknowledgeDeepseek:true},credentials,now)
+let aiCalls=0
+const answer=async(_db,org,question,guard)=>{
+  assert.equal(org,1);assert(guard());assert.equal(question,'Como está o estoque?');aiCalls++
+  return {text:'Resposta de teste',tools:['resumo_operacional'],status:'answered'}
+}
+now+=2000
+updates=[update(11,'/ia pergunta',101),update(12,'/ia@OtherBot pergunta'),update(13,'/ia@AutoFlowVeiculosBot Como está o estoque?')]
+await sweepTelegramCommander(db,{credentials,request,send,now:()=>now,answer})
+assert.equal(aiCalls,1)
+assert.equal(messages.at(-1).text,'Resposta de teste')
+await sweepTelegramCommander(db,{credentials,request,send,now:()=>now,answer})
+assert.equal(aiCalls,1)
+messages.pop()
 dest={...c,telegramChatId:'-456'}
 updates=[update(11,'/status',100,-456)]
 await sweep()

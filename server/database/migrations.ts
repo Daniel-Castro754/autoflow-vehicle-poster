@@ -567,6 +567,16 @@ const migrations: Migration[] = [
     CREATE UNIQUE INDEX IF NOT EXISTS uq_telegram_commander_bot
       ON telegram_commander(bot_hash) WHERE enabled=1;`,
   },
+  {
+    version: 34,
+    columns: [['telegram_commander','ai_enabled','INTEGER NOT NULL DEFAULT 0 CHECK(ai_enabled IN (0,1))']],
+    sql: `CREATE TABLE IF NOT EXISTS commander_ai_usage (
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      business_day TEXT NOT NULL,
+      questions INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY(organization_id,business_day)
+    );`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

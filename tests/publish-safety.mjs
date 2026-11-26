@@ -35,7 +35,7 @@ for (const legacy of [true, false]) {
   applyMigrations(migrationDb)
   // Keep the expected schema explicit: missing or unexpected migrations must fail.
   const versions = migrationDb.prepare('SELECT version FROM schema_migrations ORDER BY version').all()
-  assert.deepEqual(versions.map(row => row.version), Array.from({ length: 33 }, (_, i) => i + 1))
+  assert.deepEqual(versions.map(row => row.version), Array.from({ length: 34 }, (_, i) => i + 1))
   const consumerColumn = migrationDb.prepare('PRAGMA table_info(social_accounts)').all()
     .find(column => column.name === 'last_consumer_auto_run')
   assert.equal(consumerColumn?.type, 'INTEGER')
@@ -66,6 +66,7 @@ for (const legacy of [true, false]) {
     applyMigrations(db)
     db.exec(`
       DELETE FROM schema_migrations WHERE version>=29;
+      DROP TABLE commander_ai_usage;
       DROP TABLE telegram_commander;
       ALTER TABLE organization_settings DROP COLUMN deepseek_api_key;
       DROP TABLE telegram_monitor_delivery;
@@ -86,7 +87,7 @@ for (const legacy of [true, false]) {
     db.exec('UPDATE social_accounts SET last_consumer_auto_run=0 WHERE id=1')
     applyMigrations(db)
     assert.equal(db.prepare('SELECT last_consumer_auto_run value FROM social_accounts WHERE id=1').get().value,0)
-    assert.equal(db.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count,33)
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count,34)
   } finally {
     db.close()
   }
@@ -97,7 +98,7 @@ for (const legacy of [true, false]) {
   const db=new DatabaseSync(':memory:')
   try{
     initializeBaseSchema(db);applyMigrations(db)
-    db.exec("DELETE FROM schema_migrations WHERE version>=30; DROP TABLE telegram_commander; ALTER TABLE organization_settings DROP COLUMN deepseek_api_key; DROP TABLE telegram_monitor_delivery; DROP TABLE telegram_monitor_profiles; DROP TABLE telegram_monitor_settings; DROP TABLE consumer_history; DROP TABLE consumer_presence_checkpoint; INSERT INTO organizations(id,name) VALUES(1,'Keep me')")
+    db.exec("DELETE FROM schema_migrations WHERE version>=30; DROP TABLE commander_ai_usage; DROP TABLE telegram_commander; ALTER TABLE organization_settings DROP COLUMN deepseek_api_key; DROP TABLE telegram_monitor_delivery; DROP TABLE telegram_monitor_profiles; DROP TABLE telegram_monitor_settings; DROP TABLE consumer_history; DROP TABLE consumer_presence_checkpoint; INSERT INTO organizations(id,name) VALUES(1,'Keep me')")
     const prior=db.prepare('SELECT version,checksum FROM schema_migrations ORDER BY version').all()
     applyMigrations(db);applyMigrations(db)
     assert.deepEqual(db.prepare('SELECT version,checksum FROM schema_migrations WHERE version<=29 ORDER BY version').all(),prior)
