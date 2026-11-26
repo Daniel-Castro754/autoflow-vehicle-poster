@@ -489,6 +489,34 @@ const migrations: Migration[] = [
     columns: [['social_accounts', 'last_consumer_auto_run', 'INTEGER']],
     sql: '',
   },
+  {
+    version: 30,
+    columns: [],
+    sql: `CREATE TABLE IF NOT EXISTS consumer_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      account_id INTEGER NOT NULL REFERENCES social_accounts(id) ON DELETE CASCADE,
+      event_key TEXT NOT NULL CHECK(length(event_key)=64),
+      code TEXT NOT NULL,
+      observed_at INTEGER NOT NULL,
+      received_at INTEGER NOT NULL,
+      job_id INTEGER,
+      queue_size INTEGER,
+      http_status INTEGER,
+      retry_after_seconds INTEGER,
+      UNIQUE(organization_id,account_id,event_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_consumer_history_org_time ON consumer_history(organization_id,id DESC);
+    CREATE INDEX IF NOT EXISTS idx_consumer_history_account_time ON consumer_history(organization_id,account_id,id DESC);
+    CREATE INDEX IF NOT EXISTS idx_consumer_history_expiry ON consumer_history(observed_at);
+    CREATE TABLE IF NOT EXISTS consumer_presence_checkpoint (
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      account_id INTEGER NOT NULL REFERENCES social_accounts(id) ON DELETE CASCADE,
+      received_at INTEGER NOT NULL,
+      auto_run INTEGER CHECK(auto_run IN (0,1)),
+      PRIMARY KEY(organization_id,account_id)
+    );`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

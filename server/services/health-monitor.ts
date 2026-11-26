@@ -5,6 +5,7 @@ import { publicationMayExist, ambiguousPublicationReport } from './publication-e
 import { logger } from '../lib/logger.ts'
 import { warnSlowExecutions } from './proactive-alerts.ts'
 import { recordOperationalSignal } from './operational-incidents.ts'
+import { pruneConsumerHistory } from './consumer-history.ts'
 
 export interface HealthStatusReport {
   timestamp: string
@@ -290,6 +291,7 @@ export function startHealthMonitor(db: DatabaseSync, intervalMs = 60000): void {
     running = true
     try {
       await runHealthCheck(db, { autoRecover: true })
+      pruneConsumerHistory(db)
     } catch (err) {
       logger.warn('HealthMonitor', 'Erro na verificação periódica de saúde', { error: err })
     } finally {

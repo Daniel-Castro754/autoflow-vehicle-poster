@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { randomBytes } from 'node:crypto'
 import { logger } from '../lib/logger.ts'
+import { persistConsumerHistory } from '../services/consumer-history.ts'
 import { openResultConflict, recordResultConflict, resultConflict, resultFingerprint, terminalConflictOutcome } from '../services/result-conflicts.ts'
 import { sanitizeExecutionDiagnostics, sanitizeConsumerDiagnostic, recordConsumerState, recordConsumerDecision } from '../services/execution-diagnostics.ts'
 import { publicationMayExist, readPublicationReport, publicationReviewKind } from '../services/publication-evidence.ts'
@@ -120,7 +121,7 @@ export async function handleExtensionRoute(
     // Presence is only a signal from the extension, never proof of a valid
     // Facebook session or permission to publish. Paused profiles may report
     // liveness without having their pause removed.
-    const raw = await jsonBody(req, 2048)
+    const raw = await jsonBody(req, 65536)
     const body =
       raw && typeof raw === 'object' && !Array.isArray(raw)
         ? (raw as Record<string, unknown>)
@@ -140,6 +141,12 @@ export async function handleExtensionRoute(
     ).run('connected', typeof body?.autoRun === 'boolean' ? Number(body.autoRun) : null, accountId, auth.organizationId)
     recordConsumerState(db, auth.organizationId, accountId, body?.autoRun)
     recordConsumerDecision(db, auth.organizationId, accountId, body?.diagnostic)
+    try {
+      persistConsumerHistory(db,auth.organizationId,accountId,body?.autoRun,body?.diagnostic,body?.diagnosticHistory)
+    } catch {
+      // History is advisory: disk failure must not change the current heartbeat or pause.
+      logger.warn('ExtensionConsumer','Não foi possível persistir histórico operacional',{organizationId:auth.organizationId,accountId})
+    }
     const diagnostic = sanitizeConsumerDiagnostic(body?.diagnostic)
     if (diagnostic) logger.info('ExtensionConsumer', 'Estado operacional do perfil', {
       organizationId: auth.organizationId, accountId, autoRun: typeof body?.autoRun === 'boolean' ? body.autoRun : null, ...diagnostic,

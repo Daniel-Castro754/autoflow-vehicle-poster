@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
 import { startTestServer, createApiClient } from './helpers/server.mjs'
 import { recordOperationalSignal } from '../server/services/operational-incidents.ts'
+import { persistConsumerHistory, pruneConsumerHistory, consumerHistoryProfileLimit } from '../server/services/consumer-history.ts'
 
 const server = await startTestServer()
 const db = new DatabaseSync(join(server.dataDir, 'autoflow.db'))
@@ -219,6 +220,39 @@ try {
   assert(monitor.conflicts.rows.some(c=>c.id===conflictId))
   assert(!JSON.stringify(monitor).includes('fixture-digest'))
   assert(!(await external('/operations/monitor')).conflicts.rows.some(c=>c.id===conflictId))
+  // Replay of the local ring buffer is deduplicated across repeated heartbeats.
+  const at=Date.now()-2000
+  const batch=[{code:'job_selected',at,jobId},{code:'dispatch_failed',at:at+1,jobId,secret:'DO_NOT_EXPORT'},{code:'bad_code',at},{code:'queue_empty',at:at+86400000},{code:'queue_http_error',at:at-31*86400000}]
+  const presenceBody={accountId:target,autoRun:false,diagnostic:batch[1],diagnosticHistory:batch}
+  for(let i=0;i<2;i++)await admin('/extension/presence',{method:'POST',body:JSON.stringify(presenceBody)})
+  db.prepare('UPDATE consumer_presence_checkpoint SET received_at=? WHERE organization_id=? AND account_id=?').run(at-600000,orgId,target)
+  await admin('/extension/presence',{method:'POST',body:JSON.stringify({...presenceBody,autoRun:true})})
+  const history=(await admin('/operations/monitor?accountId='+target)).consumerHistory
+  assert.equal(history.rows.filter(r=>r.code==='dispatch_failed').length,1)
+  assert.equal(history.rows.filter(r=>r.code==='job_selected').length,1)
+  assert(history.rows.some(r=>r.code==='presence_restored'))
+  assert(history.rows.some(r=>r.code==='consumer_state_paused'))
+  assert(history.rows.some(r=>r.code==='consumer_state_enabled'))
+  assert(!history.rows.some(r=>['bad_code','queue_http_error','queue_empty'].includes(r.code)))
+  assert(!JSON.stringify(history).includes('DO_NOT_EXPORT'))
+  assert.equal((await external('/operations/monitor')).consumerHistory.rows.length,0)
+  const before=history.rows[0].id
+  assert((await admin('/operations/monitor?accountId='+target+'&consumerBeforeId='+before)).consumerHistory.rows.every(r=>r.id<before))
+  // A separate database connection can read the committed history independently of memory.
+  const reopened=new DatabaseSync(join(server.dataDir,'autoflow.db'))
+  assert.equal(reopened.prepare("SELECT COUNT(*) n FROM consumer_history WHERE organization_id=? AND account_id=? AND code='dispatch_failed'").get(orgId,target).n,1)
+  reopened.close()
+  // Retention never deletes another profile's recent history.
+  db.prepare("INSERT INTO consumer_history(organization_id,account_id,event_key,code,observed_at,received_at) VALUES (?,?,?,'queue_empty',?,?)").run(orgId,target,'f'.repeat(64),at-31*86400000,at)
+  assert.equal(pruneConsumerHistory(db),1)
+  const accountCount=db.prepare('SELECT COUNT(*) n FROM consumer_history WHERE organization_id=? AND account_id=?').get(orgId,account).n
+  db.prepare(`WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<?)
+    INSERT INTO consumer_history(organization_id,account_id,event_key,code,observed_at,received_at)
+    SELECT ?,?,printf('%064d',x),'queue_empty',?,? FROM n`).run(consumerHistoryProfileLimit+5,orgId,target,at,at)
+  persistConsumerHistory(db,orgId,target,true,null,[])
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM consumer_history WHERE organization_id=? AND account_id=?').get(orgId,target).n,consumerHistoryProfileLimit)
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM consumer_history WHERE organization_id=? AND account_id=?').get(orgId,account).n,accountCount)
+  console.log('✓ Consumer history: persistent deduplication, tenant isolation, retention and profile limit.')
   console.log(
     '✓ Phase 4: persistent incidents, dedup/reopen, RBAC, isolation, audit and publish safety',
   )
