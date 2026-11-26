@@ -2,12 +2,14 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { sendCriticalAlert } from '../services/alerting.ts'
 import { getAlertCredentials } from '../services/credential-vault.ts'
+import { telegramMonitorSettings, saveTelegramMonitorSettings } from '../services/telegram-monitor.ts'
 
 type AuthContext = { userId: number; organizationId: number }
 type Dependencies = {
   db: DatabaseSync
   send: (res: ServerResponse, status: number, data: unknown) => void
   isAdmin: (auth: AuthContext) => boolean
+  jsonBody: (req: IncomingMessage, maxBytes?: number) => Promise<unknown>
 }
 
 export async function handleAlertRoute(
@@ -15,8 +17,16 @@ export async function handleAlertRoute(
   res: ServerResponse,
   url: URL,
   auth: AuthContext,
-  { db, send, isAdmin }: Dependencies,
+  { db, send, isAdmin, jsonBody }: Dependencies,
 ): Promise<boolean> {
+  if (url.pathname === '/api/alerts/telegram-monitor' && ['GET','PATCH'].includes(req.method || '')) {
+    if (!isAdmin(auth)) { send(res,403,{error:'Somente administradores podem configurar notificações.'}); return true }
+    if (req.method==='GET') { send(res,200,telegramMonitorSettings(db,auth.organizationId)); return true }
+    const body=await jsonBody(req,4096) as {categories?:unknown}|null
+    try { send(res,200,saveTelegramMonitorSettings(db,auth.organizationId,body?.categories)) }
+    catch { send(res,400,{error:'Não foi possível salvar as categorias de notificações.'}) }
+    return true
+  }
   if (req.method !== 'POST' || url.pathname !== '/api/alerts/test') return false
   if (!isAdmin(auth)) {
     send(res, 403, { error: 'Somente administradores podem testar alertas.' })

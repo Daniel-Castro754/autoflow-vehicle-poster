@@ -52,6 +52,7 @@ import { DrawerFocusGuard } from './DrawerFocusGuard'
 import { formatRate } from './management-metrics'
 import { OverviewPriorities } from './OverviewPriorities'
 import { ListingExpiryPanel } from './ListingExpiryPanel'
+import { TelegramMonitorSettings } from './TelegramMonitorSettings'
 
 type ApiFn = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
 type Vehicle = {
@@ -4475,6 +4476,7 @@ export function SettingsView({
                   : 'Testa somente os valores salvos (não as edições pendentes)'}
               </small>
             </div>
+            <TelegramMonitorSettings api={api} />
           </div>
         </article>
         <article id="settings-appearance" className="settings-card">

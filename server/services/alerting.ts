@@ -73,7 +73,7 @@ export async function sendCriticalAlert(
       }
     } catch (err) {
       logger.warn('AutoFlowAlert', 'Erro ao enviar alerta para o Telegram', {
-        error: err instanceof Error ? err.message : err,
+        errorType: err instanceof Error ? err.name : 'unknown',
       })
     }
   }
