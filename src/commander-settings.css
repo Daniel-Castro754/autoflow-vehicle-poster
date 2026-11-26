@@ -105,3 +105,59 @@
 @media (max-width: 1050px) {
   .commander-section .commander-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Navigation keeps every form mounted; only the selected panel is visible. */
+.commander-panel {
+  min-width: 0;
+  margin-top: 16px;
+}
+.commander-panel > h3 {
+  font-size: 17px;
+  margin: 0 0 8px;
+  color: var(--af-text);
+}
+.commander-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.app-shell .settings-page .commander-navigation button {
+  min-height: 36px;
+  padding: 7px 12px;
+  font-size: 13px;
+}
+.app-shell .settings-page .commander-navigation button[aria-pressed='true'] {
+  border-color: var(--af-primary);
+  color: var(--af-primary);
+  box-shadow: inset 0 -2px 0 var(--af-primary);
+}
+.commander-panel > [hidden] { display: none !important; }
+.commander-panel .commander-section { margin-top: 8px; }
+.commander-section .commander-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.commander-section .commander-table-scroll table { width: 100%; }
+.app-shell .settings-page .commander-section .commander-table-scroll :is(th, td) {
+  padding: 6px 8px;
+  font-size: 12px;
+  text-align: left;
+  vertical-align: middle;
+}
+.app-shell .settings-page .commander-section label.commander-grant {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.commander-section .commander-grant input { flex-shrink: 0; }
+.commander-section .commander-empty { color: var(--af-muted); }
+.commander-panel :is(button, summary):focus-visible {
+  outline: 2px solid var(--af-focus);
+  outline-offset: 2px;
+}
+@media (max-width: 600px) {
+  .app-shell .settings-page .commander-section { padding: 10px; }
+  .commander-section .commander-group { padding: 8px; }
+  .commander-navigation button { flex: 1 1 auto; }
+}
