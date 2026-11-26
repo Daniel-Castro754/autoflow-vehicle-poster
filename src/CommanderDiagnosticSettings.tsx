@@ -23,7 +23,7 @@ export function CommanderDiagnosticSettings({api}:{api:Api}){
     catch{setMessage('Não foi possível atualizar.')}
   }
   return <section className="commander-section">
-    <div className="commander-heading"><h3>Diagnóstico automático</h3><span className="commander-metric">{state?.usage.used??0}/{state?.usage.limit??10} hoje</span></div>
+    <div className="commander-heading"><h3>Diagnóstico automático</h3><span className="commander-metric">{state ? (state.enabled ? "Ligado" : "Desligado") : "Carregando"} · {state?.usage.used??0}/{state?.usage.limit??10} diagnósticos hoje</span></div>
     <p>Analisa novas ocorrências e envia hipóteses ao grupo. Nenhuma alteração automática de anúncios ou filas.</p>
     <label className="toggle-label"><span>Analisar ocorrências automaticamente</span><input type="checkbox" checked={enabled} disabled={!state||saving} onChange={e=>setEnabled(e.target.checked)}/></label>
     <label className="toggle-label"><span>Autorizo o envio de evidências operacionais estruturadas ao DeepSeek e de resultados ao grupo.</span><input type="checkbox" checked={ack} disabled={!state||saving||!enabled} onChange={e=>setAck(e.target.checked)}/></label>
@@ -34,6 +34,6 @@ export function CommanderDiagnosticSettings({api}:{api:Api}){
       <button type="button" className="secondary" disabled={!state||saving} onClick={()=>void refresh()}>Atualizar histórico</button>
       <small role="status">{message}</small>
     </div>
-    <details><summary>Últimos diagnósticos</summary><table><thead><tr><th>Evento</th><th>Trabalho</th><th>Hipótese</th><th>Análise</th><th>Entrega</th></tr></thead><tbody>{state?.history.map(h=><tr key={h.eventId}><td>{h.eventId}</td><td>{h.jobId}</td><td>{h.cause}</td><td>{h.analysisStatus}</td><td>{h.deliveryStatus}</td></tr>)}</tbody></table></details>
+    <details><summary>Últimos diagnósticos ({state?.history.length??0})</summary>{state?.history.length ? <div className="commander-table-scroll"><table><thead><tr><th>Evento</th><th>Trabalho</th><th>Hipótese</th><th>Análise</th><th>Entrega</th></tr></thead><tbody>{state?.history.map(h=><tr key={h.eventId}><td>{h.eventId}</td><td>{h.jobId}</td><td>{h.cause}</td><td>{h.analysisStatus}</td><td>{h.deliveryStatus}</td></tr>)}</tbody></table></div> : <p className="commander-empty">Nenhum diagnóstico registrado.</p>}</details>
   </section>
 }
