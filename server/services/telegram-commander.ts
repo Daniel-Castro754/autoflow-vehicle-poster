@@ -104,7 +104,7 @@ function statusText(db:DatabaseSync,org:number,now:number){
     ...profiles.map(p=>{const seen=parseSqliteTimestamp(p.seen);return clean(p.label)+': '+(p.status==='connected'&&seen!==null&&seen<=now+60000&&now-seen<=300000?'online':'offline')}),
     'Presença recente não garante que o Facebook esteja autenticado.'].join('\n')
 }
-function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,botId:number|undefined,update:Update,now:number):string|{question:string;userId:string}|null{
+function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,botId:number|undefined,update:Update,now:number):string|{question:string;userId:string}|{menu:true;text:string}|null{
   const m=update.message
   if(!m||m.sender_chat||m.from?.is_bot!==false||!Number.isSafeInteger(m.from.id)||
     !Number.isSafeInteger(m.chat?.id)||String(m.chat?.id)!==c.telegramChatId||
@@ -137,7 +137,7 @@ function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,botId:nu
     if(!row.ai_enabled)return 'Perguntas com DeepSeek desativadas. Ative no painel.'
     return {question:ai[2].trim(),userId:String(m.from.id)}
   }
-  const match=m.text.trim().match(/^\/(meu_id|ajuda|status|limpar_memoria)(?:@([A-Za-z0-9_]+))?$/i)
+  const match=m.text.trim().match(/^\/(meu_id|ajuda|status|limpar_memoria|menu)(?:@([A-Za-z0-9_]+))?$/i)
   if(!match){
     // Only a leading mention or a reply to this bot is a natural query.
     // Slash commands never fall through into the conversational path.
@@ -163,7 +163,8 @@ function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,botId:nu
     clearCommanderMemory(db,row.organization_id,user)
     return 'Suas referências de consultas foram limpas no AutoFlow. O histórico do Telegram, backups e diagnósticos operacionais não foram alterados.'
   }
-  if(command==='ajuda')return 'AutoFlow AI Commander — consulta somente leitura\n/status — situação do sistema\n/meu_id — seu identificador\n/ajuda — comandos\n/ia pergunta — consulta DeepSeek, se ativada no painel.\nVocê também pode mencionar @'+username+' no início da pergunta ou responder diretamente ao bot.\n/limpar_memoria — limpa suas referências locais. /solicitar_pausa ID — demonstração de autorização, se permitida.\n/autorizar CÓDIGO ou /recusar CÓDIGO — decidir proposta. /pausar ID, /adiar ID AAAA-MM-DDTHH:MM-03:00, /cancelar_trabalho ID — propostas reais se autorizadas. Não publica nem retira anúncios.'
+  if(command==='menu')return {menu:true,text:'AutoFlow — menu de consultas\n/status — situação atual\n/ajuda — comandos disponíveis\n'+(row.ai_enabled?'Escolha uma consulta de IA no teclado ou responda a uma mensagem do bot.':'DeepSeek desativado. As consultas básicas continuam disponíveis.')+'\nOperações reais continuam exigindo comandos explícitos e confirmação individual.'}
+  if(command==='ajuda')return 'AutoFlow AI Commander — consulta somente leitura\n/status — situação do sistema\n/meu_id — seu identificador\n/ajuda — comandos\n/menu — atalhos de consulta\n/ia pergunta — consulta DeepSeek, se ativada no painel.\nVocê também pode mencionar @'+username+' no início da pergunta ou responder diretamente ao bot.\n/limpar_memoria — limpa suas referências locais. /solicitar_pausa ID — demonstração de autorização, se permitida.\n/autorizar CÓDIGO ou /recusar CÓDIGO — decidir proposta. /pausar ID, /adiar ID AAAA-MM-DDTHH:MM-03:00, /cancelar_trabalho ID — propostas reais se autorizadas. Não publica nem retira anúncios.'
   return statusText(db,row.organization_id,now)
 }
 
@@ -214,6 +215,10 @@ export async function sweepTelegramCommander(db:DatabaseSync,deps:Dependencies={
           replies++
           if(typeof reply==='string'){
             if(!await send(reply,c))status='reply_failed'
+          }else if('menu' in reply){
+            const messageId=update.message?.message_id
+            const menu=typeof messageId==='number'&&Number.isSafeInteger(messageId)&&messageId>0?{messageId,username:bot.username,aiEnabled:Boolean(r.ai_enabled)}:undefined
+            if(!await send(reply.text,c,{menu}))status='reply_failed'
           }else{
             const authorized=()=>Boolean(current()?.ai_enabled&&sameDestination())
             const memory:MemoryScope|undefined=r.memory_enabled?{userId:reply.userId,destinationHash:r.destination_hash,revision:r.revision}:undefined
