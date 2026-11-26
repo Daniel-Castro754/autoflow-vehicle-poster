@@ -35,7 +35,7 @@ for (const legacy of [true, false]) {
   applyMigrations(migrationDb)
   // Keep the expected schema explicit: missing or unexpected migrations must fail.
   const versions = migrationDb.prepare('SELECT version FROM schema_migrations ORDER BY version').all()
-  assert.deepEqual(versions.map(row => row.version), Array.from({ length: 37 }, (_, i) => i + 1))
+  assert.deepEqual(versions.map(row => row.version), Array.from({ length: 38 }, (_, i) => i + 1))
   const consumerColumn = migrationDb.prepare('PRAGMA table_info(social_accounts)').all()
     .find(column => column.name === 'last_consumer_auto_run')
   assert.equal(consumerColumn?.type, 'INTEGER')
@@ -93,7 +93,7 @@ for (const legacy of [true, false]) {
     db.exec('UPDATE social_accounts SET last_consumer_auto_run=0 WHERE id=1')
     applyMigrations(db)
     assert.equal(db.prepare('SELECT last_consumer_auto_run value FROM social_accounts WHERE id=1').get().value,0)
-    assert.equal(db.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count,37)
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count,38)
   } finally {
     db.close()
   }

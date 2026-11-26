@@ -658,6 +658,37 @@ const migrations: Migration[] = [
     );
     CREATE INDEX IF NOT EXISTS idx_commander_permission_audit_scope ON commander_permission_audit(organization_id,id DESC);`,
   },
+  {
+    version: 38,
+    columns: [],
+    sql: `CREATE TABLE commander_action_requests_v38 (
+      id INTEGER PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      telegram_user_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      job_id INTEGER NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      destination_hash TEXT NOT NULL,
+      receiver_revision INTEGER NOT NULL,
+      policy_revision INTEGER NOT NULL,
+      snapshot_hash TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      decided_at INTEGER,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','validated_only','executed','rejected','expired','stale','revoked')),
+      mode TEXT NOT NULL DEFAULT 'preview_only' CHECK(mode IN ('preview_only','execute_once')),
+      scheduled_at TEXT,
+      CHECK((mode='preview_only' AND action='pausar_trabalho' AND scheduled_at IS NULL AND status!='executed')
+        OR (mode='execute_once' AND action IN ('pausar_trabalho_real','adiar_trabalho','cancelar_trabalho_pendente') AND status!='validated_only'
+            AND ((action='adiar_trabalho' AND scheduled_at IS NOT NULL) OR (action!='adiar_trabalho' AND scheduled_at IS NULL))))
+    );
+    INSERT INTO commander_action_requests_v38(id,organization_id,telegram_user_id,action,job_id,token_hash,destination_hash,receiver_revision,policy_revision,snapshot_hash,created_at,expires_at,decided_at,status,mode)
+      SELECT id,organization_id,telegram_user_id,action,job_id,token_hash,destination_hash,receiver_revision,policy_revision,snapshot_hash,created_at,expires_at,decided_at,status,mode FROM commander_action_requests;
+    DROP TABLE commander_action_requests;
+    ALTER TABLE commander_action_requests_v38 RENAME TO commander_action_requests;
+    CREATE INDEX idx_commander_requests_scope ON commander_action_requests(organization_id,telegram_user_id,status,created_at);
+    CREATE INDEX idx_commander_requests_age ON commander_action_requests(created_at);`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {

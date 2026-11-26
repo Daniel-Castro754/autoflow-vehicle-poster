@@ -80,9 +80,9 @@ const db = new DatabaseSync(':memory:')
 try {
   initializeBaseSchema(db)
   applyMigrations(db)
-  // Check the complete migration sequence, including Commander permissions (v37).
+  // Check the complete migration sequence, including Commander operational actions (v38).
   const versions = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all()
-  assert.deepEqual(versions.map(row => row.version), Array.from({ length: 37 }, (_, i) => i + 1))
+  assert.deepEqual(versions.map(row => row.version), Array.from({ length: 38 }, (_, i) => i + 1))
   db.exec(`
     INSERT INTO organizations(id,name) VALUES(1,'Test'),(2,'Other');
     INSERT INTO users(id,organization_id,name,email,password_hash) VALUES
