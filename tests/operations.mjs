@@ -8,6 +8,7 @@ import { applyMigrations } from '../server/database/migrations.ts'
 import { coordinateAutopilot, skippedAutopilot } from '../server/services/autopilot-coordinator.ts'
 import { createAutonomousScheduler } from '../server/services/autonomous-scheduler.ts'
 import { runAutopilotPipeline } from '../server/services/ai-agent.ts'
+import { recordConsumerState } from '../server/services/execution-diagnostics.ts'
 import {
   calculateListingHash,
   listingSnapshotForVehicle,
@@ -48,6 +49,10 @@ function seedOrg(id, enabled = 1) {
   db.prepare(
     "INSERT INTO social_accounts(id,organization_id,user_id,label,status,last_seen_at) VALUES(?,?,?,?,'connected',CURRENT_TIMESTAMP)",
   ).run(id, id, id, `Account ${id}`)
+  // Simulate an explicit fresh presence signal in each independent process.
+  // Historical database state alone must not grant recurring eligibility.
+  recordConsumerState(db, id, id, true)
+  recordConsumerState(other, id, id, true)
 }
 function vehicle(
   id,
@@ -73,6 +78,8 @@ try {
   db.exec(
     "INSERT INTO social_accounts(id,organization_id,user_id,label,status,last_seen_at) VALUES(10,1,1,'Second account','connected',CURRENT_TIMESTAMP)",
   )
+  recordConsumerState(db, 1, 10, true)
+  recordConsumerState(other, 1, 10, true)
   const started = deferred(),
     finish = deferred()
   const manual = coordinateAutopilot(db, 1, false, async (ownsLease) => {
@@ -272,6 +279,18 @@ try {
   // Recurring planning must not leave otherwise complete CSV stock waiting
   // for a separate human description approval. Only documented fields are
   // included, and existing seller descriptions stay unchanged.
+  // A connected profile without a current enabled consumer is ineligible.
+  seedOrg(11)
+  vehicle(110, 11)
+  recordConsumerState(db, 11, 11, undefined)
+  assert.equal((await runAutopilotPipeline(db, 11, null, { automatic: true })).jobsCreated, 0)
+  db.exec('UPDATE autopilot_state SET next_run_at=NULL WHERE organization_id=11')
+  recordConsumerState(db, 11, 11, false)
+  assert.equal((await runAutopilotPipeline(db, 11, null, { automatic: true })).jobsCreated, 0)
+  db.exec('UPDATE autopilot_state SET next_run_at=NULL WHERE organization_id=11')
+  recordConsumerState(db, 11, 11, true)
+  assert.equal((await runAutopilotPipeline(db, 11, null, { automatic: true })).jobsCreated, 1)
+
   seedOrg(9)
   vehicle(90, 9, '')
   const descriptionResult = await runAutopilotPipeline(db, 9, null, { automatic: true })
