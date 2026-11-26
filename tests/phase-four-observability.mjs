@@ -219,6 +219,28 @@ try {
   assert(monitor.conflicts.rows.some(c=>c.id===conflictId))
   assert(!JSON.stringify(monitor).includes('fixture-digest'))
   assert(!(await external('/operations/monitor')).conflicts.rows.some(c=>c.id===conflictId))
+  // Replay of the local ring buffer is deduplicated across repeated heartbeats.
+  const at=Date.now()-2000
+  const batch=[{code:'job_selected',at,jobId},{code:'dispatch_failed',at:at+1,jobId,secret:'DO_NOT_EXPORT'},{code:'bad_code',at},{code:'queue_empty',at:at+86400000},{code:'queue_http_error',at:at-31*86400000}]
+  const presenceBody={accountId:target,autoRun:false,diagnostic:batch[1],diagnosticHistory:batch}
+  for(let i=0;i<2;i++)await admin('/extension/presence',{method:'POST',body:JSON.stringify(presenceBody)})
+  db.prepare('UPDATE consumer_presence_checkpoint SET received_at=? WHERE organization_id=? AND account_id=?').run(at-600000,orgId,target)
+  await admin('/extension/presence',{method:'POST',body:JSON.stringify({...presenceBody,autoRun:true})})
+  const history=(await admin('/operations/monitor?accountId='+target)).consumerHistory
+  assert.equal(history.rows.filter(r=>r.code==='dispatch_failed').length,1)
+  assert.equal(history.rows.filter(r=>r.code==='job_selected').length,1)
+  assert(history.rows.some(r=>r.code==='presence_restored'))
+  assert(history.rows.some(r=>r.code==='consumer_state_paused'))
+  assert(history.rows.some(r=>r.code==='consumer_state_enabled'))
+  assert(!history.rows.some(r=>['bad_code','queue_http_error','queue_empty'].includes(r.code)))
+  assert(!JSON.stringify(history).includes('DO_NOT_EXPORT'))
+  assert.equal((await external('/operations/monitor')).consumerHistory.rows.length,0)
+  const before=history.rows[0].id
+  assert((await admin('/operations/monitor?accountId='+target+'&consumerBeforeId='+before)).consumerHistory.rows.every(r=>r.id<before))
+  // A separate database connection can read the committed history independently of memory.
+  const reopened=new DatabaseSync(join(server.dataDir,'autoflow.db'))
+  assert.equal(reopened.prepare("SELECT COUNT(*) n FROM consumer_history WHERE organization_id=? AND account_id=? AND code='dispatch_failed'").get(orgId,target).n,1)
+  reopened.close()
   console.log(
     '✓ Phase 4: persistent incidents, dedup/reopen, RBAC, isolation, audit and publish safety',
   )

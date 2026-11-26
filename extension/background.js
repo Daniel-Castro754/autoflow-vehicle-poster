@@ -326,6 +326,13 @@ async function reportExtensionPresence() {
         diagnostic: Array.isArray(state.consumerDiagnostics)
           ? [...state.consumerDiagnostics].reverse().find((entry) => entry.accountId === state.activeAccountId)
           : undefined,
+        // Re-send the bounded local buffer on heartbeat; the server deduplicates.
+        diagnosticHistory:Array.isArray(state.consumerDiagnostics)
+          ? state.consumerDiagnostics.filter(entry=>entry.accountId===state.activeAccountId).slice(-200).map(entry=>{
+              const {code,at,jobId,httpStatus,queueSize,retryAfterSeconds}=entry
+              return {code,at,jobId,httpStatus,queueSize,retryAfterSeconds}
+            })
+          : [],
       }),
     })
   } catch {

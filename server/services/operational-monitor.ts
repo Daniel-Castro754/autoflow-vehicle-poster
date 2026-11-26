@@ -3,6 +3,7 @@ import { consumerState, latestConsumerDecision } from './execution-diagnostics.t
 import { profileCapacity, parseSqliteTimestamp } from './profile-capacity.ts'
 import { publicationReviewKind } from './publication-evidence.ts'
 import { listOpenResultConflicts } from './result-conflicts.ts'
+import { readConsumerHistory } from './consumer-history.ts'
 
 const eventGroups = {
   scheduling: ['autopilot_scheduled','created','scheduled','smart_scheduled','batch_scheduled','schedule_removed'],
@@ -24,7 +25,7 @@ export function monitorFilters(params: URLSearchParams) {
   const hours = integer('hours',24)
   if (![24,168,720].includes(hours)) throw new Error('Período inválido.')
   return { category: category as Category|'all', hours, accountId: integer('accountId',0),
-    vehicleId: integer('vehicleId',0), beforeId: integer('beforeId',0), limit: Math.min(integer('limit',30),100) }
+    vehicleId: integer('vehicleId',0), beforeId: integer('beforeId',0), consumerBeforeId:integer('consumerBeforeId',0), limit: Math.min(integer('limit',30),100) }
 }
 
 export function operationalMonitor(db: DatabaseSync, org: number, filters: ReturnType<typeof monitorFilters>) {
@@ -88,6 +89,6 @@ export function operationalMonitor(db: DatabaseSync, org: number, filters: Retur
     WHERE (?=0 OR a.id=? OR src.id=? OR dst.id=?)
     ORDER BY t.id DESC LIMIT ?`).all(org,'-'+filters.hours+' hours',filters.beforeId,filters.beforeId,
       filters.vehicleId,filters.vehicleId,...types,org,org,org,filters.accountId,filters.accountId,filters.accountId,filters.accountId,filters.limit+1) as Array<{id:number;eventType:string;[key:string]:unknown}>
-  return {timestamp:new Date(now).toISOString(),filters,profiles,reviews,reviewCount,conflicts:listOpenResultConflicts(db,org),activity:events.slice(0,filters.limit),
+  return {timestamp:new Date(now).toISOString(),filters,profiles,reviews,reviewCount,conflicts:listOpenResultConflicts(db,org),consumerHistory:readConsumerHistory(db,org,filters,now),activity:events.slice(0,filters.limit),
     nextBeforeId:events.length>filters.limit?events[filters.limit-1].id:null}
 }
