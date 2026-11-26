@@ -25,7 +25,7 @@ export function recordAiAudit(
   items = 0,
 ) {
   const cleanProvider =
-    provider && ['gemini', 'openai', 'procedural', 'auto'].includes(provider) ? provider : null
+    provider && ['gemini', 'openai', 'deepseek', 'procedural', 'auto'].includes(provider) ? provider : null
   db.prepare(
     'INSERT INTO ai_operation_history(organization_id,user_id,action,outcome,provider,items) VALUES(?,?,?,?,?,?)',
   ).run(org, user, action, outcome, cleanProvider, Math.max(0, Math.min(2000, items)))

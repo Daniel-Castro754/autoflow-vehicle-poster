@@ -124,6 +124,8 @@ type SettingsData = {
     autoCurateGroups?: boolean
     geminiKeyConfigured?: boolean
     openaiKeyConfigured?: boolean
+    deepseekKeyConfigured?: boolean
+    deepseekKeySource?: string
     geminiKeySource?: string
     openaiKeySource?: string
     aiProvider?: string
@@ -3384,7 +3386,11 @@ export function SettingsView({
   const [openaiKeySource, setOpenaiKeySource] = useState('none')
   const [clearGeminiKey, setClearGeminiKey] = useState(false)
   const [clearOpenaiKey, setClearOpenaiKey] = useState(false)
-  const [testingKey, setTestingKey] = useState<'gemini' | 'openai' | null>(null),
+  const [deepseekApiKey, setDeepseekApiKey] = useState('')
+  const [deepseekKeyConfigured, setDeepseekKeyConfigured] = useState(false)
+  const [deepseekKeySource, setDeepseekKeySource] = useState('none')
+  const [clearDeepseekKey, setClearDeepseekKey] = useState(false)
+  const [testingKey, setTestingKey] = useState<'gemini' | 'openai' | 'deepseek' | null>(null),
     [testKeyStatus, setTestKeyStatus] = useState('')
   const [settingsSection, setSettingsSection] = useState('company')
   const settingsSections = [
@@ -3427,6 +3433,10 @@ export function SettingsView({
       setAlertWebhookSource(result.settings.alertWebhookSource || 'none')
       setGeminiApiKey('')
       setOpenaiApiKey('')
+      setDeepseekApiKey('')
+      setClearDeepseekKey(false)
+      setDeepseekKeyConfigured(Boolean(result.settings.deepseekKeyConfigured))
+      setDeepseekKeySource(result.settings.deepseekKeySource || 'none')
       setGeminiKeyConfigured(Boolean(result.settings.geminiKeyConfigured))
       setOpenaiKeyConfigured(Boolean(result.settings.openaiKeyConfigured))
       setGeminiKeySource(result.settings.geminiKeySource || 'none')
@@ -3462,7 +3472,7 @@ export function SettingsView({
     })
   }
 
-  async function testKey(provider: 'gemini' | 'openai') {
+  async function testKey(provider: 'gemini' | 'openai' | 'deepseek') {
     setTestingKey(provider)
     setTestKeyStatus('')
     try {
@@ -3470,7 +3480,7 @@ export function SettingsView({
         method: 'POST',
         body: JSON.stringify({
           provider,
-          apiKey: provider === 'gemini' ? geminiApiKey : openaiApiKey,
+          apiKey: provider === 'gemini' ? geminiApiKey : provider === 'deepseek' ? deepseekApiKey : openaiApiKey,
         }),
       })
       setTestKeyStatus(res.message)
@@ -3679,6 +3689,8 @@ export function SettingsView({
           autoCurateGroups,
           geminiApiKey,
           openaiApiKey,
+          deepseekApiKey,
+          clearDeepseekApiKey: clearDeepseekKey,
           clearGeminiApiKey: clearGeminiKey,
           clearOpenaiApiKey: clearOpenaiKey,
           aiProvider,
@@ -3706,6 +3718,10 @@ export function SettingsView({
       setAlertWebhookSource(fresh.settings.alertWebhookSource || 'none')
       setGeminiApiKey('')
       setOpenaiApiKey('')
+      setDeepseekApiKey('')
+      setClearDeepseekKey(false)
+      setDeepseekKeyConfigured(Boolean(fresh.settings.deepseekKeyConfigured))
+      setDeepseekKeySource(fresh.settings.deepseekKeySource || 'none')
       setClearGeminiKey(false)
       setClearOpenaiKey(false)
       setGeminiKeyConfigured(Boolean(fresh.settings.geminiKeyConfigured))
@@ -4158,7 +4174,7 @@ export function SettingsView({
           <div className="settings-content">
             <h2>Inteligência Artificial & Chaves de API</h2>
             <p>
-              Configure suas chaves da API Gemini ou OpenAI para potencializar o gerador de
+              Configure suas chaves da API Gemini, OpenAI ou DeepSeek para potencializar o gerador de
               descrições e o leitor de anúncios.
             </p>
             <div className="settings-fields">
@@ -4174,6 +4190,7 @@ export function SettingsView({
                   <option value="auto">Automático (Gemini ➔ OpenAI ➔ Fallback Offline)</option>
                   <option value="gemini">Google Gemini (Recomendado)</option>
                   <option value="openai">OpenAI (ChatGPT / GPT-4o)</option>
+                  <option value="deepseek">DeepSeek (Flash)</option>
                   <option value="procedural">Offline / Procedural (Sem API externa)</option>
                 </select>
               </label>
@@ -4310,6 +4327,27 @@ export function SettingsView({
                     {clearOpenaiKey ? 'Remoção pendente ao salvar' : 'Remover chave salva'}
                   </button>
                 )}
+              </label>
+              <label>
+                <FieldLabel help="Chave DeepSeek armazenada no cofre local. O teste faz uma chamada curta e pode consumir créditos.">
+                  DeepSeek API Key
+                </FieldLabel>
+                <div style={{display:'flex',gap:8,marginTop:4}}>
+                  <input name="deepseekApiKey" type="password" autoComplete="new-password"
+                    value={deepseekApiKey}
+                    onChange={e=>{setDeepseekApiKey(e.target.value);setClearDeepseekKey(false)}}
+                    placeholder={deepseekKeyConfigured?'Chave salva — digite apenas para substituir':'Cole a chave DeepSeek'}
+                    style={{flex:1}}/>
+                  <button type="button" className="secondary" disabled={testingKey!==null||clearDeepseekKey}
+                    onClick={()=>void testKey('deepseek')}><Sparkles size={14}/>{testingKey==='deepseek'?'Testando...':'Testar DeepSeek'}</button>
+                </div>
+                <small>{deepseekKeyConfigured?'Configurada ('+(deepseekKeySource==='database'?'banco local':'ambiente')+').':'Ainda não configurada.'} Modelo: deepseek-flash. </small>
+                <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer">Obter chave</a>
+                {deepseekKeySource==='database'&&<button type="button" className="secondary" onClick={()=>{
+                  if(window.confirm('Remover a chave DeepSeek salva no banco ao salvar as configurações?')){
+                    setClearDeepseekKey(true);setDeepseekApiKey('')
+                  }
+                }}>{clearDeepseekKey?'Remoção pendente ao salvar':'Remover chave salva'}</button>}
               </label>
             </div>
 

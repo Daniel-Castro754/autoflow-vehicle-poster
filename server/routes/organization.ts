@@ -60,7 +60,7 @@ export async function handleOrganizationRoute(
       fill_groups fillGroups,target_groups targetGroups,auto_publish autoPublish,
       autopilot_enabled autopilotEnabled,autopilot_interval_minutes autopilotIntervalMinutes,
       auto_retry autoRetry,max_retries maxRetries,alert_telegram_token alertTelegramToken,alert_telegram_chat_id alertTelegramChatId,alert_webhook_url alertWebhookUrl,auto_curate_groups autoCurateGroups,
-      gemini_api_key geminiApiKey,openai_api_key openaiApiKey,ai_provider aiProvider
+      gemini_api_key geminiApiKey,openai_api_key openaiApiKey,deepseek_api_key deepseekApiKey,ai_provider aiProvider
       FROM organization_settings WHERE organization_id=?`,
       )
       .get(auth.organizationId) as Record<string, unknown>
@@ -84,6 +84,9 @@ export async function handleOrganizationRoute(
         ? 'environment'
         : 'none'
     delete settings.geminiApiKey
+    settings.deepseekKeyConfigured = Boolean(settings.deepseekApiKey || process.env.DEEPSEEK_API_KEY)
+    settings.deepseekKeySource = settings.deepseekApiKey ? 'database' : process.env.DEEPSEEK_API_KEY ? 'environment' : 'none'
+    delete settings.deepseekApiKey
     delete settings.openaiApiKey
     settings.alertTelegramConfigured = Boolean(
       settings.alertTelegramToken || process.env.TELEGRAM_BOT_TOKEN,
@@ -248,12 +251,13 @@ export async function handleOrganizationRoute(
     // Older forms send empty API key fields. Empty and omitted fields mean KEEP, not erase.
     const currentAI = db
       .prepare(
-        'SELECT gemini_api_key geminiApiKey,openai_api_key openaiApiKey,ai_provider aiProvider FROM organization_settings WHERE organization_id=?',
+        'SELECT gemini_api_key geminiApiKey,openai_api_key openaiApiKey,deepseek_api_key deepseekApiKey,ai_provider aiProvider FROM organization_settings WHERE organization_id=?',
       )
       .get(auth.organizationId) as
       | {
           geminiApiKey: string
           openaiApiKey: string
+          deepseekApiKey: string
           aiProvider: string
         }
       | undefined
@@ -263,14 +267,18 @@ export async function handleOrganizationRoute(
     }
     if (
       (body.clearGeminiApiKey !== undefined && typeof body.clearGeminiApiKey !== 'boolean') ||
-      (body.clearOpenaiApiKey !== undefined && typeof body.clearOpenaiApiKey !== 'boolean')
+      (body.clearOpenaiApiKey !== undefined && typeof body.clearOpenaiApiKey !== 'boolean') ||
+      (body.clearDeepseekApiKey !== undefined && typeof body.clearDeepseekApiKey !== 'boolean')
     ) {
       send(res, 400, { error: 'Comando de remoção da chave inválido.' })
       return true
     }
     const incomingGemini = typeof body.geminiApiKey === 'string' ? body.geminiApiKey.trim() : ''
     const incomingOpenai = typeof body.openaiApiKey === 'string' ? body.openaiApiKey.trim() : ''
+    const incomingDeepseek = typeof body.deepseekApiKey === 'string' ? body.deepseekApiKey.trim() : ''
     if (
+      (body.deepseekApiKey !== undefined && typeof body.deepseekApiKey !== 'string') ||
+      incomingDeepseek.length > 4096 || (body.clearDeepseekApiKey && incomingDeepseek) ||
       incomingGemini.length > 4096 ||
       incomingOpenai.length > 4096 ||
       (body.clearGeminiApiKey && incomingGemini) ||
@@ -291,7 +299,10 @@ export async function handleOrganizationRoute(
         : incomingOpenai
           ? encryptCredential(incomingOpenai, auth.organizationId, 'openai_api_key')
           : currentAI.openaiApiKey
-    const aiProvider = ['auto', 'gemini', 'openai', 'procedural'].includes(String(body.aiProvider))
+    const deepseekApiKey = body.clearDeepseekApiKey === true ? '' : incomingDeepseek
+      ? encryptCredential(incomingDeepseek, auth.organizationId, 'deepseek_api_key')
+      : currentAI.deepseekApiKey
+    const aiProvider = ['auto', 'gemini', 'openai', 'deepseek', 'procedural'].includes(String(body.aiProvider))
       ? String(body.aiProvider)
       : currentAI.aiProvider || 'auto'
     const targetGroups = Array.isArray(body.targetGroups)
@@ -339,7 +350,7 @@ export async function handleOrganizationRoute(
         auth.organizationId,
       )
       db.prepare(
-        `UPDATE organization_settings SET default_location=?,daily_limit=?,stuck_timeout_minutes=?,execution_interval_minutes=?,require_confirmation=?,description_template=?,auto_advance=?,fill_groups=?,target_groups=?,auto_publish=?,auto_retry=?,max_retries=?,alert_telegram_token=?,alert_telegram_chat_id=?,alert_webhook_url=?,auto_curate_groups=?,gemini_api_key=?,openai_api_key=?,ai_provider=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=?`,
+        `UPDATE organization_settings SET default_location=?,daily_limit=?,stuck_timeout_minutes=?,execution_interval_minutes=?,require_confirmation=?,description_template=?,auto_advance=?,fill_groups=?,target_groups=?,auto_publish=?,auto_retry=?,max_retries=?,alert_telegram_token=?,alert_telegram_chat_id=?,alert_webhook_url=?,auto_curate_groups=?,gemini_api_key=?,openai_api_key=?,deepseek_api_key=?,ai_provider=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=?`,
       ).run(
         String(body.defaultLocation || ''),
         limit,
@@ -359,6 +370,7 @@ export async function handleOrganizationRoute(
         autoCurateGroups ? 1 : 0,
         geminiApiKey,
         openaiApiKey,
+        deepseekApiKey,
         aiProvider,
         auth.organizationId,
       )
@@ -377,6 +389,7 @@ export async function handleOrganizationRoute(
       if (
         geminiApiKey !== currentAI.geminiApiKey ||
         openaiApiKey !== currentAI.openaiApiKey ||
+        deepseekApiKey !== currentAI.deepseekApiKey ||
         aiProvider !== currentAI.aiProvider
       ) {
         recordAiAudit(

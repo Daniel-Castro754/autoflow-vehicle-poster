@@ -116,6 +116,7 @@ interface AiProviderStatus {
   preference: string
   geminiConfigured: boolean
   openaiConfigured: boolean
+  deepseekConfigured: boolean
   fallback: string
 }
 
@@ -669,7 +670,7 @@ export function AiCenterView({
         <p>
           Preferência: <strong>{providerStatus?.preference || 'carregando'}</strong>. Gemini:{' '}
           {providerStatus?.geminiConfigured ? 'configurado' : 'não configurado'}. OpenAI:{' '}
-          {providerStatus?.openaiConfigured ? 'configurada' : 'não configurada'}. Fallback
+          {providerStatus?.openaiConfigured ? 'configurada' : 'não configurada'}. DeepSeek: {providerStatus?.deepseekConfigured ? 'configurado' : 'não configurado'}. Fallback
           disponível: procedural (offline).
         </p>
         <p style={{ fontSize: 13 }}>
