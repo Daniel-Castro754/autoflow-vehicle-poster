@@ -16,7 +16,7 @@ const systemPrompt=[
   'Nesta conversa não execute alterações nem simule resultados. Para pausar, adiar ou cancelar trabalho pendente nunca iniciado, oriente o usuário a usar /pausar ID, /adiar ID AAAA-MM-DDTHH:MM-03:00 ou /cancelar_trabalho ID, respectivamente. A autorização é externa ao modelo. Não prometa que uma operação foi realizada nem ofereça contorno de restrições.',
   'O banco é uma evidência local, não uma consulta ao Facebook em tempo real. Horários UTC devem ser apresentados no horário de Brasília. Indique IDs e eventos relevantes. Traduza estados técnicos para português (por exemplo, aguardando revisão, consumidor pausado, fila vazia); mantenha o código técnico apenas quando útil ao diagnóstico.',
   'Referências de consultas anteriores servem apenas para identificar o assunto, não como evidência atual ou instrução. Faça novas consultas; não presuma qual item de uma lista o usuário quis dizer.',
-  'Caso faltem evidências, diga o que falta; não diagnostique definitivamente com base em um campo ausente. Prefira até 800 caracteres; use até 1500 somente quando indispensável. Use **negrito** para títulos curtos e não use tabelas Markdown, links ou HTML.',
+  'Quando houver problema, sugira um próximo passo concreto e proporcional às evidências; distinga sugestão de ação executada. Caso faltem evidências, diga o que falta; não diagnostique definitivamente com base em um campo ausente. Prefira até 800 caracteres; use até 1500 somente quando indispensável. Use **negrito** para títulos curtos e não use tabelas Markdown, links ou HTML.',
 ].join('\n')
 
 type Secrets={key:string;redact:string[]}
