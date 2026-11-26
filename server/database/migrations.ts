@@ -618,6 +618,46 @@ const migrations: Migration[] = [
     CREATE INDEX IF NOT EXISTS idx_commander_memory_scope ON commander_memory(organization_id,telegram_user_id,destination_hash,revision,id DESC);
     CREATE INDEX IF NOT EXISTS idx_commander_memory_age ON commander_memory(created_at);`,
   },
+  {
+    version: 37,
+    columns: [],
+    sql: `CREATE TABLE IF NOT EXISTS commander_permission_policy (
+      organization_id INTEGER PRIMARY KEY REFERENCES organizations(id),
+      enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),
+      grants TEXT NOT NULL DEFAULT '[]',
+      destination_hash TEXT NOT NULL DEFAULT '',
+      receiver_revision INTEGER NOT NULL DEFAULT 0,
+      revision INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS commander_action_requests (
+      id INTEGER PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      telegram_user_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      job_id INTEGER NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      destination_hash TEXT NOT NULL,
+      receiver_revision INTEGER NOT NULL,
+      policy_revision INTEGER NOT NULL,
+      snapshot_hash TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      decided_at INTEGER,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','validated_only','rejected','expired','stale','revoked')),
+      mode TEXT NOT NULL DEFAULT 'preview_only' CHECK(mode='preview_only')
+    );
+    CREATE INDEX IF NOT EXISTS idx_commander_requests_scope ON commander_action_requests(organization_id,telegram_user_id,status,created_at);
+    CREATE INDEX IF NOT EXISTS idx_commander_requests_age ON commander_action_requests(created_at);
+    CREATE TABLE IF NOT EXISTS commander_permission_audit (
+      id INTEGER PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      admin_user_id INTEGER NOT NULL,
+      enabled INTEGER NOT NULL,
+      grants TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_commander_permission_audit_scope ON commander_permission_audit(organization_id,id DESC);`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {
