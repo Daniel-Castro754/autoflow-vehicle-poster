@@ -5,7 +5,7 @@ const executionCodes = new Set([
   'photo_identity_unverified', 'photo_previous_pending', 'photo_input_missing',
   'photo_address_rejected', 'photo_download_failed', 'photo_downloaded',
   'photo_count_unverified', 'photo_accepted', 'photo_accept_timeout', 'photos_retry',
-  'advanced', 'advance_failed', 'groups_checked', 'publication_confirmed', 'transmission_checked',
+  'advanced', 'advance_failed', 'groups_checked', 'publication_confirmed', 'transmission_checked', 'location_checked',
   'publication_uncertain', 'publication_not_clicked', 'form_finished',
 ])
 const consumerCodes = new Set([

@@ -111,3 +111,63 @@ assert.equal(actions.action(['Publicar', 'Postar', 'Publish'], true), post)
 actions.document.querySelectorAll = () => [other]
 assert.equal(actions.action(['Publicar', 'Postar', 'Publish'], true), null)
 console.log('✓ Confirmação de câmbio e botão Postar: evidência positiva e negativa.')
+
+
+// Production location helpers: exact city/state and real selection evidence.
+const locationStart = content.indexOf('  const brazilStates =')
+const locationEnd = content.indexOf('  function contextError(', locationStart)
+assert(locationStart >= 0 && locationEnd > locationStart)
+const locationInput = {
+  value: 'Criciúma - SC',
+  validity: { valid: true },
+  getAttribute: () => null,
+  closest: () => null,
+  labels: [{ textContent: 'Localização' }],
+}
+const locationRoot = { innerText: '', querySelectorAll: () => [locationInput] }
+const locationContext = {
+  normalize, rootScope: () => locationRoot, visible: () => true,
+  document: { getElementById: () => null, querySelectorAll: () => [] },
+}
+vm.runInNewContext(content.slice(locationStart, locationEnd) +
+  '\nthis.locationApi = { locationTarget, locationMatches, locationConfirmed, findLocationInput }', locationContext)
+const loc = locationContext.locationApi
+const target = loc.locationTarget('Criciúma - SC')
+assert.equal(target.city, 'criciuma')
+assert(loc.locationMatches('Criciúma, Santa Catarina, Brasil', target))
+assert(loc.locationMatches('Criciúma, SC', target))
+assert(!loc.locationMatches('Criciúma, Paraná', target))
+assert(!loc.locationMatches('Criciúma', target))
+assert(!loc.locationMatches('Nova Criciúma, SC', target))
+assert(!loc.locationTarget('Criciúma'))
+assert(!loc.locationConfirmed(['Localização'], target, false))
+assert(loc.locationConfirmed(['Localização'], target, true))
+locationRoot.innerText = 'Insira uma localização válida.'
+assert(!loc.locationConfirmed(['Localização'], target, true))
+locationRoot.innerText = ''
+locationInput.closest = () => ({})
+assert(!loc.locationConfirmed(['Localização'], target, true))
+locationInput.closest = () => null
+locationRoot.querySelectorAll = () => [locationInput, { ...locationInput }]
+assert.equal(loc.findLocationInput(['Localização']), null)
+
+// No click on Next if the preflight fails, no repeated repair if it fails.
+const advanceStart = content.indexOf('  async function advanceToGroups(')
+const advanceEnd = content.indexOf('  function groupTarget(', advanceStart)
+let advanceClicks = 0, repairCalls = 0
+const nextButton = { scrollIntoView() {} }
+const advanceContext = {
+  marketplaceStage: () => 'form',
+  actionButton: () => nextButton,
+  waitForDom: async test => test(),
+  sleep: async () => {},
+  firePointerClick: () => { advanceClicks++ },
+}
+vm.runInNewContext(content.slice(advanceStart, advanceEnd) +
+  '\nthis.advance = advanceToGroups', advanceContext)
+assert.equal(await advanceContext.advance(null, async () => false), false)
+assert.equal(advanceClicks, 0)
+assert.equal(await advanceContext.advance(async () => { repairCalls++; return false }, async () => true), false)
+assert.equal(advanceClicks, 1)
+assert.equal(repairCalls, 1)
+console.log('✓ Localização: cidade/UF exatas, seleção obrigatória e avanço interrompido sem repetição.')
