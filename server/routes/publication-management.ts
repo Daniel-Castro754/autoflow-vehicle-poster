@@ -1,5 +1,6 @@
 import { randomInt } from 'node:crypto'
 import { publicationMayExist } from '../services/publication-evidence.ts'
+import { openResultConflict } from '../services/result-conflicts.ts'
 import { organizationScheduleHistory } from '../services/schedule-history.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
@@ -347,6 +348,7 @@ export async function handlePublicationManagementRoute(
       return send(res, 400, { error: 'Um ou mais trabalhos não pertencem a esta empresa.' })
     if (!canManageJobs(ids, auth))
       return send(res, 403, { error: 'Você não pode reprocessar trabalhos de outro perfil.' })
+    if (ids.some(id=>openResultConflict(db,auth.organizationId,id))) return send(res,409,{error:'Há resultados em conflito. Reconcilie antes de reprocessar.'})
     if (jobs.some((job) => job.status !== 'error'))
       return send(res, 409, {
         error: 'O reprocessamento em lote aceita somente trabalhos no estado Erro.',
@@ -378,8 +380,9 @@ export async function handlePublicationManagementRoute(
         })
     }
 
-    db.exec('BEGIN')
+    db.exec('BEGIN IMMEDIATE')
     try {
+      if(ids.some(id=>openResultConflict(db,auth.organizationId,id))){db.exec('ROLLBACK');return send(res,409,{error:'Há resultados em conflito. Reconcilie antes de reprocessar.'})}
       db.prepare(
         `UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,
           error_code=NULL,fill_report='',publish_attempt_at=NULL,last_lease_token=NULL,
@@ -717,6 +720,8 @@ export async function handlePublicationManagementRoute(
     if (!canManageJobs([Number(publication[1])], auth))
       return send(res, 403, { error: 'Você não pode alterar trabalhos de outro perfil.' })
     const nextStatus = String(b.status)
+    const unresolvedConflict=openResultConflict(db,auth.organizationId,Number(publication[1]))
+    if(unresolvedConflict && nextStatus==='pending') return send(res,409,{error:'Trabalho com conflito não pode voltar à fila. Verifique o anúncio e encerre o conflito.'})
     if (
       nextStatus === 'pending' &&
       jobsIncludeSoldVehicle([Number(publication[1])], auth.organizationId)
@@ -728,7 +733,7 @@ export async function handlePublicationManagementRoute(
       })
     if (
       (nextStatus === 'pending' || nextStatus === 'canceled') &&
-      (job.status === 'awaiting_confirmation' || publicationMayExist(job)) &&
+      (job.status === 'awaiting_confirmation' || publicationMayExist(job) || unresolvedConflict) &&
       b.confirmNoPublication !== true
     )
       return send(res, 409, {
@@ -749,8 +754,12 @@ export async function handlePublicationManagementRoute(
       if (duplicateRisk)
         return send(res, 409, { error: duplicateRisk.message, duplicate: duplicateRisk })
     }
-    db.exec('BEGIN')
+    db.exec('BEGIN IMMEDIATE')
     try {
+      const conflictNow=openResultConflict(db,auth.organizationId,Number(publication[1]))
+      if(conflictNow&&(nextStatus==='pending'||(nextStatus==='canceled'&&b.confirmNoPublication!==true))){
+        db.exec('ROLLBACK');return send(res,409,{error:'Há resultado em conflito. Verifique o Facebook antes de alterar o trabalho.'})
+      }
       if (nextStatus === 'pending')
         db.prepare(
           "UPDATE publication_jobs SET status='pending',paused=0,extension_visible=1,error_code=NULL,fill_report='',publish_attempt_at=NULL,last_lease_token=NULL,started_at=NULL,filled_at=NULL,removed_at=NULL,retry_count=retry_count+1,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",

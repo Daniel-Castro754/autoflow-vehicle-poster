@@ -409,6 +409,20 @@ try {
   assert.equal(JSON.parse(conflictEvents[0].details).conflictCode,'result_conflict')
   assert(!conflictEvents[0].details.includes(conflictPrepared.leaseToken))
   assert(!conflictEvents[0].details.includes('facebook.com'))
+  const conflictId=testDb.prepare("SELECT id FROM publication_job_events WHERE publication_job_id=? AND event_type='fill_result_conflict'").get(conflictJob.id).id
+  const resolutionPath='/operations/conflicts/'+conflictId
+  const resolve=()=>call(resolutionPath,adminToken,{method:'PATCH',body:JSON.stringify({verifiedFacebook:true,outcome:'not_published'})})
+  await expectStatus(409,resolve)
+  await expectStatus(409,()=>call('/publications/'+conflictJob.id,adminToken,{method:'PATCH',body:JSON.stringify({status:'pending',confirmNoPublication:true})}))
+  await call('/publications/'+conflictJob.id,adminToken,{method:'PATCH',body:JSON.stringify({status:'canceled',confirmNoPublication:true})})
+  assert.equal((await resolve()).ok,true)
+  assert.equal((await resolve()).idempotent,true)
+  const statusRequest=body=>call('/extension/conflicts/status',adminToken,{method:'POST',body:JSON.stringify(body)})
+  const identity={conflictId,jobId:conflictJob.id,leaseToken:conflictPrepared.leaseToken,tabId:conflictPrepared.tabId,document:conflictPrepared.document,documentId:conflictPrepared.documentId}
+  assert.equal((await statusRequest(identity)).resolved,true)
+  await expectStatus(404,()=>statusRequest({...identity,leaseToken:'wrong-lease'}))
+  await expectStatus(404,()=>statusRequest({...identity,jobId:conflictJob.id+1}))
+  assert.equal(jobRow(conflictJob.id).status,'canceled')
 
   // 3. Sem sinal de publish-check, a recuperação automática continua segura (volta para
   //    "pending"), mas passa a respeitar max_retries (via retry_count, não attempt_count) em

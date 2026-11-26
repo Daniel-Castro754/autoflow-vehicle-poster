@@ -244,6 +244,7 @@ function sendFillResult(jobId, token, payload) {
       const error = new Error(data.error || 'Falha ao atualizar o trabalho')
       error.status = response.status
       error.conflictCode = data.conflictCode
+      error.conflictId = data.conflictId
       throw error
     }
     return data
@@ -594,6 +595,7 @@ async function recoverConsumer() {
   recoveryInFlight = (async () => {
     await validatePendingTab()
     await flushPendingResults()
+    await synchronizeConflictResolutions()
     await synchronizeAutonomousConsumption()
     await reportExtensionPresence()
     await consumeQueue()
@@ -671,7 +673,7 @@ function changePendingResults(change) {
   return operation
 }
 function hasQuarantinedResult(entries, jobId) {
-  return Object.values(entries || {}).some(entry => entry.rejectedAt && entry.jobId === jobId)
+  return Object.values(entries || {}).some(entry => entry.rejectedAt && !entry.resolvedAt && entry.jobId === jobId)
 }
 const conflictCodes = new Set(['lease_mismatch','identity_mismatch','lease_expired','status_changed','result_conflict'])
 async function quarantineResult(entry, error) {
@@ -681,7 +683,7 @@ async function quarantineResult(entry, error) {
     const current = entries[key] || entry
     // Preserve the original rejected report and any newer report in flight.
     entries[key] = {...current,rejectedAt:current.rejectedAt || Date.now(),
-      conflictCode:code,firstRejectedPayload:current.firstRejectedPayload || entry.payload}
+      conflictCode:code,conflictId:Number.isSafeInteger(error.conflictId)&&error.conflictId>0?error.conflictId:null,firstRejectedPayload:current.firstRejectedPayload || entry.payload}
   })
   const state = await chrome.storage.local.get(['pendingJob','activeAccountId'])
   const sameExecution = state.pendingJob?.jobId === entry.jobId && state.pendingJob.leaseToken === entry.leaseToken
@@ -728,7 +730,7 @@ async function queueFillResult(jobId, token, payload) {
     const previous = entries[key]
     if (previous?.rejectedAt) {
       if (payload.published === true && previous.payload.published !== true)
-        entries[key] = {...previous,payload}
+        entries[key] = {...previous,payload,version:`${Date.now()}:${++resultSequence}`,resolvedAt:null,resolution:null}
       return entries[key]
     }
     if (previous?.payload.published && !payload.published) return previous
@@ -746,6 +748,32 @@ async function queueFillResult(jobId, token, payload) {
     return next
   })
   return deliverResult(entry, token)
+}
+// Only archive a server-verified terminal decision for this exact rejected request.
+async function synchronizeConflictResolutions(){
+  const {pendingResults,token,refreshToken}=await chrome.storage.local.get(['pendingResults','token','refreshToken'])
+  if(!token&&!refreshToken)return
+  const entries=Object.values(pendingResults||{}).filter(e=>e.rejectedAt&&!e.resolvedAt&&Number.isSafeInteger(e.conflictId)&&e.conflictId>0).slice(0,20)
+  for(const entry of entries){
+    try{
+      const original=entry.firstRejectedPayload||entry.payload
+      const response=await authorizedFetch(API+'/extension/conflicts/status',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({conflictId:entry.conflictId,jobId:entry.jobId,leaseToken:entry.leaseToken,
+          tabId:original.tabId,document:original.document,documentId:original.documentId}),
+      },{attempts:1,timeoutMs:8000})
+      if(!response.ok)continue
+      const result=await response.json()
+      if(result.resolved!==true||result.conflictId!==entry.conflictId||result.jobId!==entry.jobId||!['published','not_published','removed'].includes(result.outcome))continue
+      await changePendingResults(all=>{
+        const key=entry.jobId+':'+entry.leaseToken,current=all[key]
+        if(!current||current.version!==entry.version||current.conflictId!==entry.conflictId||current.resolvedAt)return
+        // Stronger evidence received after the rejection needs independent review.
+        if(current.payload?.published===true && original.published!==true)return
+        all[key]={...current,resolvedAt:Date.now(),resolution:result.outcome}
+      })
+    }catch{/* Preserve quarantine on unavailable or invalid server response. */}
+  }
 }
 async function flushPendingResults() {
   if (flushingResults) return

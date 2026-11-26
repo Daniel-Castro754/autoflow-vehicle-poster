@@ -9,8 +9,10 @@ type Profile = {
 }
 type Review = {id:number;vehicleId:number;accountId:number|null;title:string;status:string;reviewKind:string|null;paused:boolean;visible:boolean}
 type Event = {id:number;jobId:number;vehicleId:number;title:string;eventType:string;createdAt:string;accountLabel:string|null;fromLabel:string|null;toLabel:string|null;automatic:number|null;conflictCode?:string|null}
-type Snapshot = {timestamp:string;filters:{accountId:number;vehicleId:number;hours:number;category:string;beforeId:number;limit:number};profiles:Profile[];reviews:Review[];reviewCount:number;activity:Event[];nextBeforeId:number|null}
+type Conflict = {id:number;jobId:number;jobStatus:string;title:string;accountLabel:string|null;conflictCode:string;reportedPublished:number;reportedPublishAttempted:number;createdAt:string}
+type Snapshot = {conflicts:{count:number;rows:Conflict[]};timestamp:string;filters:{accountId:number;vehicleId:number;hours:number;category:string;beforeId:number;limit:number};profiles:Profile[];reviews:Review[];reviewCount:number;activity:Event[];nextBeforeId:number|null}
 const labels:Record<string,string> = {
+ fill_result_conflict_resolved:'Conflito reconciliado',completed:'Publicado',removed:'Removido',canceled:'Encerrado',awaiting_confirmation:'Aguardando confirmação',pending:'Pendente',filling:'Em execução',
  lease_mismatch:'Bloqueio incompatível',identity_mismatch:'Documento incompatível',lease_expired:'Bloqueio expirado',status_changed:'Estado alterado',result_conflict:'Resultado incompatível',
  offline:'Sem sinal recente',server_paused:'Pausa no servidor',consumer_paused:'Consumo pausado',consumer_unknown:'Consumo sem sinal recente',daily_limit:'Limite de execuções',queue_daily_limit:'Limite de agendamentos',operational_interval:'Intervalo operacional',
  enabled:'Ativo',paused:'Pausado',unknown:'Desconhecido',
@@ -21,7 +23,7 @@ const labels:Record<string,string> = {
 const label=(code:string)=>labels[code]||code.replaceAll('_',' ')
 const date=(value:string|null)=>value?new Date(/(?:Z|[+-]\d\d:\d\d)$/.test(value)?value:value.replace(' ','T')+'Z').toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'}):'—'
 
-export function OperationalMonitor({api}:{api:<T>(path:string)=>Promise<T>}) {
+export function OperationalMonitor({api}:{api:<T>(path:string,options?:RequestInit)=>Promise<T>}) {
   const [account,setAccount]=useState('')
   const [vehicle,setVehicle]=useState('')
   const [category,setCategory]=useState('all')
@@ -30,6 +32,18 @@ export function OperationalMonitor({api}:{api:<T>(path:string)=>Promise<T>}) {
   const [refresh,setRefresh]=useState(0)
   const [data,setData]=useState<Snapshot|null>(null)
   const [error,setError]=useState('')
+  const [busy,setBusy]=useState<number|null>(null)
+  const [notice,setNotice]=useState('')
+  async function resolveConflict(c:Conflict){
+    const outcome=c.jobStatus==='completed'?'published':c.jobStatus==='removed'?'removed':c.jobStatus==='canceled'?'not_published':null
+    if(!outcome||busy!==null)return
+    const description=outcome==='published'?'foi publicado':outcome==='removed'?'foi removido':'não foi publicado'
+    if(!window.confirm('Confirma que verificou Seus classificados no perfil correto, fechou o formulário antigo e que o anúncio '+description+'? A evidência será preservada e não haverá nova tentativa automática.'))return
+    setBusy(c.id);setNotice('')
+    try{await api('/operations/conflicts/'+c.id,{method:'PATCH',body:JSON.stringify({outcome,verifiedFacebook:true})});setNotice('Conflito reconciliado. A extensão sincronizará o arquivo sem reativar o consumo.');setRefresh(n=>n+1)}
+    catch(e){setNotice(e instanceof Error?e.message:'Não foi possível reconciliar.')}
+    finally{setBusy(null)}
+  }
   useEffect(()=>{
     let active=true
     let timer:ReturnType<typeof setTimeout>|undefined
@@ -77,6 +91,9 @@ export function OperationalMonitor({api}:{api:<T>(path:string)=>Promise<T>}) {
       <td>{p.decision?label(p.decision.code)+(p.decision.jobId?' · #'+p.decision.jobId:'')+(p.decision.httpStatus?' · HTTP '+p.decision.httpStatus:''):'Sem decisão recente'}<small className="job-report">{p.reasons.map(label).join(' · ')||'Sem restrição de perfil detectada'}</small></td>
       </tr>)}</tbody></table></div>
       <div className="health-table-wrap"><table className="health-table"><caption>Trabalhos para revisão — {data.reviews.length} de {data.reviewCount} (estado atual, independente do período)</caption><thead><tr><th>Trabalho</th><th>Veículo</th><th>Perfil</th><th>Motivo</th></tr></thead><tbody>{data.reviews.map(j=><tr key={j.id}><td>#{j.id}</td><td>#{j.vehicleId} · {j.title}</td><td>{data.profiles.find(p=>p.id===j.accountId)?.label||'—'}</td><td>{label(j.reviewKind||j.status)}{j.paused?' · pausado':''}{!j.visible?' · oculto':''}</td></tr>)}</tbody></table></div>
+      <div className="health-table-wrap"><table className="health-table"><caption>Conflitos abertos — {data.conflicts.rows.length} de {data.conflicts.count} (todos os perfis)</caption><thead><tr><th>Trabalho / veículo</th><th>Perfil</th><th>Conflito / evidência declarada</th><th>Estado final / ação</th></tr></thead><tbody>{data.conflicts.rows.map(c=><tr key={c.id}><td>#{c.jobId} · {c.title}<small className="job-report">{date(c.createdAt)}</small></td><td>{c.accountLabel||'—'}</td><td>{label(c.conflictCode)} · {c.reportedPublished?'Publicação declarada':c.reportedPublishAttempted?'Tentativa declarada':'Sem tentativa declarada'}</td><td>{label(c.jobStatus)} · <button type="button" disabled={busy!==null||Boolean(error)||!['completed','removed','canceled'].includes(c.jobStatus)} onClick={()=>void resolveConflict(c)}>Reconciliar</button></td></tr>)}</tbody></table></div>
+      <p className="health-note">Primeiro confirme o resultado em Publicações. Somente trabalhos encerrados podem ser reconciliados aqui; não haverá reabertura automática.</p>
+      {notice&&<p role="status">{notice}</p>}
       <div className="health-table-wrap"><table className="health-table"><caption>Histórico filtrado — {data.activity.length} eventos (tipos operacionais selecionados)</caption><thead><tr><th>Horário</th><th>Trabalho / veículo</th><th>Evento</th><th>Perfil registrado</th></tr></thead><tbody>{data.activity.map(e=><tr key={e.id}><td>{date(e.createdAt)}</td><td>#{e.jobId} · #{e.vehicleId} {e.title}</td><td>{label(e.eventType)}{e.conflictCode?' · '+label(e.conflictCode):''}{e.automatic?' · automático':''}</td><td>{e.fromLabel||e.toLabel?(e.fromLabel||'—')+' → '+(e.toLabel||'—'):e.accountLabel||'Não registrado'}</td></tr>)}</tbody></table></div>
       {!data.activity.length&&<p className="health-note">Sem eventos para os filtros selecionados.</p>}
       <div className="intervention-filter"><button type="button" disabled={!cursor} onClick={()=>{setCursor(null);setData(null)}}>Mais recentes</button><button type="button" disabled={!data.nextBeforeId} onClick={()=>{setCursor(data.nextBeforeId);setData(null)}}>Eventos anteriores</button></div>
