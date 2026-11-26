@@ -218,7 +218,7 @@ export async function sweepTelegramCommander(db:DatabaseSync,deps:Dependencies={
           }else if('menu' in reply){
             const messageId=update.message?.message_id
             const menu=typeof messageId==='number'&&Number.isSafeInteger(messageId)&&messageId>0?{messageId,username:bot.username,aiEnabled:Boolean(r.ai_enabled)}:undefined
-            if(!await send(reply.text,c,{menu}))status='reply_failed'
+            if(!await send(reply.text,c,menu?{menu}:{}))status='reply_failed'
           }else{
             const authorized=()=>Boolean(current()?.ai_enabled&&sameDestination())
             const memory:MemoryScope|undefined=r.memory_enabled?{userId:reply.userId,destinationHash:r.destination_hash,revision:r.revision}:undefined
