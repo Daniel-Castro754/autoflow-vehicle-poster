@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
-import { initializeBaseSchema, registerSqliteFunctions } from '../server/database/schema.ts'
+import { initializeBaseSchema } from '../server/database/schema.ts'
 import { applyMigrations } from '../server/database/migrations.ts'
 import { saveTelegramMonitorSettings, telegramMonitorSettings, runTelegramMonitor } from '../server/services/telegram-monitor.ts'
 const db=new DatabaseSync(':memory:')
 initializeBaseSchema(db)
-registerSqliteFunctions(db)
 applyMigrations(db)
 db.exec("INSERT INTO organizations(id,name) VALUES(1,'One'),(2,'Two'); INSERT INTO organization_settings(organization_id) VALUES(1),(2); INSERT INTO users(id,organization_id,name,email,password_hash) VALUES(1,1,'Owner','one@local','fixture'),(2,2,'Owner','two@local','fixture'); INSERT INTO social_accounts(id,organization_id,user_id,label,status,last_seen_at) VALUES(1,1,1,'Mae','connected',CURRENT_TIMESTAMP),(2,2,2,'Other','connected',CURRENT_TIMESTAMP); INSERT INTO vehicles(id,organization_id,year,make,model) VALUES(1,1,2022,'VW','Nivus'),(2,2,2022,'Private','Other'); INSERT INTO publication_jobs(id,organization_id,vehicle_id,social_account_id) VALUES(1,1,1,1),(2,2,2,2); INSERT INTO publication_job_events(organization_id,publication_job_id,event_type) VALUES(1,1,'created');")
 assert.deepEqual(telegramMonitorSettings(db,1).categories,[])

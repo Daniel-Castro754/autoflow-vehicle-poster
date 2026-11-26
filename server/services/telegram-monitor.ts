@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { getAlertCredentials } from './credential-vault.ts'
-import { businessDate, localParts } from '../lib/timezone.ts'
+import { businessDate, localParts, localInstant } from '../lib/timezone.ts'
 import { parseSqliteTimestamp, profileCapacity } from './profile-capacity.ts'
 import { listingExpiryOverview } from './listing-expiry.ts'
 import { canonicalMarketplaceListing } from './publication-ledger.ts'
@@ -90,13 +90,16 @@ function collect(db:DatabaseSync,org:number,now:number){
     const accounts=db.prepare('SELECT id,label,status,last_seen_at lastSeen FROM social_accounts WHERE organization_id=? ORDER BY id').all(org) as Array<{id:number;label:string;status:string;lastSeen:string|null}>
     const online=accounts.filter(a=>isOnline(a,now)).length
     const parts=localParts(new Date(now),timezone)
+    const carrier=new Date(Date.UTC(parts.year,parts.month-1,parts.day))
+    const dayStart=localInstant(carrier,0,timezone).toISOString()
+    const dayEnd=localInstant(carrier,1440,timezone).toISOString()
     if(enabled.has('daily') && parts.hour*60+parts.minute>=21*60+30){
       const totals=db.prepare("SELECT status,COUNT(*) n FROM publication_jobs WHERE organization_id=? GROUP BY status").all(org) as Array<{status:string;n:number}>
       const count=(status:string)=>totals.find(t=>t.status===status)?.n||0
-      const confirmed=db.prepare("SELECT COUNT(*) n FROM publication_listing_ledger WHERE organization_id=? AND autoflow_day(first_confirmed_at)=?").get(org,day) as {n:number}
-      const errors=db.prepare("SELECT COUNT(DISTINCT publication_job_id) n FROM publication_job_events WHERE organization_id=? AND event_type='fill_error' AND autoflow_day(created_at)=?").get(org,day) as {n:number}
+      const confirmed=db.prepare("SELECT COUNT(*) n FROM publication_listing_ledger WHERE organization_id=? AND unixepoch(first_confirmed_at)>=unixepoch(?) AND unixepoch(first_confirmed_at)<unixepoch(?)").get(org,dayStart,dayEnd) as {n:number}
+      const errors=db.prepare("SELECT COUNT(DISTINCT publication_job_id) n FROM publication_job_events WHERE organization_id=? AND event_type='fill_error' AND unixepoch(created_at)>=unixepoch(?) AND unixepoch(created_at)<unixepoch(?)").get(org,dayStart,dayEnd) as {n:number}
       const lines=accounts.slice(0,20).map(a=>{
-        const n=(db.prepare("SELECT COUNT(*) n FROM publication_listing_ledger WHERE organization_id=? AND social_account_id=? AND autoflow_day(first_confirmed_at)=?").get(org,a.id,day) as {n:number}).n
+        const n=(db.prepare("SELECT COUNT(*) n FROM publication_listing_ledger WHERE organization_id=? AND social_account_id=? AND unixepoch(first_confirmed_at)>=unixepoch(?) AND unixepoch(first_confirmed_at)<unixepoch(?)").get(org,a.id,dayStart,dayEnd) as {n:number}).n
         const cap=profileCapacity(db,org,a.id,now)
         return clean(a.label,60)+': '+n+' confirmações; '+cap.used+'/'+cap.dailyLimit+' execuções'
       })

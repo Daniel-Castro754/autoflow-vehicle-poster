@@ -20,6 +20,7 @@ import {
   DuplicateListingHashError,
 } from '../services/duplicate-checker.ts'
 import { sendCriticalAlert } from '../services/alerting.ts'
+import { getAlertCredentials } from '../services/credential-vault.ts'
 import {
   openSelectorCircuitBreaker,
   recordSelectorHealth,
@@ -902,15 +903,12 @@ export async function handleExtensionRoute(
     if (error) {
       const orgSettings = db
         .prepare(
-          'SELECT auto_retry autoRetry, max_retries maxRetries, alert_telegram_token alertTelegramToken, alert_telegram_chat_id alertTelegramChatId, alert_webhook_url alertWebhookUrl FROM organization_settings WHERE organization_id=?',
+          'SELECT auto_retry autoRetry, max_retries maxRetries FROM organization_settings WHERE organization_id=?',
         )
         .get(auth.organizationId) as
         | {
             autoRetry?: number
             maxRetries?: number
-            alertTelegramToken?: string
-            alertTelegramChatId?: string
-            alertWebhookUrl?: string
           }
         | undefined
       if (publicationMayExist(job)) {
@@ -1045,11 +1043,7 @@ export async function handleExtensionRoute(
           message: error,
           attemptCount: Number(job.attemptCount || 1),
         },
-        {
-          telegramBotToken: orgSettings?.alertTelegramToken,
-          telegramChatId: orgSettings?.alertTelegramChatId,
-          webhookUrl: orgSettings?.alertWebhookUrl,
-        },
+        getAlertCredentials(db, auth.organizationId),
       )
       return send(res, 200, {
         ok: true,
@@ -1116,13 +1110,6 @@ export async function handleExtensionRoute(
       })
     }
     if (report.layoutDriftSuspected) {
-      const alertSettings = db
-        .prepare(
-          'SELECT alert_telegram_token alertTelegramToken, alert_telegram_chat_id alertTelegramChatId, alert_webhook_url alertWebhookUrl FROM organization_settings WHERE organization_id=?',
-        )
-        .get(auth.organizationId) as
-        | { alertTelegramToken?: string; alertTelegramChatId?: string; alertWebhookUrl?: string }
-        | undefined
       void sendCriticalAlert(
         {
           jobId: job.id,
@@ -1138,11 +1125,7 @@ export async function handleExtensionRoute(
             accountAutomationPaused: Boolean(selectorCircuit),
           },
         },
-        {
-          telegramBotToken: alertSettings?.alertTelegramToken,
-          telegramChatId: alertSettings?.alertTelegramChatId,
-          webhookUrl: alertSettings?.alertWebhookUrl,
-        },
+        getAlertCredentials(db, auth.organizationId),
       )
     }
     const registeredGroups = marketplaceGroups(auth.organizationId)
