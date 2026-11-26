@@ -40,24 +40,27 @@ export function TelegramCommanderSettings({api}:{api:Api}){
     catch{setMessage('Não foi possível consultar o estado.')}
   }
   return <section className="commander-section">
-    <h3>AI Commander — comandos pelo Telegram</h3>
+    <div className="commander-heading"><h3>AI Commander — Telegram e IA</h3><span className="commander-metric">Receptor: {state ? (state.enabled ? "Ligado" : "Desligado") : "Carregando"}</span></div>
     <p>Consulta somente leitura. Usa o bot e grupo salvos. O receptor é independente das notificações.</p>
+    <div className="commander-grid"><div className="commander-group commander-group-wide"><h4>Conexão e acesso</h4>
     <label className="toggle-label"><span>Receber comandos do Telegram</span><input type="checkbox" checked={enabled} disabled={!state||saving} onChange={e=>setEnabled(e.target.checked)}/></label>
     <label><span>IDs de usuários autorizados (separados por vírgula)</span>
       <input value={userIds} onChange={e=>setUserIds(e.target.value)} placeholder="Envie /meu_id no grupo para descobrir seu ID" disabled={!state||saving}/>
     </label>
     <label className="toggle-label"><span>Entendo que as respostas podem ser vistas por todos os membros do grupo.</span><input type="checkbox" checked={ack} onChange={e=>setAck(e.target.checked)} disabled={!state||saving}/></label>
-    <details><summary>Como vincular o Telegram</summary><p><small>Para vincular: salve com o receptor ligado e sem IDs, envie /meu_id@NomeDoBot no grupo e depois salve seu ID. Somente usuários autorizados podem consultar /status e /ajuda. Não é necessário desativar a privacidade do bot.</small></p></details>
+    <details><summary>Como vincular o Telegram</summary><p><small>Para vincular: salve com o receptor ligado e sem IDs, envie /meu_id@NomeDoBot no grupo e depois salve seu ID. Somente usuários autorizados podem consultar /status e /ajuda. Não é necessário desativar a privacidade do bot.</small></p></details></div>
+    <div className="commander-group"><div className="commander-heading"><h4>DeepSeek</h4><span className="commander-metric">{state?.usage?.used??0}/{state?.usage?.limit??20} hoje</span></div>
     <label className="toggle-label"><span>Responder perguntas com DeepSeek (somente leitura)</span><input type="checkbox" checked={enabled&&aiEnabled} disabled={!state||saving||!enabled} onChange={e=>setAiEnabled(e.target.checked)}/></label>
     <label className="toggle-label"><span>Autorizo o envio das perguntas e dos dados operacionais selecionados à API DeepSeek.</span><input type="checkbox" checked={aiAck} disabled={!state||saving||!enabled||!aiEnabled} onChange={e=>setAiAck(e.target.checked)}/></label>
     <details><summary>Comandos e limites da IA</summary><p><small>Use /ia@NomeDoBot seguido da pergunta. Não envie senhas, chaves, dados pessoais ou logs brutos. Limite de 20 perguntas por dia (Brasília), até 3 chamadas de IA por pergunta. </small></p></details>
-    <small>Uso de hoje: {state?.usage?.used??0}/{state?.usage?.limit??20}</small>
+    </div>
+    <div className="commander-group"><div className="commander-heading"><h4>Memória</h4><span className="commander-metric">{state?.memoryCount??0} referências</span></div>
     <label className="toggle-label"><span>Memória de referências de consultas</span><input type="checkbox" checked={enabled&&aiEnabled&&memoryEnabled} disabled={!state||saving||!enabled||!aiEnabled} onChange={e=>setMemoryEnabled(e.target.checked)}/></label>
     <label className="toggle-label"><span>Autorizo armazenar e reutilizar referências de consultas no DeepSeek por até 30 dias.</span><input type="checkbox" checked={memoryAck} disabled={!state||saving||!enabled||!aiEnabled||!memoryEnabled} onChange={e=>setMemoryAck(e.target.checked)}/></label>
     <details><summary>Retenção e limpeza da memória</summary><p><small>Até 6 consultas respondidas por usuário, sem texto de conversa. Alterar a autorização ou desativar a memória limpa as referências. Use /limpar_memoria para limpar as suas. </small></p></details>
-    <small>Registros ativos: {state?.memoryCount??0}</small>
-    <button type="button" className="secondary" disabled={!state||saving} onClick={()=>void clearMemory()}>Limpar memória da empresa</button>
-    <small>Estado: {state?.lastStatus||'carregando'} {state?.lastPollAt?' · '+new Date(state.lastPollAt).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'}):''}</small>
+    
+    <button type="button" className="secondary" disabled={!state||saving} onClick={()=>void clearMemory()}>Limpar memória da empresa</button></div></div>
+    <div className="commander-state"><small>Estado: {state?.lastStatus||'carregando'} {state?.lastPollAt?' · '+new Date(state.lastPollAt).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'}):''}</small></div>
     {state?.requiresRebind&&<p>O destino mudou. Revise a autorização e salve novamente.</p>}
     <div className="commander-actions">
       <button type="button" className="secondary" disabled={!state||saving||(enabled&&(!ack||!state.configured||(aiEnabled&&(!aiAck||!userIds.trim()||(memoryEnabled&&!memoryAck)))))} onClick={()=>void save()}>Salvar receptor</button>
