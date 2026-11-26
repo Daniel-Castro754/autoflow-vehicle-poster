@@ -1,5 +1,5 @@
 type Credentials = { telegramBotToken: string; telegramChatId: string }
-export type CommanderReplyOptions = { format?: boolean; menu?: { messageId: number; username: string } }
+export type CommanderReplyOptions = { format?: boolean; menu?: { messageId: number; username: string; aiEnabled: boolean } }
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 // Only locally generated tags are allowed. Model text never becomes raw HTML.
@@ -20,11 +20,24 @@ export function formatCommanderReply(raw: string) {
 
 export async function sendCommanderReply(text: string, credentials: Credentials, options: CommanderReplyOptions = {}) {
   const formatted = options.format ? formatCommanderReply(text) : null
+  const menu = options.menu
+  const keyboard = menu ? [
+    [{ text: '/status@' + menu.username }, { text: '/ajuda@' + menu.username }],
+    ...(menu.aiEnabled ? [
+      [{ text: '/ia@' + menu.username + ' Quantos veículos estão em estoque?' }],
+      [{ text: '/ia@' + menu.username + ' Qual é a situação dos perfis?' }],
+      [{ text: '/ia@' + menu.username + ' Quais trabalhos aguardam revisão?' }],
+    ] : []),
+  ] : null
   const payload = {
     chat_id: credentials.telegramChatId,
     text: formatted?.html ?? text.slice(0, 3900),
     link_preview_options: { is_disabled: true },
     ...(formatted ? { parse_mode: 'HTML' } : {}),
+    ...(menu && keyboard ? {
+      reply_parameters: { message_id: menu.messageId, allow_sending_without_reply: false },
+      reply_markup: { keyboard, resize_keyboard: true, one_time_keyboard: true, selective: true },
+    } : {}),
   }
   const send = async (body: Record<string, unknown>) => {
     const response = await fetch('https://api.telegram.org/bot' + credentials.telegramBotToken + '/sendMessage', {
@@ -38,7 +51,9 @@ export async function sendCommanderReply(text: string, credentials: Credentials,
     const result = await send(payload)
     // Only retry an explicit parse rejection, never an ambiguous network failure.
     if (formatted && result.status === 400 && /parse entities|unsupported start tag/i.test(result.description ?? '')) {
-      return (await send({ chat_id: payload.chat_id, text: formatted.plain, link_preview_options: payload.link_preview_options })).ok
+      const { parse_mode: _parseMode, ...plainPayload } = payload
+      void _parseMode
+      return (await send({ ...plainPayload, text: formatted.plain })).ok
     }
     return result.ok
   } catch { return false }
