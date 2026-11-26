@@ -57,6 +57,8 @@ assert.equal(messages.at(-1).text,'Resposta de teste')
 await sweepTelegramCommander(db,{credentials,request,send,now:()=>now,answer})
 assert.equal(aiCalls,1)
 messages.pop()
+assert.equal(settings().memoryEnabled,false)
+assert.throws(()=>saveTelegramCommanderSettings(db,1,{enabled:true,userIds:['100'],acknowledgeGroup:true,aiEnabled:true,acknowledgeDeepseek:true,memoryEnabled:true},credentials,now))
 dest={...c,telegramChatId:'-456'}
 updates=[update(11,'/status',100,-456)]
 await sweep()

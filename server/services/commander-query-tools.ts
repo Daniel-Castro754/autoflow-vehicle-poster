@@ -27,6 +27,7 @@ const definitions = {
   consultar_configuracoes:{description:'Regras operacionais não secretas e último estado do piloto automático.',properties:{},sources:['organization_settings','autopilot_state']},
   listar_grupos:{description:'Grupos cadastrados, ativação, prioridade e contadores; sem links de convite.',properties:{limit,beforeId},sources:['marketplace_groups']},
   listar_anuncios:{description:'Anúncios registrados no ledger local e política de vencimento; não consulta o Facebook ao vivo.',properties:{limit,beforeId,vehicleId:id('Filtrar veículo')},sources:['publication_listing_ledger','publication_jobs','organization_settings']},
+  historico_diagnosticos:{description:'Hipóteses registradas pelo monitor de IA, frequência por causa, estado atual dos trabalhos e entrega; não comprova solução aplicada.',properties:{limit,beforeId,hours,jobId:id('Filtrar trabalho')},sources:['commander_diagnostic_history','publication_jobs']},
   historico_ia:{description:'Histórico de operações da IA, sem prompts, respostas ou chaves.',properties:{limit,beforeId},sources:['ai_operation_history']},
 } satisfies Record<string,Definition>
 type ToolName = keyof typeof definitions
@@ -59,6 +60,11 @@ function parseArgs(name:unknown,raw:unknown){
   }
   if(def.required?.some(key=>!Object.hasOwn(input,key)))throw new QueryToolError('Parâmetro obrigatório ausente.')
   return {name:name as ToolName,args:input as Record<string,number|string>,def}
+}
+// Reuse the same closed argument validation for persistent conversation context.
+export function validatedQueryReference(name:unknown,args:unknown){
+  const parsed=parseArgs(name,args)
+  return {tool:parsed.name,arguments:Object.fromEntries(Object.entries(parsed.args))}
 }
 const vehicleColumns="v.id,v.year,substr(v.make,1,120) make,substr(v.model,1,120) model,substr(v.trim,1,120) trim,v.price,v.km,v.status,v.sold_at soldAt,substr(v.stock_code,1,120) stockCode,(SELECT COUNT(*) FROM vehicle_images i WHERE i.organization_id=v.organization_id AND i.vehicle_id=v.id) photoCount"
 const cleanVehicle=(v:Record<string,unknown>)=>({id:v.id,year:v.year,make:safeText(v.make),model:safeText(v.model),trim:safeText(v.trim),price:v.price,km:v.km,status:allowed(v.status,stockStatuses),sold:Boolean(v.soldAt||v.status==='Vendido'),stockCode:safeText(v.stockCode),photoCount:v.photoCount})
@@ -149,6 +155,15 @@ export function runCommanderQuery(db:DatabaseSync,org:number,tool:unknown,input:
         const review=parseSqliteTimestamp(typeof l.reviewUntil==='string'?l.reviewUntil:null)
         return {id:l.id,vehicleId:l.vehicleId,jobId:l.jobId,accountId:l.accountId,status:allowed(l.status,['active','removed']),confirmedAt:trusted?l.confirmedAt:null,removedAt:l.removedAt,url:trusted?canonical.canonicalUrl:null,expiresAt:trusted&&policy.enabled&&l.status==='active'?new Date(Math.max(stamp!+policy.days*86400000,review||0)).toISOString():null}
       }),n),policy,note:'Ledger local; não verifica presença ou retirada no Facebook.'};break
+    }
+    case 'historico_diagnosticos': {
+      const min=Math.max(Date.parse(since),now-30*86400000)
+      const scope='h.organization_id=? AND h.claimed_at>=? AND (?=0 OR h.job_id=?)'
+      const rows=db.prepare('SELECT h.event_id id,h.job_id jobId,h.family,h.cause,h.claimed_at claimedAt,h.analysis_status analysisStatus,h.delivery_status deliveryStatus,j.status jobStatus FROM commander_diagnostic_history h LEFT JOIN publication_jobs j ON j.id=h.job_id AND j.organization_id=h.organization_id WHERE '+scope+' AND (?=0 OR h.event_id<?) ORDER BY h.event_id DESC LIMIT ?').all(org,min,jobId,jobId,cursor,cursor,n+1)
+      const causes=['insufficient','location','transmission','photos','authentication','timeout','layout','uncertain','duplicate','validation','manual_review']
+      const frequencies=db.prepare('SELECT h.cause,COUNT(*) count,COUNT(DISTINCT h.job_id) jobs FROM commander_diagnostic_history h WHERE '+scope+' GROUP BY h.cause ORDER BY count DESC LIMIT 20').all(org,min,jobId,jobId)
+      data={...list(rows.map(h=>({...h,family:allowed(h.family,['fill','review','uncertain','timeout','layout','duplicate']),cause:allowed(h.cause,causes),analysisStatus:allowed(h.analysisStatus,['claimed','analyzed','fallback']),deliveryStatus:allowed(h.deliveryStatus,['pending','sent','failed','skipped']),jobStatus:allowed(h.jobStatus,statuses)})),n),
+        frequencies:frequencies.map(h=>({...h,cause:allowed(h.cause,causes)})),retentionDays:30,note:'Somente diagnósticos reservados pelo monitor (com limites e deduplicação), não todas as falhas. Estado atual não comprova que a orientação resolveu o erro.'};break
     }
     case 'historico_ia': {
       const rows=db.prepare('SELECT id,action,outcome,provider,items,created_at createdAt FROM ai_operation_history WHERE organization_id=? AND (?=0 OR id<?) ORDER BY id DESC LIMIT ?').all(org,cursor,cursor,n+1)

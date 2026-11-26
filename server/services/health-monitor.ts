@@ -5,6 +5,7 @@ import { publicationMayExist, ambiguousPublicationReport } from './publication-e
 import { logger } from '../lib/logger.ts'
 import { warnSlowExecutions } from './proactive-alerts.ts'
 import { recordOperationalSignal } from './operational-incidents.ts'
+import { pruneCommanderMemory } from './commander-memory.ts'
 import { pruneConsumerHistory } from './consumer-history.ts'
 import { runTelegramMonitor } from './telegram-monitor.ts'
 import { runCommanderIncidentDiagnostics } from './commander-incident-diagnostics.ts'
@@ -296,6 +297,7 @@ export function startHealthMonitor(db: DatabaseSync, intervalMs = 60000): void {
     try {
       await runHealthCheck(db, { autoRecover: true })
       pruneConsumerHistory(db)
+      pruneCommanderMemory(db)
       if (!diagnosticsRunning) {
         diagnosticsRunning = true
         void runCommanderIncidentDiagnostics(db).catch(() => {

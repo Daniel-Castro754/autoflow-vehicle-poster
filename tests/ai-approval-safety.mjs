@@ -41,7 +41,7 @@ try {
 
   await assert.rejects(anon('/ai/query-tools'),e=>e.status===401)
   const catalog=await api('/ai/query-tools')
-  assert.equal(catalog.tools.length,12)
+  assert.equal(catalog.tools.length,13)
   const summary=await api('/ai/query-tools/run',{method:'POST',body:JSON.stringify({tool:'resumo_operacional',arguments:{}})})
   assert.equal(summary.readOnly,true)
   await assert.rejects(api('/ai/query-tools/run',{method:'POST',body:JSON.stringify({tool:'resumo_operacional',arguments:{organizationId:2}})}),e=>e.status===400)
