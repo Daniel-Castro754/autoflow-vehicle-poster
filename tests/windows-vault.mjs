@@ -31,25 +31,27 @@ if (process.platform !== 'win32') {
     assert.equal(decryptCredential(encrypted, 7, 'gemini_api_key'), 'test-fake-gemini')
 
     db.exec(
-      "CREATE TABLE organization_settings (organization_id INTEGER PRIMARY KEY,gemini_api_key TEXT NOT NULL DEFAULT '',openai_api_key TEXT NOT NULL DEFAULT '',alert_telegram_token TEXT NOT NULL DEFAULT '',alert_telegram_chat_id TEXT NOT NULL DEFAULT '',alert_webhook_url TEXT NOT NULL DEFAULT '')",
+      "CREATE TABLE organization_settings (organization_id INTEGER PRIMARY KEY,gemini_api_key TEXT NOT NULL DEFAULT '',openai_api_key TEXT NOT NULL DEFAULT '',deepseek_api_key TEXT NOT NULL DEFAULT '',alert_telegram_token TEXT NOT NULL DEFAULT '',alert_telegram_chat_id TEXT NOT NULL DEFAULT '',alert_webhook_url TEXT NOT NULL DEFAULT '')",
     )
     db.prepare(
-      'INSERT INTO organization_settings (organization_id,gemini_api_key,openai_api_key) VALUES(7,?,?)',
-    ).run('legacy-gemini-fake-key', 'legacy-openai-fake-key')
+      'INSERT INTO organization_settings (organization_id,gemini_api_key,openai_api_key,deepseek_api_key) VALUES(7,?,?,?)',
+    ).run('legacy-gemini-fake-key', 'legacy-openai-fake-key', 'legacy-deepseek-fake-key')
     migrateCredentials(db)
     const row = db
       .prepare(
-        'SELECT gemini_api_key gemini,openai_api_key openai FROM organization_settings WHERE organization_id=7',
+        'SELECT gemini_api_key gemini,openai_api_key openai,deepseek_api_key deepseek FROM organization_settings WHERE organization_id=7',
       )
       .get()
     assert(row.gemini.startsWith('enc:v1:') && row.openai.startsWith('enc:v1:'))
     assert.equal(decryptCredential(row.gemini, 7, 'gemini_api_key'), 'legacy-gemini-fake-key')
     assert.equal(decryptCredential(row.openai, 7, 'openai_api_key'), 'legacy-openai-fake-key')
+    assert(row.deepseek.startsWith('enc:v1:'))
+    assert.equal(decryptCredential(row.deepseek,7,'deepseek_api_key'),'legacy-deepseek-fake-key')
     initializeCredentialVault(root)
     migrateCredentials(db)
     const same = db
       .prepare(
-        'SELECT gemini_api_key gemini,openai_api_key openai FROM organization_settings WHERE organization_id=7',
+        'SELECT gemini_api_key gemini,openai_api_key openai,deepseek_api_key deepseek FROM organization_settings WHERE organization_id=7',
       )
       .get()
     assert.deepEqual(same, row, 'Restart must not rewrite encrypted credentials')
