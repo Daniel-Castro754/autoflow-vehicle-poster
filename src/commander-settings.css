@@ -1,0 +1,65 @@
+/* AI Commander: scoped, compact settings without changing the shared settings UI. */
+.app-shell .settings-page .commander-section {
+  min-width: 0;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius);
+  background: var(--af-surface);
+}
+.app-shell .settings-page .commander-section h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--af-text);
+}
+.app-shell .settings-page .commander-section p {
+  margin: 6px 0 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.app-shell .settings-page .commander-section .toggle-label {
+  min-height: 44px;
+  padding: 7px 10px;
+  margin: 4px 0;
+  gap: 10px;
+  box-sizing: border-box;
+}
+.app-shell .settings-page .commander-section .toggle-label > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+.app-shell .settings-page .commander-section input:not([type='checkbox']) {
+  min-height: 36px;
+  padding: 7px 10px;
+}
+.app-shell .settings-page .commander-section small {
+  font-size: 12px;
+  line-height: 1.45;
+}
+.app-shell .settings-page .commander-section .commander-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.app-shell .settings-page .commander-section .commander-actions button {
+  min-height: 36px;
+  padding: 7px 12px;
+  font-size: 13px;
+}
+.app-shell .settings-page .commander-section details {
+  margin: 6px 0;
+  font-size: 12px;
+  color: var(--af-muted);
+}
+.app-shell .settings-page .commander-section summary {
+  cursor: pointer;
+  padding: 5px 0;
+  font-weight: 600;
+}
+.app-shell .settings-page .commander-section details p {
+  margin: 4px 0 8px;
+}
