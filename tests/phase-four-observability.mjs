@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
 import { startTestServer, createApiClient } from './helpers/server.mjs'
 import { recordOperationalSignal } from '../server/services/operational-incidents.ts'
+import { persistConsumerHistory, pruneConsumerHistory, consumerHistoryProfileLimit } from '../server/services/consumer-history.ts'
 
 const server = await startTestServer()
 const db = new DatabaseSync(join(server.dataDir, 'autoflow.db'))
@@ -241,6 +242,17 @@ try {
   const reopened=new DatabaseSync(join(server.dataDir,'autoflow.db'))
   assert.equal(reopened.prepare("SELECT COUNT(*) n FROM consumer_history WHERE organization_id=? AND account_id=? AND code='dispatch_failed'").get(orgId,target).n,1)
   reopened.close()
+  // Retention never deletes another profile's recent history.
+  db.prepare("INSERT INTO consumer_history(organization_id,account_id,event_key,code,observed_at,received_at) VALUES (?,?,?,'queue_empty',?,?)").run(orgId,target,'f'.repeat(64),at-31*86400000,at)
+  assert.equal(pruneConsumerHistory(db),1)
+  const accountCount=db.prepare('SELECT COUNT(*) n FROM consumer_history WHERE organization_id=? AND account_id=?').get(orgId,account).n
+  db.prepare(`WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<?)
+    INSERT INTO consumer_history(organization_id,account_id,event_key,code,observed_at,received_at)
+    SELECT ?,?,printf('%064d',x),'queue_empty',?,? FROM n`).run(consumerHistoryProfileLimit+5,orgId,target,at,at)
+  persistConsumerHistory(db,orgId,target,true,null,[])
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM consumer_history WHERE organization_id=? AND account_id=?').get(orgId,target).n,consumerHistoryProfileLimit)
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM consumer_history WHERE organization_id=? AND account_id=?').get(orgId,account).n,accountCount)
+  console.log('✓ Consumer history: persistent deduplication, tenant isolation, retention and profile limit.')
   console.log(
     '✓ Phase 4: persistent incidents, dedup/reopen, RBAC, isolation, audit and publish safety',
   )
