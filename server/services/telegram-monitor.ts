@@ -12,7 +12,10 @@ type Credentials = { telegramBotToken: string; telegramChatId: string }
 type Delivery = { key: string; text: string }
 const timezone = 'America/Sao_Paulo'
 const clock = (date: number) => new Date(date).toLocaleString('pt-BR', {timeZone:timezone})
-const clean = (value: unknown, max=120) => String(value ?? '').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,max)
+const clean = (value: unknown, max=120) => [...String(value ?? '')].map(char => {
+  const code = char.charCodeAt(0)
+  return code < 32 || code === 127 ? ' ' : char
+}).join('').slice(0,max)
 const eventMap: Record<string,{category:Category;title:string}> = {
   created:{category:'schedule',title:'📅 Trabalho criado'},
   scheduled:{category:'schedule',title:'📅 Publicação agendada'},
