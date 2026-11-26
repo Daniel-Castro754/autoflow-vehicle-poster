@@ -1,5 +1,5 @@
 type Credentials = { telegramBotToken: string; telegramChatId: string }
-export type CommanderReplyOptions = { format?: boolean; menu?: { messageId: number; username: string; aiEnabled: boolean } }
+export type CommanderReplyOptions = { format?: boolean; menu?: { messageId: number; keyboard: { text: string; callback_data: string }[][] } }
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 // Only locally generated tags are allowed. Model text never becomes raw HTML.
@@ -21,22 +21,14 @@ export function formatCommanderReply(raw: string) {
 export async function sendCommanderReply(text: string, credentials: Credentials, options: CommanderReplyOptions = {}) {
   const formatted = options.format ? formatCommanderReply(text) : null
   const menu = options.menu
-  const keyboard = menu ? [
-    [{ text: '/status@' + menu.username }, { text: '/ajuda@' + menu.username }],
-    ...(menu.aiEnabled ? [
-      [{ text: '/ia@' + menu.username + ' Quantos veículos estão em estoque?' }],
-      [{ text: '/ia@' + menu.username + ' Qual é a situação dos perfis?' }],
-      [{ text: '/ia@' + menu.username + ' Quais trabalhos aguardam revisão?' }],
-    ] : []),
-  ] : null
   const payload = {
     chat_id: credentials.telegramChatId,
     text: formatted?.html ?? text.slice(0, 3900),
     link_preview_options: { is_disabled: true },
     ...(formatted ? { parse_mode: 'HTML' } : {}),
-    ...(menu && keyboard ? {
+    ...(menu ? {
       reply_parameters: { message_id: menu.messageId, allow_sending_without_reply: false },
-      reply_markup: { keyboard, resize_keyboard: true, one_time_keyboard: true, selective: true },
+      reply_markup: { inline_keyboard: menu.keyboard },
     } : {}),
   }
   const send = async (body: Record<string, unknown>) => {

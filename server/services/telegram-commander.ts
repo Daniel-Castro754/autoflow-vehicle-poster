@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { createHash, randomUUID } from 'node:crypto'
 import { getAlertCredentials } from './credential-vault.ts'
 import { sendCommanderReply } from './commander-telegram-reply.ts'
+import { buildCommanderMenu, verifyCommanderMenu, type MenuScope } from './commander-inline-menu.ts'
 import { parseSqliteTimestamp } from './profile-capacity.ts'
 import { logger } from '../lib/logger.ts'
 import { answerCommanderQuestion, commanderUsage } from './commander-conversation.ts'
@@ -15,7 +16,7 @@ type Row = {
   lease_owner: string; lease_until: number; last_poll_at: number; last_status: string
 }
 type Result = { ok: true; result: unknown } | { ok: false; status: string }
-type Request = (token: string, method: 'getMe'|'getUpdates', payload: Record<string,unknown>) => Promise<Result>
+type Request = (token: string, method: 'getMe'|'getUpdates'|'answerCallbackQuery', payload: Record<string,unknown>) => Promise<Result>
 type Dependencies = {
   credentials?: (db: DatabaseSync, org:number)=>Credentials
   request?: Request
@@ -80,10 +81,10 @@ export function saveTelegramCommanderSettings(db:DatabaseSync,org:number,input:u
   // The public read path uses the same injected destination for tests.
   return telegramCommanderSettings(db,org,()=>({...c,webhookUrl:''}))
 }
-export async function telegramRequest(token:string,method:'getMe'|'getUpdates',payload:Record<string,unknown>):Promise<Result>{
+export async function telegramRequest(token:string,method:'getMe'|'getUpdates'|'answerCallbackQuery',payload:Record<string,unknown>):Promise<Result>{
   try{
     const res=await fetch('https://api.telegram.org/bot'+token+'/'+method,{
-      method:'POST',redirect:'error',signal:AbortSignal.timeout(15000),
+      method:'POST',redirect:'error',signal:AbortSignal.timeout(method==='answerCallbackQuery'?3000:15000),
       headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),
     })
     if(!res.ok){void res.body?.cancel().catch(()=>{});return {ok:false,status:'http_'+res.status}}
@@ -92,7 +93,8 @@ export async function telegramRequest(token:string,method:'getMe'|'getUpdates',p
   }catch{return {ok:false,status:'network_error'}}
 }
 type Message = {date?:number;message_id?:number;text?:string;reply_to_message?:{from?:{id?:number;is_bot?:boolean}};forward_origin?:unknown;from?:{id?:number;is_bot?:boolean};chat?:{id?:number;type?:string};sender_chat?:unknown}
-type Update = {update_id?:number;message?:Message}
+type Callback = {id?:string;data?:string;from?:{id?:number;is_bot?:boolean};message?:Message;inline_message_id?:string}
+type Update = {update_id?:number;message?:Message;callback_query?:Callback}
 const clean = (value:unknown)=>String(value??'').replace(/\s+/g,' ').slice(0,70)
 function statusText(db:DatabaseSync,org:number,now:number){
   const profiles=db.prepare('SELECT label,status,last_seen_at seen FROM social_accounts WHERE organization_id=? ORDER BY id LIMIT 20').all(org) as Array<{label:string;status:string;seen:string|null}>
@@ -104,7 +106,31 @@ function statusText(db:DatabaseSync,org:number,now:number){
     ...profiles.map(p=>{const seen=parseSqliteTimestamp(p.seen);return clean(p.label)+': '+(p.status==='connected'&&seen!==null&&seen<=now+60000&&now-seen<=300000?'online':'offline')}),
     'Presença recente não garante que o Facebook esteja autenticado.'].join('\n')
 }
-function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,botId:number|undefined,update:Update,now:number):string|{question:string;userId:string}|{menu:true;text:string}|null{
+type Reply = string|{question:string;userId:string}|{menu:true;text:string;userId:string}|null
+function menuScope(row:Row,c:Credentials,userId:string):MenuScope {
+  return {organizationId:row.organization_id,chatId:c.telegramChatId,userId,revision:row.revision,token:c.telegramBotToken}
+}
+function helpText(username:string){
+  return 'AutoFlow AI Commander — consulta somente leitura\n/status — situação do sistema\n/meu_id — seu identificador\n/ajuda — comandos\n/menu — atalhos de consulta\n/ia pergunta — consulta DeepSeek, se ativada no painel.\nResponda diretamente a uma mensagem do bot para conversar. Menções simples @'+username+' dependem da entrega pelo Telegram.\n/limpar_memoria — limpa suas referências locais. /solicitar_pausa ID — demonstração de autorização, se permitida.\n/autorizar CÓDIGO ou /recusar CÓDIGO — decidir proposta. /pausar ID, /adiar ID AAAA-MM-DDTHH:MM-03:00, /cancelar_trabalho ID — propostas reais se autorizadas. Não publica nem retira anúncios.'
+}
+function callbackReply(db:DatabaseSync,row:Row,c:Credentials,username:string,botId:number|undefined,callback:Callback,now:number):Reply{
+  const m=callback.message, user=String(callback.from?.id)
+  if(callback.inline_message_id||callback.from?.is_bot!==false||!Number.isSafeInteger(callback.from.id)||!ids(row).includes(user)||
+    !m||m.sender_chat||m.forward_origin||!Number.isSafeInteger(m.message_id)||Number(m.message_id)<=0||
+    !Number.isSafeInteger(botId)||Number(botId)<=0||m.from?.is_bot!==true||m.from.id!==botId||
+    !Number.isSafeInteger(m.chat?.id)||String(m.chat?.id)!==c.telegramChatId||!['group','supergroup'].includes(m.chat?.type||'')||
+    !Number.isSafeInteger(m.date)||Number(m.date)*1000<Math.floor(row.activated_at/1000)*1000||
+    now-Number(m.date)*1000>300000||Number(m.date)*1000>now+30000)return null
+  const item=verifyCommanderMenu(callback.data,menuScope(row,c,user),Boolean(row.ai_enabled),now)
+  if(!item)return null
+  if('question' in item)return {question:item.question,userId:user}
+  if(item.action==='status')return statusText(db,row.organization_id,now)
+  if(item.action==='help')return helpText(username)
+  if(item.action==='memory')return 'Memória de referências: '+(row.memory_enabled?'ativada (até 30 dias).':'desativada.')+'\nPara limpar somente suas referências, use /limpar_memoria@'+username+'. Nenhuma alteração foi feita.'
+  if(item.action==='chat')return '💬 Envie sua pergunta usando Responder nesta mensagem, ou /ia@'+username+' seguido da pergunta.'
+  return null
+}
+function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,botId:number|undefined,update:Update,now:number):Reply{
   const m=update.message
   if(!m||m.sender_chat||m.from?.is_bot!==false||!Number.isSafeInteger(m.from.id)||
     !Number.isSafeInteger(m.chat?.id)||String(m.chat?.id)!==c.telegramChatId||
@@ -163,8 +189,8 @@ function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,botId:nu
     clearCommanderMemory(db,row.organization_id,user)
     return 'Suas referências de consultas foram limpas no AutoFlow. O histórico do Telegram, backups e diagnósticos operacionais não foram alterados.'
   }
-  if(command==='menu')return {menu:true,text:'AutoFlow — menu de consultas\n/status — situação atual\n/ajuda — comandos disponíveis\n'+(row.ai_enabled?'Escolha uma consulta de IA no teclado ou responda a uma mensagem do bot.':'DeepSeek desativado. As consultas básicas continuam disponíveis.')+'\nOperações reais continuam exigindo comandos explícitos e confirmação individual.'}
-  if(command==='ajuda')return 'AutoFlow AI Commander — consulta somente leitura\n/status — situação do sistema\n/meu_id — seu identificador\n/ajuda — comandos\n/menu — atalhos de consulta\n/ia pergunta — consulta DeepSeek, se ativada no painel.\nVocê também pode mencionar @'+username+' no início da pergunta ou responder diretamente ao bot.\n/limpar_memoria — limpa suas referências locais. /solicitar_pausa ID — demonstração de autorização, se permitida.\n/autorizar CÓDIGO ou /recusar CÓDIGO — decidir proposta. /pausar ID, /adiar ID AAAA-MM-DDTHH:MM-03:00, /cancelar_trabalho ID — propostas reais se autorizadas. Não publica nem retira anúncios.'
+  if(command==='menu')return {menu:true,userId:user,text:'🤖 AutoFlow — central de operações\nSelecione uma consulta abaixo. Menu válido por 5 minutos e reservado a quem o solicitou. Respostas aparecem no grupo.\n'+(row.ai_enabled?'Consultas de IA usam o limite diário.':'DeepSeek desativado. Consultas básicas disponíveis.')+'\nOperações reais exigem comandos explícitos e confirmação individual.'}
+  if(command==='ajuda')return helpText(username)
   return statusText(db,row.organization_id,now)
 }
 
@@ -193,7 +219,7 @@ export async function sweepTelegramCommander(db:DatabaseSync,deps:Dependencies={
       if(!current()||!sameDestination())return
       // Telegram may choose a new random update ID after a week without updates.
       const reset=row.last_update_at>0&&started-row.last_update_at>6*86400000
-      const updates=await request(c.telegramBotToken,'getUpdates',{timeout:10,limit:10,allowed_updates:['message'],offset:reset?0:row.next_offset})
+      const updates=await request(c.telegramBotToken,'getUpdates',{timeout:10,limit:10,allowed_updates:['message','callback_query'],offset:reset?0:row.next_offset})
       if(!updates.ok){status=updates.status;return}
       if(!Array.isArray(updates.result)){status='invalid_response';return}
       status='online'
@@ -210,14 +236,23 @@ export async function sweepTelegramCommander(db:DatabaseSync,deps:Dependencies={
         const claimed=db.prepare('UPDATE telegram_commander SET next_offset=?,last_update_at=? WHERE organization_id=? AND revision=? AND enabled=1 AND lease_owner=? AND lease_until>?').run(id+1,now(),org,row.revision,owner,now())
         if(!claimed.changes)break
         offset=id+1
-        const reply=replyFor(db,r,c,bot.username,bot.id,update,now())
+        const callback=update.callback_query
+        let reply:Reply
+        if(callback){
+          // Callback contents are untrusted. Acknowledge generically, then recheck the lease.
+          if(typeof callback.id!=='string'||!callback.id.length||callback.id.length>128)continue
+          reply=callbackReply(db,r,c,bot.username,bot.id,callback,now())
+          if(!current()||!sameDestination())break
+          const ack=await request(c.telegramBotToken,'answerCallbackQuery',{callback_query_id:callback.id,text:reply?'Consulta recebida.':'Menu inválido, vencido ou não autorizado.',cache_time:0})
+          if(!ack.ok)continue
+        }else reply=replyFor(db,r,c,bot.username,bot.id,update,now())
         if(reply&&replies<5&&current()&&sameDestination()){
           replies++
           if(typeof reply==='string'){
             if(!await send(reply,c))status='reply_failed'
           }else if('menu' in reply){
             const messageId=update.message?.message_id
-            const menu=typeof messageId==='number'&&Number.isSafeInteger(messageId)&&messageId>0?{messageId,username:bot.username,aiEnabled:Boolean(r.ai_enabled)}:undefined
+            const menu=typeof messageId==='number'&&Number.isSafeInteger(messageId)&&messageId>0?{messageId,keyboard:buildCommanderMenu(menuScope(r,c,reply.userId),Boolean(r.ai_enabled),now())}:undefined
             if(!await send(reply.text,c,menu?{menu}:{}))status='reply_failed'
           }else{
             const authorized=()=>Boolean(current()?.ai_enabled&&sameDestination())
