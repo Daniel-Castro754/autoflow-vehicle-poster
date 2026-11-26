@@ -581,7 +581,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (await handleAIRoute(req, res, url, auth, { db, send, jsonBody, isAdmin })) return
     if (await queueModule.scheduling(req, res, url, auth)) return
     if (await facebookModule.groups(req, res, url, auth)) return
-    if (await handleAlertRoute(req, res, url, auth, { db, send, isAdmin })) return
+    if (await handleAlertRoute(req, res, url, auth, { db, send, isAdmin, jsonBody })) return
     return send(res, 404, { error: 'Rota não encontrada.' })
   } catch (error) {
     if (res.headersSent || res.destroyed) {

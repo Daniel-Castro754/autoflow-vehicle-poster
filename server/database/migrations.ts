@@ -517,6 +517,30 @@ const migrations: Migration[] = [
       PRIMARY KEY(organization_id,account_id)
     );`,
   },
+  {
+    version: 31,
+    columns: [],
+    sql: `CREATE TABLE IF NOT EXISTS telegram_monitor_settings (
+      organization_id INTEGER PRIMARY KEY REFERENCES organizations(id),
+      categories TEXT NOT NULL DEFAULT '[]',
+      event_cursor INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS telegram_monitor_profiles (
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      account_id INTEGER NOT NULL REFERENCES social_accounts(id) ON DELETE CASCADE,
+      online INTEGER NOT NULL CHECK(online IN (0,1)),
+      changed_at INTEGER NOT NULL,
+      PRIMARY KEY(organization_id,account_id)
+    );
+    CREATE TABLE IF NOT EXISTS telegram_monitor_delivery (
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      delivery_key TEXT NOT NULL,
+      claimed_at INTEGER NOT NULL,
+      outcome TEXT NOT NULL DEFAULT 'claimed' CHECK(outcome IN ('claimed','sent','failed')),
+      PRIMARY KEY(organization_id,delivery_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_telegram_monitor_delivery_age ON telegram_monitor_delivery(claimed_at);`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {
