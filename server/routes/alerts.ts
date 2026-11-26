@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
+import { commanderPermissionSettings, saveCommanderPermissionSettings } from '../services/commander-permissions.ts'
 import { clearAllCommanderMemory } from '../services/commander-memory.ts'
 import { sendCriticalAlert } from '../services/alerting.ts'
 import { getAlertCredentials } from '../services/credential-vault.ts'
@@ -22,6 +23,15 @@ export async function handleAlertRoute(
   auth: AuthContext,
   { db, send, isAdmin, jsonBody }: Dependencies,
 ): Promise<boolean> {
+  if (url.pathname === '/api/alerts/commander-permissions' && ['GET','PATCH'].includes(req.method||'')) {
+    if(!isAdmin(auth)){send(res,403,{error:'Somente administradores podem gerenciar permissões.'});return true}
+    res.setHeader('Cache-Control','no-store')
+    if(req.method==='GET'){send(res,200,commanderPermissionSettings(db,auth.organizationId));return true}
+    const body=await jsonBody(req,4096)
+    try{send(res,200,saveCommanderPermissionSettings(db,auth.organizationId,auth.userId,body))}
+    catch{send(res,400,{error:'Verifique os usuários autorizados, a ferramenta e a confirmação.'})}
+    return true
+  }
   if (url.pathname === '/api/alerts/commander-memory/clear' && req.method==='POST') {
     if(!isAdmin(auth)){send(res,403,{error:'Somente administradores podem limpar a memória da empresa.'});return true}
     const body=await jsonBody(req,4096) as {confirm?:unknown}|null

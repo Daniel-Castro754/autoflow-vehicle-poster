@@ -54,6 +54,7 @@ import { OverviewPriorities } from './OverviewPriorities'
 import { ListingExpiryPanel } from './ListingExpiryPanel'
 import { TelegramMonitorSettings } from './TelegramMonitorSettings'
 import { TelegramCommanderSettings } from './TelegramCommanderSettings'
+import { CommanderPermissionSettings } from './CommanderPermissionSettings'
 import { CommanderDiagnosticSettings } from './CommanderDiagnosticSettings'
 
 type ApiFn = <T = Record<string, unknown>>(path: string, options?: RequestInit) => Promise<T>
@@ -4518,6 +4519,7 @@ export function SettingsView({
             </div>
             <TelegramMonitorSettings api={api} />
             <TelegramCommanderSettings api={api} />
+            <CommanderPermissionSettings api={api} />
             <CommanderDiagnosticSettings api={api} />
           </div>
         </article>
