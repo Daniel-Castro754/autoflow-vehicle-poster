@@ -29,7 +29,7 @@ export function CommanderPermissionSettings({api}:{api:Api}){
     catch{setMessage('Não foi possível atualizar.')}
   }
   return <section className="commander-section">
-    <h3>AI Commander — permissões e autorizações</h3>
+    <div className="commander-heading"><h3>Permissões e autorizações</h3><span className="commander-metric">{state ? (state.enabled ? "Ligadas" : "Desligadas") : "Carregando"}</span></div>
     <p>Operações reais limitadas à fila local e separadas da demonstração. Cada execução exige nova confirmação. Nenhum comando publica ou retira anúncios do Facebook.</p>
     <label className="toggle-label"><span>Habilitar solicitações de autorização</span><input type="checkbox" checked={enabled} disabled={!state||saving} onChange={e=>setEnabled(e.target.checked)}/></label>
     {state?.requiresRebind&&<p>O receptor mudou. Autorize novamente após revisar os usuários.</p>}
