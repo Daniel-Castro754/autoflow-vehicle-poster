@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { sendCriticalAlert } from '../services/alerting.ts'
 import { getAlertCredentials } from '../services/credential-vault.ts'
+import { commanderDiagnosticSettings, saveCommanderDiagnosticSettings } from '../services/commander-incident-diagnostics.ts'
 import { telegramMonitorSettings, saveTelegramMonitorSettings } from '../services/telegram-monitor.ts'
 import { telegramCommanderSettings, saveTelegramCommanderSettings } from '../services/telegram-commander.ts'
 
@@ -20,6 +21,15 @@ export async function handleAlertRoute(
   auth: AuthContext,
   { db, send, isAdmin, jsonBody }: Dependencies,
 ): Promise<boolean> {
+  if (url.pathname === '/api/alerts/commander-diagnostics' && ['GET','PATCH'].includes(req.method || '')) {
+    if (!isAdmin(auth)) {send(res,403,{error:'Somente administradores podem configurar diagnósticos.'});return true}
+    res.setHeader('Cache-Control','no-store')
+    if (req.method==='GET') {send(res,200,commanderDiagnosticSettings(db,auth.organizationId));return true}
+    const body=await jsonBody(req,4096)
+    try{send(res,200,saveCommanderDiagnosticSettings(db,auth.organizationId,body))}
+    catch{send(res,400,{error:'Confirme o grupo e a autorização de envio de evidências.'})}
+    return true
+  }
   if (url.pathname === '/api/alerts/telegram-commander' && ['GET','PATCH'].includes(req.method || '')) {
     if (!isAdmin(auth)) {send(res,403,{error:'Somente administradores podem configurar o receptor.'});return true}
     if (req.method==='GET') {send(res,200,telegramCommanderSettings(db,auth.organizationId));return true}
