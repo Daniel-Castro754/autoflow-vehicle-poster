@@ -65,7 +65,7 @@ export function saveTelegramCommanderSettings(db:DatabaseSync,org:number,input:u
     db.exec('COMMIT')
   }catch(error){db.exec('ROLLBACK');throw error}
   // The public read path uses the same injected destination for tests.
-  return telegramCommanderSettings(db,org,(_db,_org)=>({...c,webhookUrl:''}))
+  return telegramCommanderSettings(db,org,()=>({...c,webhookUrl:''}))
 }
 export async function telegramRequest(token:string,method:'getMe'|'getUpdates',payload:Record<string,unknown>):Promise<Result>{
   try{
