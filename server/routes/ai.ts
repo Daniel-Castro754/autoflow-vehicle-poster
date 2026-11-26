@@ -1,3 +1,4 @@
+import { commanderQueryCatalog, runCommanderQuery, QueryToolError } from '../services/commander-query-tools.ts'
 import { deepseekText } from '../services/deepseek.ts'
 import { getAiCredentials } from '../services/credential-vault.ts'
 import { logger } from '../lib/logger.ts'
@@ -46,6 +47,21 @@ export async function handleAIRoute(
 ): Promise<boolean> {
   if (url.pathname.startsWith('/api/ai/') && !isAdmin(auth)) {
     send(res, 403, { error: 'Somente administradores podem operar a Central de IA.' })
+    return true
+  }
+  if (req.method === 'GET' && url.pathname === '/api/ai/query-tools') {
+    res.setHeader('Cache-Control','no-store')
+    send(res,200,{tools:commanderQueryCatalog()})
+    return true
+  }
+  if (req.method === 'POST' && url.pathname === '/api/ai/query-tools/run') {
+    const body=await jsonBody(req) as {tool?:unknown;arguments?:unknown}|null
+    res.setHeader('Cache-Control','no-store')
+    try{send(res,200,runCommanderQuery(db,auth.organizationId,body?.tool,body?.arguments??{}))}
+    catch(error){
+      if(error instanceof QueryToolError)send(res,400,{error:error.message})
+      else{logger.warn('AICommander','Falha na consulta estruturada',{organizationId:auth.organizationId});send(res,500,{error:'Falha na consulta. Confira o painel.'})}
+    }
     return true
   }
   if (req.method === 'POST' && url.pathname === '/api/ai/listing-text/preview') {
