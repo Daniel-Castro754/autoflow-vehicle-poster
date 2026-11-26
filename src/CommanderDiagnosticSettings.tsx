@@ -23,13 +23,12 @@ export function CommanderDiagnosticSettings({api}:{api:Api}){
     catch{setMessage('Não foi possível atualizar.')}
   }
   return <section className="commander-section">
-    <h3>AI Commander — diagnóstico automático</h3>
+    <div className="commander-heading"><h3>Diagnóstico automático</h3><span className="commander-metric">{state?.usage.used??0}/{state?.usage.limit??10} hoje</span></div>
     <p>Analisa novas ocorrências e envia hipóteses ao grupo. Nenhuma alteração automática de anúncios ou filas.</p>
     <label className="toggle-label"><span>Analisar ocorrências automaticamente</span><input type="checkbox" checked={enabled} disabled={!state||saving} onChange={e=>setEnabled(e.target.checked)}/></label>
     <label className="toggle-label"><span>Autorizo o envio de evidências operacionais estruturadas ao DeepSeek e de resultados ao grupo.</span><input type="checkbox" checked={ack} disabled={!state||saving||!enabled} onChange={e=>setAck(e.target.checked)}/></label>
     <details><summary>Limites e regras dos diagnósticos</summary><p><small>Até 10 diagnósticos por dia, independentes das perguntas. Intervalo de 30 minutos por trabalho e categoria. Alertas normais continuam ativos. Histórico de 30 dias.</small></p></details>
     {state?.requiresRebind&&<p>Destino alterado. Confirme novamente antes de ativar.</p>}
-    <p>Diagnósticos reservados hoje: {state?.usage.used??0}/{state?.usage.limit??10}</p>
     <div className="commander-actions">
       <button type="button" className="secondary" disabled={!state||saving||(enabled&&(!ack||!state.configured))} onClick={()=>void save()}>Salvar diagnósticos</button>
       <button type="button" className="secondary" disabled={!state||saving} onClick={()=>void refresh()}>Atualizar histórico</button>
