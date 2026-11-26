@@ -580,6 +580,117 @@
     )
   }
 
+  // Geographic autocomplete requires a selected city/state, not just typed text.
+  const brazilStates = {
+    ac: 'acre', al: 'alagoas', ap: 'amapa', am: 'amazonas', ba: 'bahia',
+    ce: 'ceara', df: 'distrito federal', es: 'espirito santo', go: 'goias',
+    ma: 'maranhao', mt: 'mato grosso', ms: 'mato grosso do sul', mg: 'minas gerais',
+    pa: 'para', pb: 'paraiba', pr: 'parana', pe: 'pernambuco', pi: 'piaui',
+    rj: 'rio de janeiro', rn: 'rio grande do norte', rs: 'rio grande do sul',
+    ro: 'rondonia', rr: 'roraima', sc: 'santa catarina', sp: 'sao paulo',
+    se: 'sergipe', to: 'tocantins',
+  }
+  function locationTarget(value) {
+    const parts = String(value || '').trim().split(/\s*,\s*|\s+[-–—]\s+/).filter(Boolean)
+    if (['brasil', 'brazil'].includes(normalize(parts.at(-1)))) parts.pop()
+    if (parts.length !== 2) return null
+    const city = normalize(parts[0])
+    const state = normalize(parts[1])
+    const code = Object.keys(brazilStates).find(key => key === state || brazilStates[key] === state)
+    return city && code ? { query: parts[0], city, code, state: brazilStates[code] } : null
+  }
+
+  function locationMatches(value, target) {
+    if (!target) return false
+    const actual = normalize(value).replace(/ (?:brasil|brazil)$/, '')
+    return actual === target.city + ' ' + target.code || actual === target.city + ' ' + target.state
+  }
+
+  function findLocationInput(labels) {
+    const root = rootScope()
+    const keys = labels.map(normalize)
+    const exact = value => keys.includes(normalize(value).replace(/ (?:obrigatorio|required)$/, ''))
+    const inputs = [...root.querySelectorAll('input:not([type="file"]):not([type="hidden"])')].filter(visible)
+    const direct = inputs.filter(input => [
+      input.getAttribute('aria-label'), input.getAttribute('placeholder'), input.getAttribute('name'),
+      ...(input.labels ? [...input.labels].map(label => label.textContent) : []),
+      ...String(input.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+        .map(id => document.getElementById(id)?.textContent),
+    ].some(exact))
+    if (direct.length) return direct.length === 1 ? direct[0] : null
+    const wrapped = inputs.filter(input => {
+      let node = input.parentElement
+      for (let depth = 0; node && node !== root && depth < 4; depth++, node = node.parentElement) {
+        if (inputs.filter(item => node.contains(item)).length !== 1) break
+        if ([...node.querySelectorAll('label,span,div')].some(label =>
+          visible(label) && !label.closest('[role="option"],[role="listbox"],[aria-hidden="true"]') &&
+          exact(label.textContent),
+        )) return true
+      }
+      return false
+    })
+    return wrapped.length === 1 ? wrapped[0] : null
+  }
+
+  function locationInvalid(input) {
+    if (!input || input.validity?.valid === false || input.closest('[aria-invalid="true"]')) return true
+    const message = normalize(rootScope().innerText)
+    return /(?:insira|digite|selecione) uma localizacao valida|enter a valid location|select a valid location|introduce una ubicacion valida|selecciona una ubicacion valida/.test(message)
+  }
+
+  function locationList(input, previous) {
+    const id = input.getAttribute('aria-controls') || input.getAttribute('aria-owns')
+    if (id) {
+      const controlled = document.getElementById(id)
+      return controlled && visible(controlled) ? controlled : null
+    }
+    if (document.activeElement !== input && input.getAttribute('aria-expanded') !== 'true') return null
+    const lists = [...document.querySelectorAll('[role="listbox"]')].filter(visible)
+    return lists.length === 1 &&
+      (input.getAttribute('aria-expanded') === 'true' || !previous.includes(lists[0]))
+      ? lists[0] : null
+  }
+
+  function locationConfirmed(labels, target, selected) {
+    const input = findLocationInput(labels)
+    return Boolean(selected && input && !locationInvalid(input) &&
+      input.getAttribute('aria-expanded') !== 'true' &&
+      !locationList(input, [...document.querySelectorAll('[role="listbox"]')].filter(visible)) &&
+      locationMatches(input.value, target))
+  }
+
+  async function selectLocation(labels, target) {
+    if (!target) return false
+    const input = await waitForDom(() => findLocationInput(labels), 6000)
+    if (!input) {
+      lastFieldNotFound = true
+      return false
+    }
+    if (hasHumanChallenge() || input.disabled || input.readOnly) return false
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    if (!setter) return false
+    const previous = [...document.querySelectorAll('[role="listbox"]')].filter(visible)
+    input.scrollIntoView({ block: 'center', behavior: 'auto' })
+    input.focus()
+    setter.call(input, target.query)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    const matching = () => {
+      const current = findLocationInput(labels)
+      const list = current && locationList(current, previous)
+      return list ? [...list.querySelectorAll('[role="option"]')].filter(option =>
+        visible(option) && option.getAttribute('aria-disabled') !== 'true' &&
+        locationMatches(option.innerText, target)) : []
+    }
+    if (!await waitForDom(() => matching().length > 0, 6000)) return false
+    await sleep(350)
+    const matches = matching()
+    if (matches.length !== 1 || hasHumanChallenge()) return false
+    matches[0].click()
+    if (!await waitForDom(() => locationConfirmed(labels, target, true), 2500)) return false
+    await sleep(350)
+    return locationConfirmed(labels, target, true)
+  }
+
   function contextError(error) {
     return /Extension context invalidated/i.test(error?.message || '')
       ? Object.assign(new Error('Extensão recarregada. Reabra a aba do Marketplace.'), {
@@ -958,17 +1069,17 @@
         attempt === 0 ? 8000 : 5000,
       )
       if (!button && repair) {
-        await repair(attempt)
+        if (await repair(attempt) === false) return false
         button = await waitForDom(() => actionButton(['Avançar', 'Next']), 6000)
       }
       if (!button) continue
       button.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' })
       await sleep(350)
-      if (beforeAdvance) await beforeAdvance()
+      if (beforeAdvance && await beforeAdvance() === false) return false
       firePointerClick(button)
       const advanced = await waitForDom(() => marketplaceStage() === 'groups', 9000)
       if (advanced) return true
-      if (repair) await repair(attempt)
+      if (repair && await repair(attempt) === false) return false
       await sleep(700)
     }
     return false
@@ -1163,6 +1274,11 @@
       if (diagnostics.length < 100) diagnostics.push({ code, elapsedMs: Date.now() - started, ...details })
     }
     trace('form_started')
+    const locationLabels = fieldLabels('location', ['localizacao', 'location'])
+    const targetLocation = locationTarget(vehicle.location)
+    let locationAttempted = false
+    let locationSelected = false
+    const recheckLocation = () => locationConfirmed(locationLabels, targetLocation, locationSelected)
     const fieldSteps = [
       {
         key: 'vehicleType',
@@ -1177,10 +1293,12 @@
       {
         key: 'location',
         label: 'Localização',
-        run: () =>
-          selectOrFill(fieldLabels('location', ['localizacao', 'location']), vehicle.location, {
-            humanTyping: Boolean(selectorConfig.fields?.location?.humanTyping),
-          }),
+        run: async () => {
+          if (locationAttempted) return recheckLocation()
+          locationAttempted = true
+          locationSelected = await selectLocation(locationLabels, targetLocation)
+          return locationSelected
+        },
         critical: true,
       },
       {
@@ -1300,9 +1418,14 @@
     let imageCount = await uploadImages(vehicle.images, trace)
     resultMap.set('Fotos', ['Fotos', expectedImageCount > 0 && imageCount === expectedImageCount])
     const repairFields = async (attempt) => {
+      if (!recheckLocation()) {
+        resultMap.set('Localização', ['Localização', false, !findLocationInput(locationLabels)])
+        return false
+      }
       const failed = fieldSteps.filter((field) => !resultMap.get(field.label)?.[1])
       const candidates = failed.length ? failed : fieldSteps.filter((field) => field.critical)
       for (const field of candidates) {
+        if (field.key === 'location') continue
         const retried = await step(field.label, field.run)
         if (retried[1]) resultMap.set(field.label, retried)
       }
@@ -1321,6 +1444,15 @@
       published = false,
       publishAttempted = false
     const flowIssues = []
+    const verifyLocation = () => {
+      const control = findLocationInput(locationLabels)
+      const ok = recheckLocation()
+      resultMap.set('Localização', ['Localização', ok, !control])
+      trace('location_checked', { controlFound: control ? 1 : 0, matched: ok ? 1 : 0 })
+      return ok
+    }
+    if (!verifyLocation())
+      flowIssues.push('Localização não confirmada. Selecione a cidade e o estado na lista do Facebook. O campo não será reescrito nesta execução.')
     if (automation.autoAdvance) {
       const recheckTransmission = async () => {
         const control = findTransmissionControl()
@@ -1337,7 +1469,15 @@
       // Do not carry stale success into the audience page. Recheck immediately
       // before the transition; the preview alone never establishes success.
       resultMap.set('Câmbio', ['Câmbio', false, true])
-      advanced = await advanceToGroups(repairFields, recheckTransmission)
+      advanced = Boolean(resultMap.get('Localização')?.[1]) &&
+        await advanceToGroups(repairFields, async () => {
+          if (!verifyLocation()) return false
+          await recheckTransmission()
+          return true
+        })
+      if (!advanced && !verifyLocation() &&
+          !flowIssues.some(issue => issue.startsWith('Localização não confirmada')))
+        flowIssues.push('Localização não confirmada após a validação do formulário. Revise a cidade manualmente; o avanço foi interrompido.')
       trace(advanced ? 'advanced' : 'advance_failed')
       if (!advanced)
         flowIssues.push(
