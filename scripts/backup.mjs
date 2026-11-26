@@ -69,6 +69,7 @@ function validateDatabase(path, uploadNames) {
       const fields = [
         'gemini_api_key',
         'openai_api_key',
+        'deepseek_api_key',
         'alert_telegram_token',
         'alert_telegram_chat_id',
         'alert_webhook_url',

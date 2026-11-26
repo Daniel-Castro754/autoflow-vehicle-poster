@@ -57,6 +57,24 @@ try {
   assert.equal(chosenOffline.provider, 'procedural')
   assert.equal(chosenOffline.fallbackReason, undefined)
   assert.equal(calls.length, 0)
+  calls.length = 0
+  globalThis.fetch = async (url, options) => {
+    calls.push({url:String(url),options})
+    return Response.json({choices:[{finish_reason:'stop',message:{content:'Saveiro 2019. Entre em contato.'}}]})
+  }
+  const deepseek = await generateVehicleDescription(vehicle,{provider:'deepseek',apiKeys:{deepseek:SECRET,gemini:SECRET,openai:SECRET}})
+  assert.equal(deepseek.provider,'deepseek')
+  assert.deepEqual(deepseek.attemptedProviders,['deepseek'])
+  assert.equal(calls.length,1)
+  assert.equal(calls[0].url,'https://api.deepseek.com/chat/completions')
+  assert.equal(calls[0].options.headers.Authorization,'Bearer '+SECRET)
+  assert.equal(JSON.parse(calls[0].options.body).model,'deepseek-flash')
+  assert.equal(calls[0].options.redirect,'error')
+  globalThis.fetch = async () => new Response(SECRET,{status:401})
+  const failed = await generateVehicleDescription(vehicle,{provider:'deepseek',apiKeys:{deepseek:SECRET,openai:SECRET}})
+  assert.equal(failed.provider,'procedural')
+  assert.deepEqual(failed.attemptedProviders,['deepseek'])
+  assert(!failed.fallbackReason.includes(SECRET))
   console.log(
     '✓ AI fallback: provider order, explicit-provider boundary, real provider, no URL secrets, offline reason',
   )

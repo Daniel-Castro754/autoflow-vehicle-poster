@@ -6,6 +6,7 @@ for (const key of [
   'ALERT_WEBHOOK_URL',
   'GEMINI_API_KEY',
   'OPENAI_API_KEY',
+  'DEEPSEEK_API_KEY',
 ])
   delete process.env[key]
 const preload = `--import=${import.meta.url}`

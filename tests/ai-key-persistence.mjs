@@ -23,6 +23,7 @@ try {
   const org = db.prepare('SELECT organization_id id FROM users WHERE email=?').get(server.email).id
   const gemini = 'test-gemini-private-API-key-should-never-appear'
   const openai = 'test-openai-private-API-key-should-never-appear'
+  const deepseek = 'test-deepseek-private-key-fixture'
   const company = 'Empresa AI Teste'
   const patch = async (fields) =>
     api('/settings', {
@@ -37,21 +38,26 @@ try {
   const dbKeys = () =>
     db
       .prepare(
-        'SELECT gemini_api_key gemini,openai_api_key openai,ai_provider preference FROM organization_settings WHERE organization_id=?',
+        'SELECT gemini_api_key gemini,openai_api_key openai,deepseek_api_key deepseek,ai_provider preference FROM organization_settings WHERE organization_id=?',
       )
       .get(org)
   const initial = await api('/settings')
   assert(!('geminiApiKey' in initial.settings) && !('openaiApiKey' in initial.settings))
-  await patch({ geminiApiKey: gemini, openaiApiKey: openai, aiProvider: 'gemini' })
+  await patch({ geminiApiKey: gemini, openaiApiKey: openai, deepseekApiKey:deepseek, aiProvider: 'gemini' })
   let stored = dbKeys()
   assert(stored.gemini.startsWith('enc:v1:'), 'Key must be encrypted at rest')
   assert.equal(plaintext(stored.gemini, org, 'gemini_api_key'), gemini)
   assert(stored.openai.startsWith('enc:v1:'))
   assert.equal(plaintext(stored.openai, org, 'openai_api_key'), openai)
   assert.equal(stored.preference, 'gemini')
+  assert(stored.deepseek.startsWith('enc:v1:'))
+  assert.equal(plaintext(stored.deepseek,org,'deepseek_api_key'),deepseek)
   const saved = await api('/settings')
   assert.equal(saved.settings.geminiKeyConfigured, true)
   assert.equal(saved.settings.openaiKeyConfigured, true)
+  assert.equal(saved.settings.deepseekKeyConfigured,true)
+  assert(!Object.hasOwn(saved.settings,'deepseekApiKey'))
+  assert(!JSON.stringify(saved).includes(deepseek))
   assert.equal(saved.settings.geminiKeySource, 'database')
   assert.equal(saved.settings.openaiKeySource, 'database')
   assert(!JSON.stringify(saved).includes(gemini))
@@ -105,7 +111,13 @@ try {
 
   await assert.rejects(patch({ clearGeminiApiKey: 'yes' }), (err) => err.status === 400)
   assert.equal(plaintext(dbKeys().gemini, org, 'gemini_api_key'), gemini)
-  await patch({ clearGeminiApiKey: true, clearOpenaiApiKey: true })
+  await patch({aiProvider:'deepseek',deepseekApiKey:''})
+  assert.equal((await api('/ai/provider-status')).preference,'deepseek')
+  assert.equal(plaintext(dbKeys().deepseek,org,'deepseek_api_key'),deepseek)
+  assert(!JSON.stringify(await api('/ai/provider-status')).includes(deepseek))
+  await assert.rejects(patch({clearDeepseekApiKey:'yes'}),err=>err.status===400)
+  await patch({ clearGeminiApiKey: true, clearOpenaiApiKey: true, clearDeepseekApiKey:true })
+  assert.equal(dbKeys().deepseek,'')
   assert.equal(dbKeys().gemini, '')
   assert.equal(dbKeys().openai, '')
   assert.equal(

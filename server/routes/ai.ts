@@ -1,3 +1,4 @@
+import { deepseekText } from '../services/deepseek.ts'
 import { getAiCredentials } from '../services/credential-vault.ts'
 import { logger } from '../lib/logger.ts'
 import { summarizeAutopilotDiagnostics } from '../services/autopilot-diagnostics.ts'
@@ -171,15 +172,16 @@ export async function handleAIRoute(
   if (req.method === 'GET' && url.pathname === '/api/ai/provider-status') {
     const stored = db
       .prepare(
-        'SELECT gemini_api_key gemini,openai_api_key openai,ai_provider preference FROM organization_settings WHERE organization_id=?',
+        'SELECT gemini_api_key gemini,openai_api_key openai,deepseek_api_key deepseek,ai_provider preference FROM organization_settings WHERE organization_id=?',
       )
       .get(auth.organizationId) as
-      { gemini: string; openai: string; preference: string } | undefined
+      { gemini: string; openai: string; deepseek: string; preference: string } | undefined
     send(res, 200, {
       ok: true,
       preference: stored?.preference || 'auto',
       geminiConfigured: Boolean(stored?.gemini || process.env.GEMINI_API_KEY),
       openaiConfigured: Boolean(stored?.openai || process.env.OPENAI_API_KEY),
+      deepseekConfigured: Boolean(stored?.deepseek || process.env.DEEPSEEK_API_KEY),
       fallback: 'procedural',
     })
     return true
@@ -300,15 +302,24 @@ export async function handleAIRoute(
   if (req.method === 'POST' && url.pathname === '/api/ai/test-key') {
     const b = (await jsonBody(req)) as Record<string, unknown>
     const provider = String(b.provider || 'gemini').toLowerCase()
+    if (!['gemini','openai','deepseek'].includes(provider)) { send(res,400,{error:'Provedor desconhecido.'}); return true }
     const settings = getAiCredentials(db, auth.organizationId)
     const key =
       String(b.apiKey || '').trim() ||
       (provider === 'gemini'
         ? settings?.geminiApiKey || process.env.GEMINI_API_KEY
-        : settings?.openaiApiKey || process.env.OPENAI_API_KEY) ||
+        : provider === 'deepseek' ? settings.deepseekApiKey || process.env.DEEPSEEK_API_KEY
+          : settings?.openaiApiKey || process.env.OPENAI_API_KEY) ||
       ''
     if (!key) {
       send(res, 400, { error: 'Informe a chave de API para testar.' })
+      return true
+    }
+    if (provider === 'deepseek') {
+      const result = await deepseekText(key, 'Responda somente OK.', {maxTokens:16})
+      if (!result.ok) { send(res,400,{ok:false,error:result.reason}); return true }
+      recordAiAudit(db, auth.organizationId, auth.userId, 'api_key_test', 'tested', 'deepseek')
+      send(res,200,{ok:true,message:'✓ DeepSeek Flash respondeu com sucesso.'})
       return true
     }
     if (provider === 'gemini') {

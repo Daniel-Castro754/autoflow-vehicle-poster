@@ -16,6 +16,7 @@ const PREFIX = 'enc:v1:'
 export type CredentialField =
   | 'gemini_api_key'
   | 'openai_api_key'
+  | 'deepseek_api_key'
   | 'alert_telegram_token'
   | 'alert_telegram_chat_id'
   | 'alert_webhook_url'
@@ -171,12 +172,13 @@ export function decryptCredential(value: string, org: number, field: Field): str
 export function getAiCredentials(db: DatabaseSync, org: number) {
   const row = db
     .prepare(
-      'SELECT gemini_api_key gemini,openai_api_key openai,ai_provider provider FROM organization_settings WHERE organization_id=?',
+      'SELECT gemini_api_key gemini,openai_api_key openai,deepseek_api_key deepseek,ai_provider provider FROM organization_settings WHERE organization_id=?',
     )
-    .get(org) as { gemini: string; openai: string; provider: string } | undefined
+    .get(org) as { gemini: string; openai: string; deepseek: string; provider: string } | undefined
   return {
     geminiApiKey: decryptCredential(row?.gemini || '', org, 'gemini_api_key'),
     openaiApiKey: decryptCredential(row?.openai || '', org, 'openai_api_key'),
+    deepseekApiKey: decryptCredential(row?.deepseek || '', org, 'deepseek_api_key'),
     aiProvider: row?.provider || 'auto',
   }
 }
@@ -186,6 +188,7 @@ export function migrateCredentials(db: DatabaseSync) {
   const fields: CredentialField[] = [
     'gemini_api_key',
     'openai_api_key',
+    'deepseek_api_key',
     'alert_telegram_token',
     'alert_telegram_chat_id',
     'alert_webhook_url',
@@ -326,15 +329,18 @@ function validateMasterAgainstDatabase(db: DatabaseSync, candidate: Buffer) {
     .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_settings'")
     .get()
   if (!table) throw new Error('Banco de dados AutoFlow não encontrado neste diretório.')
+  const hasDeepseek = db.prepare('PRAGMA table_info(organization_settings)').all().some(column => column.name === 'deepseek_api_key')
   const rows = db
     .prepare(
       'SELECT organization_id id, gemini_api_key gemini, openai_api_key openai,' +
+        (hasDeepseek ? ' deepseek_api_key deepseek,' : " '' deepseek,") +
         ' alert_telegram_token telegram,alert_telegram_chat_id chat,alert_webhook_url webhook FROM organization_settings',
     )
     .all() as Array<{
     id: number
     gemini: string
     openai: string
+    deepseek: string
     telegram: string
     chat: string
     webhook: string
@@ -344,6 +350,7 @@ function validateMasterAgainstDatabase(db: DatabaseSync, candidate: Buffer) {
     for (const [field, cipher] of [
       ['gemini_api_key', row.gemini],
       ['openai_api_key', row.openai],
+      ['deepseek_api_key', row.deepseek],
       ['alert_telegram_token', row.telegram],
       ['alert_telegram_chat_id', row.chat],
       ['alert_webhook_url', row.webhook],

@@ -1,4 +1,5 @@
 import { logger } from '../lib/logger.ts'
+import { deepseekText } from './deepseek.ts'
 
 export interface VehicleInput {
   year: number
@@ -22,12 +23,13 @@ export interface VehicleInput {
 }
 
 export type CopyTone = 'vendedor' | 'profissional' | 'amigável' | 'direto'
-export type AIProviderChoice = 'gemini' | 'openai' | 'auto' | 'procedural'
+export type AIProviderChoice = 'gemini' | 'openai' | 'deepseek' | 'auto' | 'procedural'
 
 export interface AIProviderSettings {
   aiProvider?: string
   geminiApiKey?: string
   openaiApiKey?: string
+  deepseekApiKey?: string
 }
 
 export function resolveAIProviderSettings(settings?: AIProviderSettings) {
@@ -35,11 +37,13 @@ export function resolveAIProviderSettings(settings?: AIProviderSettings) {
   const configuredProvider: AIProviderChoice =
     requestedProvider === 'gemini' ||
     requestedProvider === 'openai' ||
+    requestedProvider === 'deepseek' ||
     requestedProvider === 'procedural'
       ? requestedProvider
       : 'auto'
   const geminiApiKey = settings?.geminiApiKey?.trim() || process.env.GEMINI_API_KEY || ''
   const openaiApiKey = settings?.openaiApiKey?.trim() || process.env.OPENAI_API_KEY || ''
+  const deepseekApiKey = settings?.deepseekApiKey?.trim() || process.env.DEEPSEEK_API_KEY || ''
   return {
     provider: configuredProvider,
     apiKeys:
@@ -47,7 +51,9 @@ export function resolveAIProviderSettings(settings?: AIProviderSettings) {
         ? { gemini: geminiApiKey }
         : configuredProvider === 'openai'
           ? { openai: openaiApiKey }
-          : configuredProvider === 'auto'
+          : configuredProvider === 'deepseek'
+            ? { deepseek: deepseekApiKey }
+            : configuredProvider === 'auto'
             ? { gemini: geminiApiKey, openai: openaiApiKey }
             : {},
   }
@@ -55,8 +61,8 @@ export function resolveAIProviderSettings(settings?: AIProviderSettings) {
 
 export interface GenerationResult {
   description: string
-  provider: 'gemini' | 'openai' | 'procedural'
-  attemptedProviders?: Array<'gemini' | 'openai'>
+  provider: 'gemini' | 'openai' | 'deepseek' | 'procedural'
+  attemptedProviders?: Array<'gemini' | 'openai' | 'deepseek'>
   fallbackReason?: string
 }
 
@@ -111,7 +117,7 @@ export async function generateVehicleDescription(
     tone?: CopyTone
     provider?: AIProviderChoice
     apiKey?: string
-    apiKeys?: Partial<Record<'gemini' | 'openai', string>>
+    apiKeys?: Partial<Record<'gemini' | 'openai' | 'deepseek', string>>
   },
 ): Promise<GenerationResult> {
   const tone: CopyTone = options?.tone || 'vendedor'
@@ -127,7 +133,7 @@ export async function generateVehicleDescription(
     options?.apiKeys?.openai ||
     process.env.OPENAI_API_KEY ||
     ''
-  const attemptedProviders: Array<'gemini' | 'openai'> = []
+  const attemptedProviders: Array<'gemini' | 'openai' | 'deepseek'> = []
   const failures: string[] = []
 
   const fipeInfo =
@@ -251,6 +257,17 @@ REGRAS:
       })
       failures.push('OpenAI indisponível por falha de rede')
     }
+  }
+
+  // Explicit opt-in: keep the existing automatic provider chain unchanged.
+  const deepseekKey = (provider === 'deepseek' ? options?.apiKey : undefined) ||
+    options?.apiKeys?.deepseek || process.env.DEEPSEEK_API_KEY || ''
+  if (provider === 'deepseek' && deepseekKey) {
+    attemptedProviders.push('deepseek')
+    const result = await deepseekText(deepseekKey, prompt)
+    if (result.ok && result.text.length <= 500)
+      return { description: result.text, provider: 'deepseek', attemptedProviders }
+    failures.push(result.ok ? 'DeepSeek excedeu o limite da descrição.' : result.reason)
   }
 
   // 3. Fallback procedural inteligente (100% offline e imediato)

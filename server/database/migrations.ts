@@ -541,6 +541,11 @@ const migrations: Migration[] = [
     );
     CREATE INDEX IF NOT EXISTS idx_telegram_monitor_delivery_age ON telegram_monitor_delivery(claimed_at);`,
   },
+  {
+    version: 32,
+    columns: [['organization_settings', 'deepseek_api_key', "TEXT NOT NULL DEFAULT ''"]],
+    sql: '',
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {
