@@ -91,7 +91,7 @@ export async function telegramRequest(token:string,method:'getMe'|'getUpdates',p
     return body.ok===true?{ok:true,result:body.result}:{ok:false,status:'telegram_error'}
   }catch{return {ok:false,status:'network_error'}}
 }
-type Message = {date?:number;text?:string;forward_origin?:unknown;from?:{id?:number;is_bot?:boolean};chat?:{id?:number;type?:string};sender_chat?:unknown}
+type Message = {date?:number;message_id?:number;text?:string;reply_to_message?:{from?:{id?:number;is_bot?:boolean}};forward_origin?:unknown;from?:{id?:number;is_bot?:boolean};chat?:{id?:number;type?:string};sender_chat?:unknown}
 type Update = {update_id?:number;message?:Message}
 const clean = (value:unknown)=>String(value??'').replace(/\s+/g,' ').slice(0,70)
 function statusText(db:DatabaseSync,org:number,now:number){
@@ -104,7 +104,7 @@ function statusText(db:DatabaseSync,org:number,now:number){
     ...profiles.map(p=>{const seen=parseSqliteTimestamp(p.seen);return clean(p.label)+': '+(p.status==='connected'&&seen!==null&&seen<=now+60000&&now-seen<=300000?'online':'offline')}),
     'Presença recente não garante que o Facebook esteja autenticado.'].join('\n')
 }
-function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,update:Update,now:number):string|{question:string;userId:string}|null{
+function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,botId:number|undefined,update:Update,now:number):string|{question:string;userId:string}|null{
   const m=update.message
   if(!m||m.sender_chat||m.from?.is_bot!==false||!Number.isSafeInteger(m.from.id)||
     !Number.isSafeInteger(m.chat?.id)||String(m.chat?.id)!==c.telegramChatId||
@@ -138,7 +138,22 @@ function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,update:U
     return {question:ai[2].trim(),userId:String(m.from.id)}
   }
   const match=m.text.trim().match(/^\/(meu_id|ajuda|status|limpar_memoria)(?:@([A-Za-z0-9_]+))?$/i)
-  if(!match||(match[2]&&match[2].toLowerCase()!==username.toLowerCase()))return null
+  if(!match){
+    // Only a leading mention or a reply to this bot is a natural query.
+    // Slash commands never fall through into the conversational path.
+    const text=m.text.trim()
+    if(text.startsWith('/')||!ids(row).includes(String(m.from.id)))return null
+    const mention=text.match(/^@([A-Za-z0-9_]+)(?:\s+|[:,]\s*)([\s\S]+)$/)
+    if(text.startsWith('@')&&!mention)return null
+    if(mention&&mention[1].toLowerCase()!==username.toLowerCase())return null
+    const replying=Number.isSafeInteger(botId)&&Number(botId)>0&&m.reply_to_message?.from?.is_bot===true&&m.reply_to_message?.from?.id===botId
+    if(!mention&&!replying)return null
+    const question=(mention?mention[2]:text).trim()
+    if(!question||question.startsWith('/'))return null
+    if(!row.ai_enabled)return 'Perguntas com DeepSeek desativadas. Ative no painel.'
+    return {question,userId:String(m.from.id)}
+  }
+  if(match[2]&&match[2].toLowerCase()!==username.toLowerCase())return null
   const command=match[1].toLowerCase()
   const user=String(m.from.id)
   // Setup mode can identify the caller, but never disclose operational data.
@@ -148,7 +163,7 @@ function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,update:U
     clearCommanderMemory(db,row.organization_id,user)
     return 'Suas referências de consultas foram limpas no AutoFlow. O histórico do Telegram, backups e diagnósticos operacionais não foram alterados.'
   }
-  if(command==='ajuda')return 'AutoFlow AI Commander — consulta somente leitura\n/status — situação do sistema\n/meu_id — seu identificador\n/ajuda — comandos\n/ia pergunta — consulta DeepSeek, se ativada no painel.\n/limpar_memoria — limpa suas referências locais. /solicitar_pausa ID — demonstração de autorização, se permitida.\n/autorizar CÓDIGO ou /recusar CÓDIGO — decidir proposta. /pausar ID, /adiar ID AAAA-MM-DDTHH:MM-03:00, /cancelar_trabalho ID — propostas reais se autorizadas. Não publica nem retira anúncios.'
+  if(command==='ajuda')return 'AutoFlow AI Commander — consulta somente leitura\n/status — situação do sistema\n/meu_id — seu identificador\n/ajuda — comandos\n/ia pergunta — consulta DeepSeek, se ativada no painel.\nVocê também pode mencionar @'+username+' no início da pergunta ou responder diretamente ao bot.\n/limpar_memoria — limpa suas referências locais. /solicitar_pausa ID — demonstração de autorização, se permitida.\n/autorizar CÓDIGO ou /recusar CÓDIGO — decidir proposta. /pausar ID, /adiar ID AAAA-MM-DDTHH:MM-03:00, /cancelar_trabalho ID — propostas reais se autorizadas. Não publica nem retira anúncios.'
   return statusText(db,row.organization_id,now)
 }
 
@@ -172,7 +187,7 @@ export async function sweepTelegramCommander(db:DatabaseSync,deps:Dependencies={
       const sameDestination=()=>{const latest=credentials(db,org);return configured(latest)&&destinationHash(latest)===row.destination_hash}
       const identity=await request(c.telegramBotToken,'getMe',{})
       if(!identity.ok){status=identity.status;return}
-      const bot=identity.result as {is_bot?:boolean;username?:string}|null
+      const bot=identity.result as {is_bot?:boolean;username?:string;id?:number}|null
       if(bot?.is_bot!==true||typeof bot.username!=='string'||!/^[A-Za-z0-9_]+$/.test(bot.username)){status='invalid_bot';return}
       if(!current()||!sameDestination())return
       // Telegram may choose a new random update ID after a week without updates.
@@ -194,7 +209,7 @@ export async function sweepTelegramCommander(db:DatabaseSync,deps:Dependencies={
         const claimed=db.prepare('UPDATE telegram_commander SET next_offset=?,last_update_at=? WHERE organization_id=? AND revision=? AND enabled=1 AND lease_owner=? AND lease_until>?').run(id+1,now(),org,row.revision,owner,now())
         if(!claimed.changes)break
         offset=id+1
-        const reply=replyFor(db,r,c,bot.username,update,now())
+        const reply=replyFor(db,r,c,bot.username,bot.id,update,now())
         if(reply&&replies<5&&current()&&sameDestination()){
           replies++
           if(typeof reply==='string'){
