@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { createHash, randomUUID } from 'node:crypto'
 import { getAlertCredentials } from './credential-vault.ts'
-import { sendTelegramOperational } from './telegram-monitor.ts'
+import { sendCommanderReply } from './commander-telegram-reply.ts'
 import { parseSqliteTimestamp } from './profile-capacity.ts'
 import { logger } from '../lib/logger.ts'
 import { answerCommanderQuestion, commanderUsage } from './commander-conversation.ts'
@@ -19,7 +19,7 @@ type Request = (token: string, method: 'getMe'|'getUpdates', payload: Record<str
 type Dependencies = {
   credentials?: (db: DatabaseSync, org:number)=>Credentials
   request?: Request
-  send?: typeof sendTelegramOperational
+  send?: typeof sendCommanderReply
   now?: ()=>number
   answer?: typeof answerCommanderQuestion
 }
@@ -155,7 +155,7 @@ function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,update:U
 export async function sweepTelegramCommander(db:DatabaseSync,deps:Dependencies={}){
   const credentials=deps.credentials||getAlertCredentials
   const request=deps.request||telegramRequest
-  const send=deps.send||sendTelegramOperational
+  const send=deps.send||sendCommanderReply
   const now=deps.now||Date.now
   const rows=db.prepare('SELECT * FROM telegram_commander WHERE enabled=1 ORDER BY organization_id').all() as Row[]
   // A token can have exactly one active receiver in this database. A lease
@@ -204,7 +204,7 @@ export async function sweepTelegramCommander(db:DatabaseSync,deps:Dependencies={
             const memory:MemoryScope|undefined=r.memory_enabled?{userId:reply.userId,destinationHash:r.destination_hash,revision:r.revision}:undefined
             const result=await (deps.answer||answerCommanderQuestion)(db,org,reply.question,authorized,{memory})
             if(authorized()){
-              if(!await send(result.text,c))status='reply_failed'
+              if(!await send(result.text,c,{format:true}))status='reply_failed'
               else if(memory&&result.status==='answered'&&authorized()){
                 try{rememberCommanderQueries(db,org,memory,result.references,now())}
                 catch{logger.warn('TelegramCommander','Falha ao registrar referências de consulta',{organizationId:org})}
