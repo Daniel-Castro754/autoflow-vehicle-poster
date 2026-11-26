@@ -7,6 +7,7 @@ import { warnSlowExecutions } from './proactive-alerts.ts'
 import { recordOperationalSignal } from './operational-incidents.ts'
 import { pruneConsumerHistory } from './consumer-history.ts'
 import { runTelegramMonitor } from './telegram-monitor.ts'
+import { runCommanderIncidentDiagnostics } from './commander-incident-diagnostics.ts'
 
 export interface HealthStatusReport {
   timestamp: string
@@ -288,12 +289,19 @@ export function startHealthMonitor(db: DatabaseSync, intervalMs = 60000): void {
 
   let running = false
   let telegramRunning = false
+  let diagnosticsRunning = false
   monitorTimer = setInterval(async () => {
     if (running) return
     running = true
     try {
       await runHealthCheck(db, { autoRecover: true })
       pruneConsumerHistory(db)
+      if (!diagnosticsRunning) {
+        diagnosticsRunning = true
+        void runCommanderIncidentDiagnostics(db).catch(() => {
+          logger.warn('CommanderDiagnostics', 'Falha na verificação periódica.')
+        }).finally(() => { diagnosticsRunning = false })
+      }
       if (!telegramRunning) {
         telegramRunning = true
         void runTelegramMonitor(db).catch(() => {

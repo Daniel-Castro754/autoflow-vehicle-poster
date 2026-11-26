@@ -577,6 +577,32 @@ const migrations: Migration[] = [
       PRIMARY KEY(organization_id,business_day)
     );`,
   },
+  {
+    version: 35,
+    columns: [],
+    sql: `CREATE TABLE IF NOT EXISTS commander_diagnostic_settings (
+      organization_id INTEGER PRIMARY KEY REFERENCES organizations(id),
+      enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),
+      destination_hash TEXT NOT NULL DEFAULT '',
+      revision INTEGER NOT NULL DEFAULT 0,
+      event_cursor INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS commander_diagnostic_history (
+      organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      event_id INTEGER NOT NULL,
+      job_id INTEGER NOT NULL,
+      family TEXT NOT NULL,
+      business_day TEXT NOT NULL,
+      claimed_at INTEGER NOT NULL,
+      cause TEXT NOT NULL DEFAULT 'insufficient',
+      analysis_status TEXT NOT NULL DEFAULT 'claimed',
+      delivery_status TEXT NOT NULL DEFAULT 'pending',
+      PRIMARY KEY(organization_id,event_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_commander_diagnostic_day ON commander_diagnostic_history(organization_id,business_day);
+    CREATE INDEX IF NOT EXISTS idx_commander_diagnostic_recent ON commander_diagnostic_history(organization_id,job_id,family,claimed_at);
+    CREATE INDEX IF NOT EXISTS idx_commander_diagnostic_age ON commander_diagnostic_history(claimed_at);`,
+  },
 ]
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {
