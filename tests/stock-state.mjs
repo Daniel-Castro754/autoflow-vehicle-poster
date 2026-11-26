@@ -260,7 +260,13 @@ try {
     publishAttempted: true,
   })
   assert.equal((await getJob(interrupted.jobId)).fillReport.saleInterrupted, true)
-  await call(`/publications/${interrupted.jobId}`, 'PATCH', { status: 'canceled' })
+  // An uncertain result, including after a sale, requires explicit human confirmation.
+  await call(`/publications/${interrupted.jobId}`, 'PATCH', { status: 'canceled' }, 409)
+  assert.equal((await getJob(interrupted.jobId)).status, 'awaiting_confirmation')
+  await call(`/publications/${interrupted.jobId}`, 'PATCH', {
+    status: 'canceled', confirmNoPublication: true,
+  })
+  assert.equal((await getJob(interrupted.jobId)).status, 'canceled')
   assert.equal((await getVehicle(interrupted.vehicleId)).status, 'Vendido')
 
   const manual = await fixture('Confirmação manual')
