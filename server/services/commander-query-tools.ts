@@ -8,6 +8,7 @@ import { listingExpiryPolicy } from './listing-expiry.ts'
 import { canonicalMarketplaceListing } from './publication-ledger.ts'
 import { autopilotDiagnostics, summarizeAutopilotDiagnostics } from './autopilot-diagnostics.ts'
 import { operationalBottlenecks } from './operational-bottlenecks.ts'
+import { operationalRecommendations } from './operational-recommendations.ts'
 
 type Property = {type:'integer'|'string'; minimum?:number; maximum?:number; enum?:readonly string[]; description:string}
 type Definition = {description:string; properties:Record<string,Property>; required?:string[]; sources:string[]}
@@ -21,6 +22,7 @@ const definitions = {
   resumo_operacional:{description:'Totais atuais de estoque, trabalhos e presença de perfis; confirmações registradas hoje.',properties:{},sources:['vehicles','publication_jobs','social_accounts','publication_listing_ledger']},
   diagnosticar_operacao:{description:'Diagnóstico atual de por que o piloto automático recorrente pode ou não agendar veículos: motivos, perfis elegíveis, exemplos e estado da rodada. Somente leitura.',properties:{limit},sources:['vehicles','vehicle_images','publication_jobs','social_accounts','organization_settings','autopilot_state','published_ads','publication_listing_ledger']},
   identificar_gargalos:{description:'Classifica gargalos atuais por revisão obrigatória, atenção e espera normal; contagens por entidade e exemplos, sem executar ações.',properties:{limit},sources:['vehicles','vehicle_images','publication_jobs','publication_job_events','social_accounts','organization_settings','autopilot_state','published_ads','publication_listing_ledger']},
+  recomendar_acoes:{description:'Recomenda orientações corretivas baseadas nos gargalos atuais, separando revisão humana, verificações, observação e respeito à configuração. Não executa ações.',properties:{limit},sources:['vehicles','vehicle_images','publication_jobs','publication_job_events','social_accounts','organization_settings','autopilot_state','published_ads','publication_listing_ledger']},
   listar_veiculos:{description:'Lista paginada de veículos, dados cadastrais essenciais e quantidade de fotos.',properties:{limit,beforeId,status:{type:'string',enum:stockStatuses,description:'Status cadastral'}},sources:['vehicles','vehicle_images']},
   consultar_veiculo:{description:'Detalhes essenciais e campos faltantes de um veículo, sem descrição livre nem arquivos.',properties:{vehicleId:id('ID do veículo')},required:['vehicleId'],sources:['vehicles','vehicle_images']},
   listar_publicacoes:{description:'Trabalhos, agendamento, perfil, tentativas e status atual; não confirma estado externo.',properties:{limit,beforeId,vehicleId:id('Filtrar veículo'),accountId:id('Filtrar perfil'),status:{type:'string',enum:statuses,description:'Status do trabalho'}},sources:['publication_jobs','vehicles','social_accounts']},
@@ -124,6 +126,9 @@ export function runCommanderQuery(db:DatabaseSync,org:number,tool:unknown,input:
     }
     case 'identificar_gargalos': {
       data=operationalBottlenecks(db,org,n);break
+    }
+    case 'recomendar_acoes': {
+      data=operationalRecommendations(db,org,n);break
     }
     case 'listar_veiculos': {
       const rows=db.prepare('SELECT '+vehicleColumns+' FROM vehicles v WHERE v.organization_id=? AND (?=0 OR v.id<?) AND (?=\'\' OR v.status=?) ORDER BY v.id DESC LIMIT ?').all(org,cursor,cursor,status,status,n+1)
