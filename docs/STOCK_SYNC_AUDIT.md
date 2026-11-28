@@ -164,3 +164,18 @@ O modo é escolhido em cada invocação; uma rodada ainda não devida não é an
 O bloqueio não cobre invocações manuais do CLI antigo nem cópias do repositório com arquivos de estado diferentes. Usar somente a instalação principal para execução real e não agendar o CLI antigo em paralelo. Um único arquivo serve a uma configuração local de fonte; não há orquestração multi-tenant de fontes neste runner. O agendamento no Windows, inicialização automática após reinício e integração do status com painel/Telegram ainda não foram configurados. A sincronização real e permissões Google continuam sem homologação.
 
 Teste offline: `npm run test:stock-sync-runner`. O teste usa duas conexões no mesmo SQLite temporário e funções de leitura/escrita simuladas; não acessa o Google nem o estoque real.
+
+## Etapa 4.9 — Aplicação individual de alterações e vendas revisadas
+
+A resposta da prévia passa a incluir `reviewedActions`, uma lista de candidatos restritos, para fonte declarada completa. Cada candidato contém ação, ID local, código, valores antes/depois, horário da revisão, validade de cinco minutos e digest de comparação. O digest vincula organização, fonte declarada, linha normalizada e estado local observado; não é segredo, assinatura, autenticação da origem nem prova de aprovação humana.
+
+Ações disponíveis:
+- `update_price_km`: somente Rascunho, dados cadastrais completos, diferença restrita ao preço ou quilometragem, preço e km inteiros e quilometragem não decrescente.
+- `record_sale`: somente venda explícita com correspondência local, status Rascunho ou Pronto e sem venda já registrada.
+- Ambas exigem código único, chassi de 17 caracteres compatível com o cadastrado, ano/marca/modelo coincidentes, ausência de conflito de fotos para a linha e ausência de qualquer registro local em trabalhos, ledger de anúncios e hashes de anúncios, inclusive histórico cancelado/removido. Sem chassi confirmado, o fluxo existente do painel permanece necessário. A inexistência de histórico local não comprova inexistência de anúncio externo.
+
+Para executar uma única ação, o administrador deve emitir credencial específica com `vehicles:read` e `stock:update` ou `stock:sell`, conforme o caso. Não há concessão automática a credenciais anteriores. Após revisão humana da fonte, veículo e valores, enviar `POST /api/integration/v1/stock/reviewed-action` com `confirm: "apply_reviewed_stock_action"`, `action`, `vehicleId`, `reviewedAt`, `digest` e `snapshot` (o envelope usado na prévia). O servidor revalida a credencial e recalcula o candidato sob transação de escrita. Referências vencidas, divergentes ou não elegíveis retornam 409. Não se reaplica uma alteração já efetuada enquanto o estado atual for diferente; o digest não é um token de uso único armazenado.
+
+Uma gravação aceita registra ação, ID e antes/depois no log de auditoria da integração, na mesma transação. Não altera fotos, fila, anúncio externo ou outras linhas. Vendas de veículos com qualquer histórico de publicação e alterações fora dos limites continuam no fluxo manual existente; esta rota não substitui o tratamento de trabalhos em andamento do painel. Não se infere venda por ausência, não se reabre vendido e não se altera identidade ou descrição.
+
+O runner periódico não ganhou modo de atualização ou venda. A confirmação individual é um contrato de API para operador autorizado, não uma interface interativa implementada no painel. A credencial com escopo de escrita deve ficar separada da credencial do runner. Não usar confirmação gerada automaticamente para contornar a revisão. Os testes HTTP são locais e não comprovam origem Google, efeito externo ou aprovação real. A homologação da fonte e a configuração operacional permanecem pendentes.
