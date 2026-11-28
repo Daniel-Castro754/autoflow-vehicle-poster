@@ -133,20 +133,44 @@ const server = spawn(process.execPath, ['server/server.ts'], {
   stdio: ['ignore', 'pipe', 'pipe'],
 })
 let serverOutput = ''
-server.stdout.on('data', (chunk) => (serverOutput += chunk))
-server.stderr.on('data', (chunk) => (serverOutput += chunk))
+let spawnError
+let closed = false
+const serverClosed = new Promise((resolve) => {
+  server.once('close', () => {
+    closed = true
+    resolve()
+  })
+})
+server.on('error', (error) => { spawnError = error })
+const captureOutput = (chunk) => {
+  serverOutput = (serverOutput + String(chunk)).slice(-16000)
+}
+server.stdout.on('data', captureOutput)
+server.stderr.on('data', captureOutput)
 
 async function waitForServer() {
-  for (let attempt = 0; attempt < 40; attempt++) {
+  const startedAt = Date.now()
+  const deadline = startedAt + 30_000
+  let lastProbe = 'Nenhuma resposta HTTP'
+  const diagnostic = () =>
+    `tempo=${Date.now() - startedAt}ms; porta=${port}; exitCode=${server.exitCode}; signal=${server.signalCode}; última consulta=${lastProbe}; erro de processo=${spawnError?.message || 'nenhum'}; saída=\n${serverOutput || '(vazia)'}`
+  while (Date.now() < deadline) {
+    if (spawnError || closed || server.exitCode !== null || server.signalCode !== null) {
+      await serverClosed
+      throw new Error(`A API de teste encerrou antes de iniciar. ${diagnostic()}`)
+    }
     try {
-      const response = await fetch(base + '/health')
+      const response = await fetch(base + '/health', {
+        signal: AbortSignal.timeout(1000),
+      })
       if (response.ok) return
-    } catch {
-      /* API ainda inicializando */
+      lastProbe = `HTTP ${response.status}`
+    } catch (error) {
+      lastProbe = `${error.name}: ${error.message} (${error.cause?.code || 'sem código'})`
     }
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
-  throw new Error(`A API de teste não iniciou. ${serverOutput}`)
+  throw new Error(`A API de teste não iniciou em 30 segundos. ${diagnostic()}`)
 }
 async function login(email, password) {
   const response = await fetch(base + '/auth/login', {
@@ -889,9 +913,9 @@ try {
     ),
   )
 } finally {
-  if (server.exitCode === null) {
-    server.kill()
-    await new Promise((resolve) => server.once('exit', resolve))
+  if (!closed) {
+    if (server.exitCode === null && server.signalCode === null && !spawnError) server.kill()
+    await serverClosed
   }
   await rm(dataDir, { recursive: true, force: true })
 }
