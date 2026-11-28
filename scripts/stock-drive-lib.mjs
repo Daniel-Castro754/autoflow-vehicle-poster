@@ -127,3 +127,35 @@ export async function readDriveManifest(snapshot,rootId,token,fetcher=fetch){
   }
   return {files,photos:files.map(({stockCode,sha256})=>({stockCode,sha256})),totalBytes}
 }
+
+export function planDriveUploads(snapshot,manifest,preview){
+  if(preview?.readOnly!==true||preview.sourceState!=='complete'||preview.counts?.conflict!==0||
+    preview.photoPreview?.counts?.conflict!==0||!Array.isArray(preview.entries)||
+    !Array.isArray(preview.validation?.items)||!Array.isArray(preview.photoPreview?.entries)||
+    preview.entries.length!==snapshot.rows.length||preview.validation.items.length!==snapshot.rows.length||
+    preview.photoPreview.entries.length!==manifest.files.length)
+    throw new Error('Prévia de estoque/fotos não confirmada ou contém conflitos.')
+  const targets=new Map()
+  for(const [i,row] of snapshot.rows.entries()){
+    const stockCode=code(row.stockCode)
+    const entry=preview.entries[i]
+    const check=preview.validation.items[i]
+    if(entry.stockCode!==stockCode||check.stockCode!==stockCode||targets.has(stockCode))
+      throw new Error('Identidade inconsistente na prévia.')
+    targets.set(stockCode,row.commercialState==='available'&&entry.category==='unchanged'&&
+      check.sourceFieldsComplete===true&&!check.identityConflict&&Number.isSafeInteger(entry.vehicleId)&&entry.vehicleId>0?
+      entry.vehicleId:null)
+  }
+  const uploads=[]
+  let deferred=0
+  for(const [i,file] of manifest.files.entries()){
+    const entry=preview.photoPreview.entries[i]
+    if(entry.row!==i+1||entry.stockCode!==file.stockCode||!['new','already_present'].includes(entry.category))
+      throw new Error('Manifesto não corresponde à prévia.')
+    if(entry.category==='already_present')continue
+    const vehicleId=targets.get(file.stockCode)
+    if(!vehicleId){deferred++;continue}
+    uploads.push({file,vehicleId})
+  }
+  return {uploads,deferred}
+}
