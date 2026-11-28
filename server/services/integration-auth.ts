@@ -9,6 +9,8 @@ export const integrationReadScopes = [
   'accounts:read',
   'vehicles:create',
   'stock:apply',
+  'stock:update',
+  'stock:sell',
   'photos:write',
   'reports:read',
 ] as const
