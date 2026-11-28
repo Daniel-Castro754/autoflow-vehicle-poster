@@ -1,5 +1,6 @@
 import { handleIntegrationMonthlyReport } from './integration-reports.ts'
 import { handleIntegrationPhotoUpload } from './integration-photos.ts'
+import { previewStockSync, StockSyncInputError } from '../services/stock-sync-preview.ts'
 import { applyVehicleDefaults, validateVehicleBody } from '../services/vehicle-input.ts'
 import {
   findVehicleIdentifierConflict,
@@ -80,6 +81,28 @@ export async function handleIntegrationRoute(
   }
   if (handleIntegrationMonthlyReport(req, res, url, auth, dependencies)) return true
   if (await handleIntegrationPhotoUpload(req, res, url, auth, dependencies)) return true
+  if (url.pathname === '/api/integration/v1/stock/preview' && req.method === 'POST') {
+    if (!requireScope(db, req, res, send, auth, 'vehicles:read')) return true
+    const input = await dependencies.jsonBody(req, 1024 * 1024)
+    // The body may arrive after a credential is revoked. Revalidate scope
+    // and organization before reading the inventory.
+    const current = readIntegrationAuth(db, req)
+    if (!current || current.credentialId !== auth.credentialId || current.organizationId !== auth.organizationId) {
+      send(res, 401, { error: 'Credencial de integração inválida, expirada ou revogada.' })
+      return true
+    }
+    if (!requireScope(db, req, res, send, current, 'vehicles:read')) return true
+    try {
+      const preview = previewStockSync(db, current.organizationId, input)
+      audit(db, current, req, 'stock:preview', 'allowed')
+      send(res, 200, preview)
+    } catch (error) {
+      if (!(error instanceof StockSyncInputError)) throw error
+      audit(db, current, req, 'stock:preview', 'error')
+      send(res, 400, { error: error.message })
+    }
+    return true
+  }
   if (url.pathname === '/api/integration/v1/vehicles' && req.method === 'POST') {
     if (!requireScope(db, req, res, send, auth, 'vehicles:create')) return true
     const input = await dependencies.jsonBody(req)
