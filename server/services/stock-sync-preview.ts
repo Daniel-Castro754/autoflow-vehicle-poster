@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { normalizeInventoryIdentifier, validateInventoryIdentifiers } from './vehicle-import.ts'
 import { vehicleOptions, validateVehicleBody } from './vehicle-input.ts'
@@ -7,7 +8,7 @@ const detailFields=['vehicleType','location','transmission','fuelType','bodyType
 type DetailField=typeof detailFields[number]
 type CommercialState='available'|'sold'
 type SourceRow = { commercialState?:CommercialState; stockCode:string; vin?:string; year:number; make:string; model:string; trim?:string; price:number; km:number } & Partial<Record<DetailField,string>>
-type LocalRow = SourceRow & { id:number; status:string; soldAt:string|null; protectedWork:number; photoCount:number }
+type LocalRow = SourceRow & { id:number; status:string; soldAt:string|null; protectedWork:number; photoCount:number; updatedAt:string; publicationHistory:number }
 type Category = 'new'|'changed'|'unchanged'|'conflict'
 type Entry = {stockCode:string; category:Category; vehicleId?:number; changedFields?:string[]; reason?:string}
 const fields=['year','make','model','trim','price','km',...detailFields] as const
@@ -68,7 +69,7 @@ function index<T>(rows:T[],key:(row:T)=>string){
 
 // This is a submitted snapshot, not proof of Google access or completeness.
 // Read-only, no status transitions, downloads, inserts, updates or scheduling.
-export function previewStockSync(db:DatabaseSync,org:number,input:unknown){
+export function previewStockSync(db:DatabaseSync,org:number,input:unknown,reviewedAt=Date.now()){
   const v=object(input)
   if(Object.keys(v).some(k=>!['version','source','sourceState','rows','photos'].includes(k))||v.version!==1||
     typeof v.source!=='string'||!['sheets','activepieces','manual'].includes(v.source)||
@@ -77,7 +78,10 @@ export function previewStockSync(db:DatabaseSync,org:number,input:unknown){
   const rows=v.rows.map(parseRow)
   if(v.photos!==undefined&&(!Array.isArray(v.photos)||v.photos.length>2000||(v.sourceState==='failed'&&v.photos.length)))return fail('Manifesto de fotos inválido.')
   const photos=Array.isArray(v.photos)?v.photos.map(parsePhoto):undefined
-  const local=db.prepare(`SELECT v.id,v.stock_code stockCode,v.vin,v.year,v.make,v.model,v.trim,v.price,v.km,v.status,v.sold_at soldAt,
+  const local=db.prepare(`SELECT v.id,v.stock_code stockCode,v.vin,v.year,v.make,v.model,v.trim,v.price,v.km,v.status,v.sold_at soldAt,v.updated_at updatedAt,
+    (EXISTS(SELECT 1 FROM publication_jobs j WHERE j.organization_id=v.organization_id AND j.vehicle_id=v.id)
+    OR EXISTS(SELECT 1 FROM publication_listing_ledger l WHERE l.organization_id=v.organization_id AND l.vehicle_id=v.id)
+    OR EXISTS(SELECT 1 FROM published_ads a WHERE a.organization_id=v.organization_id AND a.vehicle_id=v.id)) publicationHistory,
     v.vehicle_type vehicleType,v.location,v.transmission,v.fuel_type fuelType,v.body_type bodyType,
     v.exterior_color exteriorColor,v.interior_color interiorColor,v.vehicle_condition condition,v.description,
     (SELECT COUNT(*) FROM vehicle_images i WHERE i.organization_id=v.organization_id AND i.vehicle_id=v.id) photoCount,
@@ -121,7 +125,8 @@ export function previewStockSync(db:DatabaseSync,org:number,input:unknown){
   const photoPreview=photos===undefined?undefined:planPhotos(db,org,photos,entries,local)
   const validation=validateSourceDetails(rows,entries,local,photoPreview)
   const commercialReview=reviewCommercialState(rows,entries,local)
-  return {version:1,source:v.source,sourceState:v.sourceState,readOnly:true,sourceRows:rows.length,counts,entries,photoPreview,validation,commercialReview,
+  const reviewedActions=v.sourceState==='complete'?planReviewedActions(org,v.source,rows,entries,local,validation,reviewedAt):[]
+  return {version:1,source:v.source,sourceState:v.sourceState,readOnly:true,sourceRows:rows.length,counts,entries,photoPreview,validation,commercialReview,reviewedActions,
     absence:{comparable:absenceComparable,count:absenceComparable?notSeen.length:null,exampleVehicleIds:notSeen.slice(0,30).map(row=>row.id)},
     note:'Prévia dos campos fornecidos; não comprova a origem ou completude declarada. Ausência não significa venda, exclusão ou autorização para alterar o estoque. Nenhuma alteração foi executada.'}
 }
@@ -255,4 +260,53 @@ export function applyStockDrafts(db:DatabaseSync,org:number,actor:number|null,in
   }
   return {applied:true,created,skipped,requiresReview:true,status:'Rascunho',
     note:'Somente novos rascunhos; fotos, alterações existentes, vendas e promoção para Pronto exigem fluxo separado. Nenhum trabalho de publicação criado.'}
+}
+
+const reviewLifetime=5*60*1000
+type ReviewedAction='update_price_km'|'record_sale'
+function planReviewedActions(org:number,source:string,rows:SourceRow[],entries:Entry[],local:LocalRow[],validation:ReturnType<typeof validateSourceDetails>,reviewedAt:number){
+  const localById=new Map(local.map(v=>[v.id,v]))
+  return rows.flatMap((row,i)=>{
+    const entry=entries[i]
+    const current=entry.vehicleId?localById.get(entry.vehicleId):undefined
+    if(!current||current.soldAt||current.publicationHistory||current.protectedWork||
+      !['Rascunho','Pronto'].includes(current.status)||!row.vin||
+      !/^[A-HJ-NPR-Z0-9]{17}$/.test(row.vin)||row.vin!==normalizeInventoryIdentifier(current.vin)||
+      row.year!==current.year||row.make!==current.make||row.model!==current.model||
+      validation.items[i].photoConflicts)return []
+    let action:ReviewedAction
+    if(row.commercialState==='sold'&&entry.reason==='source_sale_requires_review')action='record_sale'
+    else if(row.commercialState==='available'&&current.status==='Rascunho'&&entry.category==='changed'&&
+      validation.items[i].sourceFieldsComplete&&entry.changedFields?.length&&
+      entry.changedFields.every(field=>field==='price'||field==='km')&&
+      Number.isSafeInteger(row.price)&&Number.isSafeInteger(row.km)&&row.km>=current.km)action='update_price_km'
+    else return []
+    // A comparison digest, not a credential or proof of human approval.
+    const digest=createHash('sha256').update(JSON.stringify([org,source,reviewedAt,action,row,current])).digest('hex')
+    return [{action,vehicleId:current.id,stockCode:row.stockCode,reviewedAt,expiresAt:reviewedAt+reviewLifetime,digest,
+      before:action==='record_sale'?{status:current.status}:{price:current.price,km:current.km},
+      after:action==='record_sale'?{status:'Vendido'}:{price:row.price,km:row.km}}]
+  })
+}
+
+// Caller must hold BEGIN IMMEDIATE and verify the distinct action scope.
+// Only one explicitly confirmed, still identical candidate is applied.
+export function applyReviewedStockAction(db:DatabaseSync,org:number,input:unknown,now=Date.now()){
+  const body=object(input)
+  if(Object.keys(body).some(k=>!['confirm','action','vehicleId','reviewedAt','digest','snapshot'].includes(k))||
+    body.confirm!=='apply_reviewed_stock_action'||!['update_price_km','record_sale'].includes(String(body.action))||
+    typeof body.vehicleId!=='number'||!Number.isSafeInteger(body.vehicleId)||body.vehicleId<1||
+    typeof body.reviewedAt!=='number'||!Number.isSafeInteger(body.reviewedAt)||
+    typeof body.digest!=='string'||!/^[a-f0-9]{64}$/.test(body.digest))return fail('Confirmação individual ou referência de revisão inválida.')
+  if(body.reviewedAt>now||now-body.reviewedAt>=reviewLifetime)return {applied:false,reason:'review_expired'}
+  const preview=previewStockSync(db,org,body.snapshot,body.reviewedAt)
+  const candidate=preview.reviewedActions.find(a=>a.vehicleId===body.vehicleId&&a.action===body.action&&a.digest===body.digest)
+  if(!candidate)return {applied:false,reason:'review_changed_or_not_eligible'}
+  const result=candidate.action==='record_sale'?
+    db.prepare("UPDATE vehicles SET status='Vendido',sold_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND sold_at IS NULL AND status IN ('Rascunho','Pronto')").run(candidate.vehicleId,org):
+    db.prepare("UPDATE vehicles SET price=?,km=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND sold_at IS NULL AND status='Rascunho'").run(
+      (candidate.after as {price:number;km:number}).price,(candidate.after as {price:number;km:number}).km,candidate.vehicleId,org)
+  if(result.changes!==1)throw new Error('Estado do veículo mudou durante a aplicação.')
+  return {applied:true,action:candidate.action,vehicleId:candidate.vehicleId,before:candidate.before,after:candidate.after,
+    note:'Operação local individual. Nenhuma publicação, galeria ou anúncio externo foi alterado.'}
 }

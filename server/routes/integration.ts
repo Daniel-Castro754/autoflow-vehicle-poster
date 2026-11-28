@@ -1,6 +1,6 @@
 import { handleIntegrationMonthlyReport } from './integration-reports.ts'
 import { handleIntegrationPhotoUpload } from './integration-photos.ts'
-import { applyStockDrafts, previewStockSync, StockSyncInputError } from '../services/stock-sync-preview.ts'
+import { applyReviewedStockAction, applyStockDrafts, previewStockSync, StockSyncInputError } from '../services/stock-sync-preview.ts'
 import { applyVehicleDefaults, validateVehicleBody } from '../services/vehicle-input.ts'
 import {
   findVehicleIdentifierConflict,
@@ -101,6 +101,41 @@ export async function handleIntegrationRoute(
       audit(db, current, req, 'stock:preview', 'error')
       send(res, 400, { error: error.message })
     }
+    return true
+  }
+  if(url.pathname==='/api/integration/v1/stock/reviewed-action'&&req.method==='POST'){
+    if(!requireScope(db,req,res,send,auth,'vehicles:read'))return true
+    const input=await dependencies.jsonBody(req,1024*1024)
+    const body=input&&typeof input==='object'&&!Array.isArray(input)?input as Record<string,unknown>:{}
+    const scope=body.action==='record_sale'?'stock:sell':body.action==='update_price_km'?'stock:update':null
+    if(!scope){send(res,400,{error:'Ação de estoque inválida.'});return true}
+    db.exec('BEGIN IMMEDIATE')
+    let response:{status:number;data:unknown}
+    try{
+      const current=readIntegrationAuth(db,req)
+      if(!current||current.credentialId!==auth.credentialId||current.organizationId!==auth.organizationId)
+        response={status:401,data:{error:'Credencial de integração inválida, expirada ou revogada.'}}
+      else if(!integrationHasScope(current,'vehicles:read')||!integrationHasScope(current,scope)){
+        audit(db,current,req,scope,'denied')
+        response={status:403,data:{error:'Escopo específico de operação obrigatório.'}}
+      }else{
+        const result=applyReviewedStockAction(db,current.organizationId,input)
+        if(result.applied){
+          db.prepare(`INSERT INTO integration_audit_events
+            (organization_id,credential_id,actor_user_id,action,resource_type,resource_id,outcome,details)
+            VALUES (?,?,?,?,'vehicle',?,'allowed',?)`).run(current.organizationId,current.credentialId,current.createdBy,scope,
+              result.vehicleId!,JSON.stringify({before:result.before,after:result.after}))
+        }else audit(db,current,req,scope,'denied')
+        response={status:result.applied?200:409,data:result}
+      }
+      db.exec('COMMIT')
+    }catch(error){
+      db.exec('ROLLBACK')
+      if(!(error instanceof StockSyncInputError))throw error
+      audit(db,auth,req,scope,'error')
+      response={status:400,data:{error:error.message}}
+    }
+    send(res,response.status,response.data)
     return true
   }
   if (url.pathname === '/api/integration/v1/stock/apply-drafts' && req.method === 'POST') {
@@ -206,7 +241,8 @@ export async function handleIntegrationRoute(
       apiVersion: 'v1',
       integration: auth.name,
       readOnly:
-        !integrationHasScope(auth, 'vehicles:create') && !integrationHasScope(auth, 'photos:write'),
+        !integrationHasScope(auth, 'vehicles:create') && !integrationHasScope(auth, 'photos:write') &&
+        !integrationHasScope(auth,'stock:apply')&&!integrationHasScope(auth,'stock:update')&&!integrationHasScope(auth,'stock:sell'),
       scopes: [...auth.scopes].sort(),
     })
     return true
