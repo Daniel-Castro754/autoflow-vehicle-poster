@@ -31,11 +31,21 @@ const eventMap: Record<string,{category:Category;title:string}> = {
   fill_result_conflict:{category:'review',title:'⚠️ Conflito de resultado'},
   auto_retry_scheduled:{category:'recovery',title:'🔄 Nova tentativa agendada'},
   stalled_recovered:{category:'recovery',title:'🔄 Execução recuperada'},
+  stalled_exhausted:{category:'recovery',title:'🛑 Limite de recuperação atingido'},
+  stalled_publish_ambiguous:{category:'review',title:'⚠️ Execução interrompida — revisão obrigatória'},
   reassigned:{category:'recovery',title:'🔄 Perfil alterado'},
 }
 const knownFields = ['Tipo de veículo','Localização','Ano','Fabricante','Modelo','Quilometragem','Preço','Câmbio','Combustível','Carroceria','Condição do veículo','Cor externa','Cor interna','Descrição','Fotos']
 function readObject(value:string):Record<string,unknown>{
   try { const o=JSON.parse(value); return o && typeof o==='object' && !Array.isArray(o) ? o : {} } catch { return {} }
+}
+// Only validated numeric event metadata and fixed explanations are included.
+function recoveryBudgetLines(details:Record<string,unknown>){
+  const used=details.retryCount, limit=details.maxRetries
+  if(typeof used!=='number'||!Number.isSafeInteger(used)||used<0||used>1000000||
+     typeof limit!=='number'||!Number.isSafeInteger(limit)||limit<0||limit>1000000)return []
+  return ['Recuperações utilizadas: '+used+'/'+limit,
+    'Restantes: '+Math.max(0,limit-used)]
 }
 export function telegramMonitorSettings(db:DatabaseSync,org:number){
   const row=db.prepare('SELECT categories FROM telegram_monitor_settings WHERE organization_id=?').get(org) as {categories:string}|undefined
@@ -122,6 +132,14 @@ function collect(db:DatabaseSync,org:number,now:number){
         const text=[info.title,clean([e.year,e.make,e.model].join(' ')),'Trabalho #'+e.jobId,'Perfil atual: '+clean(e.accountLabel||'Não definido'), 'Evento: '+clock(stamp)]
         if(info.category==='schedule' && schedule!==null)text.push('Agendado: '+clock(schedule))
         if(info.category==='review')text.push(missing.length?'Campos a revisar: '+missing.join(', '):'Confira o resultado no painel antes de qualquer nova tentativa.')
+        if(e.type==='stalled_recovered'||e.type==='stalled_exhausted'||e.type==='auto_retry_scheduled'){
+          text.push(...recoveryBudgetLines(details))
+          if(e.type==='stalled_exhausted')text.push('Recuperação automática encerrada. Revise o trabalho no painel.')
+          else if(e.type==='stalled_recovered')text.push('Trabalho devolvido à fila; publicação ainda não confirmada.')
+        }
+        if(e.type==='stalled_publish_ambiguous')text.push(details.reason==='open_result_conflict'
+          ?'Conflito de resultado em aberto. Resolva-o no painel antes de repetir.'
+          :'A publicação pode já existir. Verifique Seus classificados antes de repetir.')
         if(info.category==='published' && url)text.push(url)
         claim(db,org,{key:'event:'+e.id,text:text.join('\n')},now,items)
       }
