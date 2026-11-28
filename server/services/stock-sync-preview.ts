@@ -21,7 +21,7 @@ function text(value:unknown,max:number,required=true):string{
 }
 function identifier(value:unknown,required=true){
   const raw=text(value,128,required)
-  if(raw.replace(/\s+/g,'').length>64)return fail('Identificador de estoque/chassi excede o limite.')
+  if(raw.toUpperCase().replace(/\s+/g,'').length>64)return fail('Identificador de estoque/chassi excede o limite.')
   return normalizeInventoryIdentifier(raw)
 }
 function numeric(value:unknown,min:number,max:number,integer=false):number{
@@ -54,8 +54,8 @@ function index<T>(rows:T[],key:(row:T)=>string){
 export function previewStockSync(db:DatabaseSync,org:number,input:unknown){
   const v=object(input)
   if(Object.keys(v).some(k=>!['version','source','sourceState','rows'].includes(k))||v.version!==1||
-    !['sheets','activepieces','manual'].includes(String(v.source))||typeof v.source!=='string'||
-    !['complete','partial','failed'].includes(String(v.sourceState))||typeof v.sourceState!=='string'||
+    typeof v.source!=='string'||!['sheets','activepieces','manual'].includes(v.source)||
+    typeof v.sourceState!=='string'||!['complete','partial','failed'].includes(v.sourceState)||
     !Array.isArray(v.rows)||v.rows.length>maxRows||(v.sourceState==='failed'&&v.rows.length))return fail('Envelope de sincronização inválido.')
   const rows=v.rows.map(parseRow)
   const local=db.prepare(`SELECT v.id,v.stock_code stockCode,v.vin,v.year,v.make,v.model,v.trim,v.price,v.km,v.status,v.sold_at soldAt,
