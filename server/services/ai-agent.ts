@@ -13,7 +13,7 @@ import { calculateOptimalSchedule } from './smart-scheduler.ts'
 import { profileCapacity, profileLimits, lastProfileActivityAt } from './profile-capacity.ts'
 import { organizationScheduleHistory } from './schedule-history.ts'
 import { consumerRoutingEligible, findBestAccountForVehicle } from '../modules/accounts.ts'
-import { consumerState } from './execution-diagnostics.ts'
+import { consumerOperationalBlock, consumerState } from './execution-diagnostics.ts'
 import { redistributeOfflinePendingJobs } from './pending-job-reassignment.ts'
 import { logger } from '../lib/logger.ts'
 import { coordinateAutopilot, skippedAutopilot } from './autopilot-coordinator.ts'
@@ -492,7 +492,9 @@ async function planAutopilotJobs(
     .get(organizationId) as { dailyLimit?: number; executionIntervalMinutes?: number } | undefined
   const dailyLimit = Math.max(1, Number(settings?.dailyLimit) || 10)
   const routingMode = automatic ? 'autopilot_recurring' : 'autopilot_manual'
-  const eligibleConsumer = (id: number) => consumerRoutingEligible(consumerState(db, organizationId, id).state, routingMode)
+  const eligibleConsumer = (id: number) =>
+    consumerRoutingEligible(consumerState(db, organizationId, id).state, routingMode) &&
+    !consumerOperationalBlock(db, organizationId, id)
   const accountCapacity = db
     .prepare(
       `SELECT a.id,MAX(0,MIN(COALESCE(a.daily_limit_override,?),?)-COALESCE(SUM(CASE WHEN autoflow_day(j.created_at)=autoflow_day(CURRENT_TIMESTAMP) AND j.status!='canceled' THEN 1 ELSE 0 END),0)) remaining

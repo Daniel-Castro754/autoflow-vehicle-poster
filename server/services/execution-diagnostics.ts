@@ -60,6 +60,20 @@ export function latestConsumerDecision(db: object, org: number, accountId: numbe
     : null
 }
 
+// Presence means connectivity to AutoFlow, not operational readiness. A
+// current explicit failure is a reason to defer automatic planning to this
+// profile, without modifying its pause state or transferring existing work.
+// The local consumer keeps checking and can report a normal decision again.
+const consumerOperationalBlocks = new Set([
+  'consumer_paused', 'session_missing', 'api_unauthorized', 'queue_http_error',
+  'facebook_not_ready', 'dispatch_failed', 'consumer_check_failed',
+])
+export function consumerOperationalBlock(db: object, org: number, accountId: number, now = Date.now()) {
+  const decision = consumerDecisions.get(db)?.get(org + ':' + accountId)
+  const code = decision && now - decision.receivedAt <= 300000 ? decision.diagnostic.code : null
+  return typeof code === 'string' && consumerOperationalBlocks.has(code) ? code : null
+}
+
 // Last observed consumer state is advisory, scoped to this server/database.
 // A restart or stale heartbeat means unknown, never permission to publish.
 const consumerStates = new WeakMap<object, Map<string, { enabled: boolean; reportedAt: number }>>()

@@ -8,7 +8,8 @@ import { applyMigrations } from '../server/database/migrations.ts'
 import { coordinateAutopilot, skippedAutopilot } from '../server/services/autopilot-coordinator.ts'
 import { createAutonomousScheduler } from '../server/services/autonomous-scheduler.ts'
 import { runAutopilotPipeline } from '../server/services/ai-agent.ts'
-import { recordConsumerState } from '../server/services/execution-diagnostics.ts'
+import { recordConsumerDecision, recordConsumerState } from '../server/services/execution-diagnostics.ts'
+import { autopilotDiagnostics } from '../server/services/autopilot-diagnostics.ts'
 import {
   calculateListingHash,
   listingSnapshotForVehicle,
@@ -290,6 +291,35 @@ try {
   db.exec('UPDATE autopilot_state SET next_run_at=NULL WHERE organization_id=11')
   recordConsumerState(db, 11, 11, true)
   assert.equal((await runAutopilotPipeline(db, 11, null, { automatic: true })).jobsCreated, 1)
+
+  // Fresh heartbeats alone do not establish operational readiness. Defer only
+  // the failing profile, keep healthy scheduling, and restore eligibility
+  // when the consumer reports a normal decision (without clearing a pause).
+  seedOrg(12)
+  db.prepare(
+    "INSERT INTO social_accounts(id,organization_id,user_id,label,status,last_seen_at) VALUES(120,12,12,'Healthy','connected',CURRENT_TIMESTAMP)",
+  ).run()
+  recordConsumerState(db, 12, 120, true)
+  vehicle(1200, 12)
+  recordConsumerDecision(db, 12, 12, { code: 'queue_http_error', httpStatus: 503, at: Date.now() })
+  let diagnostic = autopilotDiagnostics(db, 12, true)
+  assert.equal(diagnostic.profiles.find(p => p.id === 12).canSchedule, false)
+  assert(diagnostic.profiles.find(p => p.id === 12).reasons.some(r => r.code === 'consumer_operational_block'))
+  assert.equal(diagnostic.profiles.find(p => p.id === 120).canSchedule, true)
+  const isolated = await runAutopilotPipeline(db, 12, null, { automatic: true })
+  assert.equal(isolated.jobsCreated, 1)
+  assert.equal(isolated.assignments[0].accountId, 120)
+  assert.equal(db.prepare('SELECT automation_paused FROM social_accounts WHERE id=12').get().automation_paused, 0)
+  db.exec('UPDATE autopilot_state SET next_run_at=NULL WHERE organization_id=12')
+  recordConsumerDecision(db, 12, 12, { code: 'queue_empty', at: Date.now() })
+  diagnostic = autopilotDiagnostics(db, 12, true)
+  assert.equal(diagnostic.profiles.find(p => p.id === 12).canSchedule, true)
+  vehicle(1201, 12)
+  recordConsumerState(db, 12, 120, false)
+  const recoveredProfile = await runAutopilotPipeline(db, 12, null, { automatic: true })
+  assert.equal(recoveredProfile.jobsCreated, 1)
+  assert.equal(recoveredProfile.assignments[0].accountId, 12)
+  console.log('✓ Operational isolation: healthy profile continues, recovered profile becomes eligible without overriding pauses.')
 
   seedOrg(9)
   vehicle(90, 9, '')

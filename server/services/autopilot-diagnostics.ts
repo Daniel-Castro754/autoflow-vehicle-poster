@@ -3,7 +3,7 @@ import { consumerRoutingEligible, findBestAccountForVehicle } from '../modules/a
 import { publicationDuplicateRisk, publicationReadinessIssues } from './publication-policy.ts'
 import { profileCapacity } from './profile-capacity.ts'
 import { publicationReviewKind } from './publication-evidence.ts'
-import { consumerState } from './execution-diagnostics.ts'
+import { consumerOperationalBlock, consumerState } from './execution-diagnostics.ts'
 
 type Reason = { code: string; message: string }
 type Job = { id: number; vehicleId: number; status: string; accountLabel: string; visible: number; paused: number; publishAttemptAt?: string; fillReport?: string }
@@ -31,6 +31,10 @@ export function autopilotDiagnostics(db: DatabaseSync, org: number, automatic = 
     if (!consumerRoutingEligible(consumer.state, routingMode)) reasons.push({
       code: consumer.state === 'paused' ? 'consumer_paused' : 'consumer_unknown',
       message: consumer.state === 'paused' ? 'Consumo pausado na extensão.' : 'Aguardando confirmação recente de consumo ativo.',
+    })
+    const operationalBlock = consumerOperationalBlock(db, org, a.id)
+    if (operationalBlock) reasons.push({
+      code: 'consumer_operational_block', message: 'Último diagnóstico do consumidor indica falha operacional: ' + operationalBlock,
     })
     if (c.queuedToday >= c.dailyLimit) reasons.push({ code: 'queue_daily_limit', message: 'Limite diário de agendamentos atingido.' })
     return { id: a.id, label: a.label, status: a.status, queuedToday: c.queuedToday, dailyLimit: c.dailyLimit,
