@@ -769,12 +769,16 @@ try {
       body: JSON.stringify({ status: 'completed' }),
     }),
   )
-  await expectStatus(409, () =>
-    call('/publications', adminToken, {
-      method: 'POST',
-      body: JSON.stringify({ vehicleId: 1, accountId: second.id }),
-    }),
+  // The current manual-queue contract is tested separately in
+  // publication-variant-route.mjs. Keep this fixture to a single job:
+  // later steps verify profile isolation, recovery and stock deletion.
+  const initialVehicleJobs = (await call('/publications', adminToken)).jobs.filter(
+    (item) => item.vehicleId === 1,
   )
+  assert.equal(initialVehicleJobs.length, 1)
+  assert.equal(initialVehicleJobs[0].id, publication.id)
+  assert.equal(initialVehicleJobs[0].accountId, first.id)
+  assert.equal(initialVehicleJobs[0].status, 'pending')
   const priorityVehicle = await call('/vehicles', adminToken, {
     method: 'POST',
     body: JSON.stringify({
