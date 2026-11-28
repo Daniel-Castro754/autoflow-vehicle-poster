@@ -82,7 +82,7 @@ await naturalSweep()
 assert.equal(messages.length,3)
 const keyboard=messages.at(-1).options.menu.keyboard
 assert.equal(messages.at(-1).options.menu.messageId,42)
-assert.equal(keyboard.flat().length,9)
+assert.equal(keyboard.flat().length,10)
 assert(keyboard.flat().every(button=>Buffer.byteLength(button.callback_data)<=64&&!button.text.startsWith('/')))
 const data=action=>keyboard.flat().find(button=>button.callback_data.startsWith('ac1:'+action+':')).callback_data
 messages.pop()
@@ -94,7 +94,8 @@ for(const changed of [{userId:'101'},{organizationId:2},{chatId:'-999'},{revisio
 assert.equal(verifyCommanderMenu(data('stock'),scope,false,now),null)
 assert.equal(verifyCommanderMenu(data('status'),scope,true,now+300001),null)
 assert.equal(verifyCommanderMenu(data('status').replace(':status:',':cancel:'),scope,true,now),null)
-assert.equal(buildCommanderMenu(scope,false,now).flat().length,3)
+assert.equal(buildCommanderMenu(scope,false,now).flat().length,4)
+assert.equal(verifyCommanderMenu(data('supervisao'),scope,false,now).action,'supervisao')
 const menuDate=Math.floor(now/1000)
 const click=(id,action,user=100,chat=-123,bot=123,extra={})=>({update_id:id,callback_query:{id:'click-'+id,data:data(action),from:{id:user,is_bot:false},message:{message_id:43,date:menuDate,from:{id:bot,is_bot:true},chat:{id:chat,type:'group'}},...extra}})
 updates=[click(26,'status',101),click(27,'status',100,-999),click(28,'status',100,-123,999),click(29,'status',100,-123,123,{data:'cancel:1'}),click(30,'status')]
@@ -146,6 +147,33 @@ try{
 }finally{globalThis.fetch=originalFetch}
 assert.equal(settings().memoryEnabled,false)
 assert.throws(()=>saveTelegramCommanderSettings(db,1,{enabled:true,userIds:['100'],acknowledgeGroup:true,aiEnabled:true,acknowledgeDeepseek:true,memoryEnabled:true},credentials,now))
+// Local supervision remains available without DeepSeek and never mutates jobs.
+save(['100'])
+db.exec("UPDATE vehicles SET status='Pronto',description='private-supervision-secret' WHERE id=1; INSERT INTO publication_jobs(id,organization_id,vehicle_id,social_account_id,status) VALUES(1,1,1,1,'awaiting_confirmation'),(2,2,2,2,'error')")
+const supervisorBefore=messages.length
+const jobsBefore=db.prepare('SELECT id,status,paused,attempt_count FROM publication_jobs ORDER BY id').all()
+updates=[update(35,'/supervisao',101),update(36,'/supervisao',100,-999),update(37,'/supervisao@OtherBot'),update(38,'/supervisao@AutoFlowVeiculosBot')]
+await naturalSweep()
+assert.equal(messages.length,supervisorBefore+1)
+const report=messages.at(-1).text
+assert(report.includes('supervisão operacional')&&report.includes('Publicação incerta')&&report.includes('trabalho(s) (#1)'))
+assert(report.includes('Orientação:')&&report.includes('Nenhuma ação foi executada.'))
+assert(!report.includes('private-supervision-secret')&&!report.includes('Foreign')&&!report.includes('(#2)'))
+assert.deepEqual(db.prepare('SELECT id,status,paused,attempt_count FROM publication_jobs ORDER BY id').all(),jobsBefore)
+assert.equal(natural.length,3)
+messages.pop()
+updates=[update(39,'/menu',100,-123,Math.floor(now/1000),{message_id:45})]
+await naturalSweep()
+const localKeyboard=messages.at(-1).options.menu.keyboard
+const supervisorButton=localKeyboard.flat().find(button=>button.callback_data.startsWith('ac1:supervisao:'))
+assert(supervisorButton)
+messages.pop()
+updates=[{update_id:40,callback_query:{id:'supervisor-click',data:supervisorButton.callback_data,from:{id:100,is_bot:false},message:{message_id:46,date:Math.floor(now/1000),from:{id:123,is_bot:true},chat:{id:-123,type:'group'}}}}]
+await naturalSweep()
+assert.equal(messages.length,supervisorBefore+1)
+assert(messages.at(-1).text.includes('supervisão operacional'))
+assert.equal(natural.length,3)
+messages.pop()
 dest={...c,telegramChatId:'-456'}
 updates=[update(11,'/status',100,-456)]
 await sweep()
