@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { consumerState } from '../services/execution-diagnostics.ts'
+import { consumerOperationalBlock, consumerState } from '../services/execution-diagnostics.ts'
 
 // Shared account selection, independent of Facebook extension transport.
 
@@ -81,6 +81,7 @@ export function findBestAccountForVehicle(
     if (acc.busy) continue
     const consumer = consumerState(db, organizationId, acc.id).state
     if (!consumerRoutingEligible(consumer, mode)) continue
+    if (mode !== 'default' && consumerOperationalBlock(db, organizationId, acc.id)) continue
 
     // Calcula score: menor volume hoje e maior recência ganham prioridade
     const capacityRemaining = limit - acc.todayCount
