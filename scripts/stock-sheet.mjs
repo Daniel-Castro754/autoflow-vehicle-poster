@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises'
+import { pathToFileURL } from 'node:url'
 import { JWT } from 'google-auth-library'
 import { sheetStockSnapshot, stockSheetUrl } from './stock-sheet-lib.mjs'
 import { readDriveManifest, readDrivePhoto, planDriveUploads } from './stock-drive-lib.mjs'
@@ -22,8 +23,7 @@ async function boundedJson(response,limit){
   }finally{await reader.cancel().catch(()=>{})}
 }
 
-async function main(){
-  const args=process.argv.slice(2)
+export async function runStockSheet(args=[]){
   if(args.some(a=>!['--apply-drafts','--upload-photos'].includes(a))||args.length>1)
     throw new Error('Use sem argumentos para prévia, --apply-drafts para criar rascunhos ou --upload-photos para completar galerias de rascunhos.')
   const apply=args.includes('--apply-drafts')
@@ -90,18 +90,21 @@ async function main(){
         throw new Error('Upload interrompido. Confira o painel e gere nova prévia antes de repetir.')
       }
     }
-    console.log(JSON.stringify({mode:'UPLOAD_PHOTOS',uploaded,alreadyPresent,deferred:plan.deferred,requiresReview:true},null,2))
+    return {mode:'UPLOAD_PHOTOS',uploaded,alreadyPresent,deferred:plan.deferred,requiresReview:true}
   }else if(apply){
     if(result.applied!==true||!Array.isArray(result.created)||!Array.isArray(result.skipped))
       throw new Error('Resultado da aplicação não confirmado.')
-    console.log(JSON.stringify({mode:'CREATE_DRAFTS',created:result.created.length,skipped:result.skipped.length,
-      requiresReview:true,note:'Confira os rascunhos no painel. Nenhum trabalho de publicação criado.'},null,2))
+    return {mode:'CREATE_DRAFTS',created:result.created.length,skipped:result.skipped.length,
+      requiresReview:true,note:'Confira os rascunhos no painel. Nenhum trabalho de publicação criado.'}
   }else{
     if(result.readOnly!==true||!result.counts)throw new Error('Resultado da prévia inválido.')
-    console.log(JSON.stringify({mode:'PREVIEW_ONLY',sourceRows:result.sourceRows,counts:result.counts,
+    return {mode:'PREVIEW_ONLY',sourceRows:result.sourceRows,counts:result.counts,
       validation:{complete:result.validation?.completeSourceFields,incomplete:result.validation?.incompleteSourceFields},
       explicitSaleSignals:result.commercialReview?.explicitSaleSignals,requiresReview:result.commercialReview?.requiresReview,
-      photos:result.photoPreview?.counts},null,2))
+      photos:result.photoPreview?.counts}
   }
 }
-main().catch(error=>{console.error('Estoque Sheets: '+error.message);process.exitCode=1})
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
+  runStockSheet(process.argv.slice(2)).then(result=>console.log(JSON.stringify(result,null,2)))
+    .catch(error=>{console.error('Estoque Sheets: '+error.message);process.exitCode=1})
+}
