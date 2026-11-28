@@ -2,6 +2,7 @@ import {
   publicationMayExist,
   ambiguousPublicationReport,
 } from '../services/publication-evidence.ts'
+import { openResultConflict } from '../services/result-conflicts.ts'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 
@@ -511,8 +512,10 @@ export async function handlePublicationReadRoute(
       return send(res, 409, {
         error: 'A extensao ainda esta trabalhando neste item. Aguarde o fim do bloqueio exclusivo.',
       })
+    if (openResultConflict(db, auth.organizationId, job.id))
+      return send(res, 409, { error: 'Trabalho com conflito de resultado; aguarde a revisão obrigatória.' })
     if (publicationMayExist(job)) {
-      db.exec('BEGIN')
+      db.exec('BEGIN IMMEDIATE')
       try {
         db.prepare(
           `UPDATE publication_jobs SET status='awaiting_confirmation',paused=1,extension_visible=0,
@@ -537,8 +540,12 @@ export async function handlePublicationReadRoute(
       return send(res, 200, { ok: true, status: 'awaiting_confirmation', ambiguous: true })
     }
     const exhausted = job.retryCount >= job.maxRetries
-    db.exec('BEGIN')
+    db.exec('BEGIN IMMEDIATE')
     try {
+      if (openResultConflict(db, auth.organizationId, job.id)) {
+        db.exec('ROLLBACK')
+        return send(res, 409, { error: 'Trabalho com conflito de resultado; revisão obrigatória.' })
+      }
       if (exhausted) {
         db.prepare(
           "UPDATE publication_jobs SET status='error',paused=0,extension_visible=1,error_code='Limite de recuperação automática esgotado.',last_lease_token=NULL,publish_attempt_at=NULL,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
