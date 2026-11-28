@@ -388,10 +388,11 @@ async function synchronizeAutonomousConsumption() {
       await chrome.storage.local.set({ autoRun: true, autoRunManaged: true })
       return true
     }
-  } else if (queue && current.autoRunManaged) {
-    // Don't continue automatic consumption after an administrator disables
-    // any part of the full-cycle opt-in.
-    await chrome.storage.local.set({ autoRun: false, autoRunManaged: false })
+  } else if (current.autoRunManaged) {
+    // Only an explicit opt-out changes the stored choice. An incomplete
+    // response is not an authorization to dispatch or a permanent pause.
+    if (queue?.automation?.autonomousMode === false)
+      await chrome.storage.local.set({ autoRun: false, autoRunManaged: false })
     return false
   }
   return Boolean(current.autoRun)
@@ -450,6 +451,24 @@ async function consumeQueue() {
     }
     if (!response.ok) throw new Error(`Falha ao consultar a fila: HTTP ${response.status}`)
     const queue = await response.json()
+    // The network request may have overlapped a profile change, manual pause,
+    // or an administrator disabling full-cycle automation. Recheck before
+    // opening a tab or reserving a job. Never treat missing mode as consent.
+    const refreshed = await chrome.storage.local.get([
+      'activeAccountId', 'autoRun', 'autoRunManaged', 'autoRunManuallyPaused',
+      'authNeeded', 'pendingJob',
+    ])
+    if (refreshed.activeAccountId !== state.activeAccountId || !refreshed.autoRun ||
+        refreshed.autoRunManuallyPaused || refreshed.authNeeded || refreshed.pendingJob) return
+    if (refreshed.autoRunManaged && queue?.automation?.autonomousMode !== true) {
+      if (queue?.automation?.autonomousMode === false) {
+        await chrome.storage.local.set({ autoRun: false, autoRunManaged: false })
+        await recordConsumerDecision(accountId, 'consumer_paused')
+      } else {
+        await recordConsumerDecision(accountId, 'consumer_check_failed')
+      }
+      return
+    }
     if (queue.nextScheduledAt) scheduleConsumer(queue.nextScheduledAt)
     if (queue.capacity?.blockedByDailyLimit) {
       await recordConsumerDecision(accountId, 'daily_limit')
