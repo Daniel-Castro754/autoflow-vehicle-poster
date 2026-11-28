@@ -107,6 +107,10 @@ async function runConsumer(queue, network = {}, settings = {}) {
   const fetch = async (url, options = {}) => {
     requests.push({ url: String(url), options })
     if (String(url).includes('/extension/queue')) {
+      const outcome = network.queueOutcomes?.shift()
+      if (outcome instanceof Error) throw outcome
+      if (outcome) return { ok: true, status: 200, json: async () => outcome }
+      network.onQueue?.(stored)
       if (network.queueOffline) throw new Error('offline')
       if (network.queueStatus && network.queueStatus !== 200) {
         return { ok: false, status: network.queueStatus, json: async () => ({ error: 'unavailable' }) }
@@ -369,6 +373,53 @@ async function runConsumer(queue, network = {}, settings = {}) {
   assert.equal(unavailable.stored.autoRun, true)
   assert.equal(unavailable.createdTabs.length, 0)
 }
+{
+  const queue = {
+    automation: { autonomousMode: false },
+    jobs: [{ jobId: 22, jobStatus: 'pending' }],
+  }
+  const network = { queueOffline: true }
+  const recovered = await runConsumer(queue, network, { autoRunManaged: true })
+  assert.equal(recovered.stored.autoRun, true)
+  assert.equal(recovered.stored.autoRunManaged, true)
+  network.queueOffline = false
+  // The synchronization GET fails but the consumer GET succeeds in the same pass.
+  network.queueOutcomes = [new Error('temporary outage'), queue]
+  recovered.listeners.alarm({ name: 'autoflow-heartbeat' })
+  for (let i = 0; i < 40; i++) await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(recovered.stored.autoRun, false)
+  assert.equal(recovered.stored.autoRunManaged, false)
+  assert.equal(recovered.createdTabs.length, 0)
+  assert.equal(recovered.requests.filter((r) => r.url.includes('/prepare')).length, 0)
+}
+{
+  const queue = { jobs: [{ jobId: 22, jobStatus: 'pending' }] }
+  const incomplete = await runConsumer(queue, {}, { autoRunManaged: true })
+  assert.equal(incomplete.stored.autoRun, true, 'Incomplete data cannot permanently pause the consumer')
+  assert.equal(incomplete.stored.autoRunManaged, true)
+  assert.equal(incomplete.createdTabs.length, 0, 'Missing authorization cannot dispatch')
+  queue.automation = { autonomousMode: true }
+  incomplete.listeners.alarm({ name: 'autoflow-heartbeat' })
+  for (let i = 0; i < 40; i++) await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(incomplete.createdTabs.length, 1, 'Explicit authorization permits normal recovery')
+  assert.equal(incomplete.requests.filter((r) => r.url.includes('/prepare')).length, 1)
+}
+{
+  const changed = await runConsumer(
+    { jobs: [{ jobId: 22, jobStatus: 'pending' }] },
+    { onQueue: (stored) => { stored.activeAccountId = 9 } },
+  )
+  assert.equal(changed.createdTabs.length, 0, 'Profile changed during queue read')
+  assert.equal(changed.requests.filter((r) => r.url.includes('/prepare')).length, 0)
+  const paused = await runConsumer(
+    { jobs: [{ jobId: 22, jobStatus: 'pending' }] },
+    { onQueue: (stored) => { stored.autoRun = false; stored.autoRunManuallyPaused = true } },
+  )
+  assert.equal(paused.createdTabs.length, 0, 'Manual pause during queue read')
+  assert.equal(paused.requests.filter((r) => r.url.includes('/prepare')).length, 0)
+}
+console.log('✓ Reconnection revalidates authorization, profile and manual pause before dispatch.')
+
 console.log('✓ Consumer recovery reports current decisions and preserves specific HTTP errors.')
 
 console.log('✓ Queue consumer ignores non-retryable errors and uncertain publications.')
