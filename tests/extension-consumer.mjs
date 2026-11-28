@@ -108,6 +108,9 @@ async function runConsumer(queue, network = {}, settings = {}) {
     requests.push({ url: String(url), options })
     if (String(url).includes('/extension/queue')) {
       if (network.queueOffline) throw new Error('offline')
+      if (network.queueStatus && network.queueStatus !== 200) {
+        return { ok: false, status: network.queueStatus, json: async () => ({ error: 'unavailable' }) }
+      }
       return { ok: true, status: 200, json: async () => queue }
     }
     if (String(url).includes('/extension/presence')) {
@@ -339,6 +342,35 @@ async function runConsumer(queue, network = {}, settings = {}) {
   assert.equal(empty.stored.consumerDiagnostics.at(-1).code, 'queue_empty')
   assert.equal(JSON.stringify(empty.stored.consumerDiagnostics).includes('extension-token'), false)
 }
+{
+  const network = { queueOffline: true }
+  const recovered = await runConsumer({ jobs: [] }, network)
+  assert.equal(recovered.stored.consumerDiagnostics.at(-1).code, 'consumer_check_failed')
+  network.queueOffline = false
+  recovered.listeners.alarm({ name: 'autoflow-heartbeat' })
+  for (let i = 0; i < 40; i++) await new Promise((resolve) => setImmediate(resolve))
+  const reports = () => recovered.requests
+    .filter((request) => request.url.includes('/extension/presence'))
+    .map((request) => JSON.parse(request.options.body))
+  assert.equal(reports().at(-1).diagnostic.code, 'queue_empty', 'Recovery reports its current decision in the same alarm')
+  assert.equal(recovered.stored.autoRun, true)
+  assert.equal(recovered.createdTabs.length, 0)
+  const before = reports().length
+  recovered.listeners.alarm({ name: 'autoflow-heartbeat' })
+  for (let i = 0; i < 40; i++) await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(reports().length, before + 1, 'Unchanged decisions need only the regular heartbeat')
+}
+{
+  const network = { queueStatus: 503 }
+  const unavailable = await runConsumer({ jobs: [] }, network)
+  const diagnostic = unavailable.stored.consumerDiagnostics.at(-1)
+  assert.equal(diagnostic.code, 'queue_http_error')
+  assert.equal(diagnostic.httpStatus, 503, 'Specific HTTP errors are not overwritten by a generic error')
+  assert.equal(unavailable.stored.autoRun, true)
+  assert.equal(unavailable.createdTabs.length, 0)
+}
+console.log('✓ Consumer recovery reports current decisions and preserves specific HTTP errors.')
+
 console.log('✓ Queue consumer ignores non-retryable errors and uncertain publications.')
 
 {
