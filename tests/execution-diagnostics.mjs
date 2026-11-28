@@ -14,7 +14,7 @@ assert.equal(sanitizeConsumerDiagnostic({ code: 'arbitrary text' }), null)
 console.log('Execution diagnostics: bounded codes, numeric metadata and sensitive field exclusion.')
 
 import { publicationReviewKind } from '../server/services/publication-evidence.ts'
-import { recordConsumerState, consumerState } from '../server/services/execution-diagnostics.ts'
+import { recordConsumerState, consumerState, recordConsumerDecision, consumerOperationalBlock } from '../server/services/execution-diagnostics.ts'
 assert.equal(publicationReviewKind({status:'awaiting_confirmation',fillReport:{published:false,publishAttempted:false,filledCount:15,totalCount:15}}),'manual_review')
 assert.equal(publicationReviewKind({status:'awaiting_confirmation',fillReport:{published:false,publishAttempted:false,filledCount:14,totalCount:15}}),'fill_incomplete')
 assert.equal(publicationReviewKind({status:'awaiting_confirmation',publishAttemptAt:'2026-11-25',fillReport:{published:false,publishAttempted:false}}),'publication_uncertain')
@@ -31,3 +31,18 @@ assert.equal(consumerState(stateDb,1,2,2003).state,'unknown')
 
 assert.deepEqual(sanitizeExecutionDiagnostics([{ code: 'transmission_checked', expectedKind: 2, observedKind: 3, controlFound: 1, matched: 0, rawText: 'private' }]), [{ code: 'transmission_checked', expectedKind: 2, observedKind: 3, controlFound: 1, matched: 0 }])
 assert.deepEqual(sanitizeExecutionDiagnostics([{ code: 'transmission_checked', expectedKind: 3, observedKind: 4, controlFound: 2, matched: -1 }]), [{ code: 'transmission_checked' }])
+
+// Operational isolation is advisory, time-bounded and scoped by tenant/profile.
+const decisionDb = {}
+for (const code of ['consumer_paused','session_missing','api_unauthorized','queue_http_error','facebook_not_ready','dispatch_failed','consumer_check_failed']) {
+  recordConsumerDecision(decisionDb,1,2,{code,at:1000},1000)
+  assert.equal(consumerOperationalBlock(decisionDb,1,2,1001),code)
+  assert.equal(consumerOperationalBlock(decisionDb,1,3,1001),null)
+  assert.equal(consumerOperationalBlock(decisionDb,2,2,1001),null)
+  assert.equal(consumerOperationalBlock(decisionDb,1,2,301001),null)
+}
+for (const code of ['queue_empty','scheduled_wait','daily_limit','operational_interval','execution_pending','dispatch_confirmed','prepare_rejected']) {
+  recordConsumerDecision(decisionDb,1,2,{code,at:2000},2000)
+  assert.equal(consumerOperationalBlock(decisionDb,1,2,2001),null)
+}
+console.log('Operational routing blocks: isolated, time-bounded, and cleared by normal decisions.')
