@@ -69,8 +69,8 @@ const consumerOperationalBlocks = new Set([
   'facebook_not_ready', 'dispatch_failed', 'consumer_check_failed',
 ])
 export function consumerOperationalBlock(db: object, org: number, accountId: number, now = Date.now()) {
-  const decision = latestConsumerDecision(db, org, accountId, now)
-  const code = decision?.code
+  const decision = consumerDecisions.get(db)?.get(org + ':' + accountId)
+  const code = decision && now - decision.receivedAt <= 300000 ? decision.diagnostic.code : null
   return typeof code === 'string' && consumerOperationalBlocks.has(code) ? code : null
 }
 
