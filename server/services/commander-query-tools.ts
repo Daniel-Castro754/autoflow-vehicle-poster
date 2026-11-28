@@ -34,6 +34,7 @@ const definitions = {
   listar_grupos:{description:'Grupos cadastrados, ativação, prioridade e contadores; sem links de convite.',properties:{limit,beforeId},sources:['marketplace_groups']},
   listar_anuncios:{description:'Anúncios registrados no ledger local e política de vencimento; não consulta o Facebook ao vivo.',properties:{limit,beforeId,vehicleId:id('Filtrar veículo')},sources:['publication_listing_ledger','publication_jobs','organization_settings']},
   historico_diagnosticos:{description:'Hipóteses registradas pelo monitor de IA, frequência por causa, estado atual dos trabalhos e entrega; não comprova solução aplicada.',properties:{limit,beforeId,hours,jobId:id('Filtrar trabalho')},sources:['commander_diagnostic_history','publication_jobs']},
+  historico_decisoes:{description:'Histórico das solicitações de ação do Commander, resultados registrados, simulações e operações locais executadas; sem identidade do solicitante ou códigos de autorização.',properties:{limit,beforeId,hours,jobId:id('Filtrar trabalho')},sources:['commander_action_requests','publication_jobs']},
   historico_ia:{description:'Histórico de operações da IA, sem prompts, respostas ou chaves.',properties:{limit,beforeId},sources:['ai_operation_history']},
 } satisfies Record<string,Definition>
 type ToolName = keyof typeof definitions
@@ -199,6 +200,25 @@ export function runCommanderQuery(db:DatabaseSync,org:number,tool:unknown,input:
       const frequencies=db.prepare('SELECT h.cause,COUNT(*) count,COUNT(DISTINCT h.job_id) jobs FROM commander_diagnostic_history h WHERE '+scope+' GROUP BY h.cause ORDER BY count DESC LIMIT 20').all(org,min,jobId,jobId)
       data={...list(rows.map(h=>({...h,family:allowed(h.family,['fill','review','uncertain','timeout','layout','duplicate']),cause:allowed(h.cause,causes),analysisStatus:allowed(h.analysisStatus,['claimed','analyzed','fallback']),deliveryStatus:allowed(h.deliveryStatus,['pending','sent','failed','skipped']),jobStatus:allowed(h.jobStatus,statuses)})),n),
         frequencies:frequencies.map(h=>({...h,cause:allowed(h.cause,causes)})),retentionDays:30,note:'Somente diagnósticos reservados pelo monitor (com limites e deduplicação), não todas as falhas. Estado atual não comprova que a orientação resolveu o erro.'};break
+    }
+    case 'historico_decisoes': {
+      const min=Date.parse(since)
+      const scope='r.organization_id=? AND r.created_at>=? AND r.created_at<=? AND (?=0 OR r.job_id=?)'
+      const params=[org,min,now,jobId,jobId]
+      const outcomes=['pending','validated_only','executed','rejected','expired','stale','revoked']
+      const actions=['pausar_trabalho','pausar_trabalho_real','adiar_trabalho','cancelar_trabalho_pendente']
+      const rows=db.prepare('SELECT r.id,r.job_id jobId,r.action,r.mode,r.status,r.created_at createdAt,r.expires_at expiresAt,r.decided_at decidedAt,r.scheduled_at scheduledAt,j.status jobStatus FROM commander_action_requests r LEFT JOIN publication_jobs j ON j.organization_id=r.organization_id AND j.id=r.job_id WHERE '+scope+' AND (?=0 OR r.id<?) ORDER BY r.id DESC LIMIT ?').all(...params,cursor,cursor,n+1)
+      const totals=db.prepare('SELECT r.status,COUNT(*) count FROM commander_action_requests r WHERE '+scope+' GROUP BY r.status').all(...params)
+      data={...list(rows.map(row=>({
+        id:row.id,jobId:row.jobId,action:allowed(row.action,actions),mode:allowed(row.mode,['preview_only','execute_once']),
+        status:allowed(row.status,outcomes),createdAt:row.createdAt,decidedAt:row.decidedAt,
+        scheduledAt:row.action==='adiar_trabalho'&&parseSqliteTimestamp(typeof row.scheduledAt==='string'?row.scheduledAt:null)!==null?row.scheduledAt:null,
+        expiredByTime:row.status==='pending'&&Number(row.expiresAt)<=now,
+        jobStatus:allowed(row.jobStatus,statuses),
+      })),n),
+        totals:totals.map(row=>({status:allowed(row.status,outcomes),count:row.count})),
+        windowBasis:'request_created_at',retentionDays:90,
+        note:'Histórico de solicitações locais, não de todas as recomendações. Executed significa operação local registrada; validated_only significa simulação. Pending não significa autorização atual; expiredByTime indica prazo vencido mesmo antes da limpeza. Totais por status registrado na janela completa, independentemente da página. O estado atual do trabalho não comprova efeito causal nem publicação no Facebook.'};break
     }
     case 'historico_ia': {
       const rows=db.prepare('SELECT id,action,outcome,provider,items,created_at createdAt FROM ai_operation_history WHERE organization_id=? AND (?=0 OR id<?) ORDER BY id DESC LIMIT ?').all(org,cursor,cursor,n+1)
