@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { initializeBaseSchema } from '../server/database/schema.ts'
 import { applyMigrations } from '../server/database/migrations.ts'
 import { saveTelegramCommanderSettings,sweepTelegramCommander } from '../server/services/telegram-commander.ts'
-import { saveCommanderPermissionSettings,proposeCommanderPause,proposeCommanderAction,decideCommanderAction,parseCommanderSchedule } from '../server/services/commander-permissions.ts'
+import { saveCommanderPermissionSettings,proposeCommanderPause,proposeCommanderAction,decideCommanderAction,parseCommanderSchedule,commanderAvailableActions } from '../server/services/commander-permissions.ts'
 const db=new DatabaseSync(':memory:')
 initializeBaseSchema(db);applyMigrations(db)
 db.exec("INSERT INTO organizations(id,name) VALUES(1,'One'),(2,'Other'); INSERT INTO organization_settings(organization_id) VALUES(1),(2); INSERT INTO users(id,organization_id,name,email,password_hash) VALUES(1,1,'Owner','one@local','fixture'); INSERT INTO social_accounts(id,organization_id,user_id,label,status,last_seen_at) VALUES(1,1,1,'Mae','connected',CURRENT_TIMESTAMP); INSERT INTO vehicles(id,organization_id,year,make,model,price,status) VALUES(1,1,2022,'VW','Nivus',108900,'Pronto'),(2,2,2022,'Private','Foreign',999999,'Pronto'); INSERT INTO publication_jobs(id,organization_id,vehicle_id,social_account_id,status) VALUES(1,1,1,1,'pending'),(2,2,2,NULL,'pending'),(3,1,1,1,'pending'),(4,1,1,1,'pending'),(5,1,1,1,'pending'),(6,1,1,1,'pending'),(7,1,1,1,'pending'); UPDATE publication_jobs SET attempt_count=1 WHERE id=5; UPDATE publication_jobs SET status='awaiting_confirmation' WHERE id=6; UPDATE publication_jobs SET lease_token='fixture-lease' WHERE id=7")
@@ -31,6 +31,20 @@ const demoToken=code(proposeCommanderPause(db,1,a,1,c,now))
 assert(decide(demoToken).includes('Nenhuma ação operacional'))
 assert.equal(job(1).paused,0)
 for(const id of [2,5,6,7])assert(propose('cancelar_trabalho_pendente',id).includes('não elegível'))
+const available=(id,who=a)=>commanderAvailableActions(db,1,who,id,c,now)
+const preflightChanges=db.prepare('SELECT total_changes() n').get().n
+assert(available(1).includes('/pausar 1'))
+assert(available(1).includes('/adiar 1'))
+assert(available(1).includes('/cancelar_trabalho 1'))
+assert(!available(1,actor('101')).includes('/pausar'))
+assert(available(2).includes('Nenhuma ação real elegível'))
+assert.equal(db.prepare('SELECT total_changes() n').get().n,preflightChanges,'Preflight must not mutate database')
+for(const column of ['execution_tab_id','execution_document','execution_document_id','removed_at']){
+  db.prepare('UPDATE publication_jobs SET '+column+'=? WHERE id=3').run(column==='execution_tab_id'?123:'fixture')
+  assert(available(3).includes('Nenhuma ação real elegível'),column)
+  assert(propose('cancelar_trabalho_pendente',3).includes('não elegível'),column)
+  db.exec('UPDATE publication_jobs SET '+column+'=NULL WHERE id=3')
+}
 const pause=code(propose('pausar_trabalho_real',1))
 assert.equal(job(1).paused,0)
 assert(decide(pause,true,actor('101')).includes('indisponível'))
@@ -64,8 +78,18 @@ assert.equal(job(4).status,'canceled')
 assert.equal(job(4).attempts,0)
 assert.equal(job(4).retries,0)
 assert.equal(job(2).status,'pending')
+updates=[{update_id:3,message:{date:Math.floor(now/1000),text:'/acoes@AutoFlowVeiculosBot 3',from:{id:100,is_bot:false},chat:{id:-123,type:'group'}}}]
+await sweep()
+assert.equal(messages.length,3)
+assert(messages[2].includes('/pausar 3'))
+assert(messages[2].includes('Nenhuma ação foi executada'))
+assert.equal(job(3).paused,0)
+updates=[{update_id:4,message:{date:Math.floor(now/1000),text:'/acoes@AutoFlowVeiculosBot 3',from:{id:999,is_bot:false},chat:{id:-123,type:'group'}}}]
+await sweep()
+assert.equal(messages.length,3)
+
 assert.equal(db.prepare("SELECT COUNT(*) n FROM commander_action_requests WHERE status='executed'").get().n,3)
 assert.equal(db.prepare("SELECT COUNT(*) n FROM publication_job_events WHERE json_extract(details,'$.source')='telegram_commander'").get().n,3)
 assert.equal(db.prepare('SELECT COUNT(*) n FROM publication_listing_ledger').get().n,0)
 db.close()
-console.log('Commander actions: explicit live grants, demo isolation, one-shot atomic pause/postpone/cancel, stale and foreign rejection, no publication or retry changes.')
+console.log('Commander actions: explicit live grants, demo isolation, one-shot atomic pause/postpone/cancel, stale and foreign rejection, read-only scoped action preflight, residual execution protection, no publication or retry changes.')
