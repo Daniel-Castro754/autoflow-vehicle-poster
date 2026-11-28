@@ -1,6 +1,6 @@
 import { handleIntegrationMonthlyReport } from './integration-reports.ts'
 import { handleIntegrationPhotoUpload } from './integration-photos.ts'
-import { previewStockSync, StockSyncInputError } from '../services/stock-sync-preview.ts'
+import { applyStockDrafts, previewStockSync, StockSyncInputError } from '../services/stock-sync-preview.ts'
 import { applyVehicleDefaults, validateVehicleBody } from '../services/vehicle-input.ts'
 import {
   findVehicleIdentifierConflict,
@@ -101,6 +101,34 @@ export async function handleIntegrationRoute(
       audit(db, current, req, 'stock:preview', 'error')
       send(res, 400, { error: error.message })
     }
+    return true
+  }
+  if (url.pathname === '/api/integration/v1/stock/apply-drafts' && req.method === 'POST') {
+    const scopes=['stock:apply','vehicles:read','vehicles:create'] as const
+    for(const scope of scopes)if(!requireScope(db,req,res,send,auth,scope))return true
+    const input=await dependencies.jsonBody(req,1024*1024)
+    db.exec('BEGIN IMMEDIATE')
+    let response:{status:number;data:unknown}
+    try{
+      const current=readIntegrationAuth(db,req)
+      if(!current||current.credentialId!==auth.credentialId||current.organizationId!==auth.organizationId)
+        response={status:401,data:{error:'Credencial de integração inválida, expirada ou revogada.'}}
+      else if(!scopes.every(scope=>integrationHasScope(current,scope))){
+        audit(db,current,req,'stock:apply','denied')
+        response={status:403,data:{error:'Escopos de aplicação de estoque obrigatórios.'}}
+      }else{
+        const result=applyStockDrafts(db,current.organizationId,current.createdBy,input)
+        audit(db,current,req,'stock:apply',result.applied?'allowed':'denied')
+        response={status:result.applied?200:409,data:result}
+      }
+      db.exec('COMMIT')
+    }catch(error){
+      db.exec('ROLLBACK')
+      if(!(error instanceof StockSyncInputError))throw error
+      audit(db,auth,req,'stock:apply','error')
+      response={status:400,data:{error:error.message}}
+    }
+    send(res,response.status,response.data)
     return true
   }
   if (url.pathname === '/api/integration/v1/vehicles' && req.method === 'POST') {
