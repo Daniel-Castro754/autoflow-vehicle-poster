@@ -313,19 +313,23 @@ async function recordConsumerDecision(accountId, code, details = {}) {
 
 // This only reports that the local extension can reach AutoFlow.
 // It does not assert Facebook login, DOM readiness or a successful publication.
-async function reportExtensionPresence() {
+async function reportExtensionPresence(previousReport) {
   const state = await chrome.storage.local.get(['activeAccountId', 'token', 'refreshToken', 'consumerDiagnostics', 'autoRun'])
   if (!state.activeAccountId || (!state.token && !state.refreshToken)) return
+  const diagnostic = Array.isArray(state.consumerDiagnostics)
+    ? [...state.consumerDiagnostics].reverse().find((entry) => entry.accountId === state.activeAccountId)
+    : undefined
+  // Compare only operational metadata, never credentials.
+  const reportKey = JSON.stringify([state.activeAccountId, Boolean(state.autoRun), diagnostic])
+  if (reportKey === previousReport) return reportKey
   try {
-    await authorizedFetch(`${API}/extension/presence`, {
+    const response = await authorizedFetch(`${API}/extension/presence`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         accountId: state.activeAccountId,
         autoRun: Boolean(state.autoRun),
-        diagnostic: Array.isArray(state.consumerDiagnostics)
-          ? [...state.consumerDiagnostics].reverse().find((entry) => entry.accountId === state.activeAccountId)
-          : undefined,
+        diagnostic,
         // Re-send the bounded local buffer on heartbeat; the server deduplicates.
         diagnosticHistory:Array.isArray(state.consumerDiagnostics)
           ? state.consumerDiagnostics.filter(entry=>entry.accountId===state.activeAccountId).slice(-200).map(entry=>{
@@ -335,6 +339,7 @@ async function reportExtensionPresence() {
           : [],
       }),
     })
+    if (response.ok) return reportKey
   } catch {
     // A temporary outage does not change manual pause or authentication state.
   }
@@ -397,6 +402,7 @@ async function consumeQueue() {
   queueConsumerRunning = true
   let accountId = 0
   let currentJobId = 0
+  let queueHttpError = false
   try {
     const state = await chrome.storage.local.get([
       'autoRun',
@@ -439,6 +445,7 @@ async function consumeQueue() {
       return
     }
     if (!response.ok) {
+      queueHttpError = true
       await recordConsumerDecision(accountId, 'queue_http_error', { httpStatus: response.status })
     }
     if (!response.ok) throw new Error(`Falha ao consultar a fila: HTTP ${response.status}`)
@@ -537,7 +544,7 @@ async function consumeQueue() {
       throw error
     }
   } catch (error) {
-    if (!currentJobId) await recordConsumerDecision(accountId, 'consumer_check_failed')
+    if (!currentJobId && !queueHttpError) await recordConsumerDecision(accountId, 'consumer_check_failed')
     console.warn(
       'AutoFlow: consumidor da fila pausado até a próxima verificação',
       error instanceof Error ? error.message : String(error),
@@ -604,8 +611,11 @@ async function recoverConsumer() {
     await flushPendingResults()
     await synchronizeConflictResolutions()
     await synchronizeAutonomousConsumption()
-    await reportExtensionPresence()
+    const previousReport = await reportExtensionPresence()
     await consumeQueue()
+    // Keep the pre-check heartbeat for routing, then publish a changed decision
+    // in the same recovery pass instead of waiting for the next alarm.
+    await reportExtensionPresence(previousReport)
   })()
   try {
     await recoveryInFlight
