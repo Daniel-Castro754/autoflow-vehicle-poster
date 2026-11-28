@@ -149,10 +149,106 @@ try {
   await capped.sweep()
   assert.equal(peakCapped, 4, 'Even misconfigured pools must respect the safety ceiling')
   capped.stop()
+
+  // A tenant's eligibility can change after the sweep builds its initial list.
+  const eligibilityEntered = deferred()
+  const eligibilityRelease = deferred()
+  const rechecked = []
+  const result = {
+    ok: true,
+    processedCount: 0,
+    jobsCreated: 0,
+    descriptionsOptimized: 0,
+    assignments: [],
+    message: 'test',
+  }
+  const revalidation = createAutonomousScheduler(db, {
+    maxConcurrentOrganizations: 1,
+    run: async (_database, organizationId) => {
+      rechecked.push(organizationId)
+      if (organizationId === 1) {
+        eligibilityEntered.resolve()
+        await eligibilityRelease.promise
+      }
+      return result
+    },
+  })
+  const revalidationSweep = revalidation.sweep()
+  await eligibilityEntered.promise
+  db.exec(`
+    UPDATE organization_settings SET autopilot_enabled=0 WHERE organization_id=2;
+    INSERT INTO autopilot_state VALUES(3,datetime('now','+10 minutes'),NULL);
+    INSERT INTO autopilot_state VALUES(4,NULL,datetime('now','+2 minutes'));
+  `)
+  eligibilityRelease.resolve()
+  await revalidationSweep
+  assert.deepEqual(rechecked, [1, 5], 'Recheck disabled, postponed and claimed tenants before dispatch')
+  revalidation.stop()
+
+  // A fresh worker must honor persisted future runs and active leases.
+  // Only the lease whose expiry was durably recorded in the past is eligible.
+  db.exec(`
+    UPDATE organization_settings SET autopilot_enabled=0 WHERE organization_id IN (1,5);
+    UPDATE autopilot_state SET lease_expires_at=datetime('now','-1 second') WHERE organization_id=4;
+  `)
+  const recovered = []
+  const replacement = createAutonomousScheduler(db, {
+    run: async (_database, organizationId) => {
+      recovered.push(organizationId)
+      return result
+    },
+  })
+  await replacement.sweep()
+  assert.deepEqual(recovered, [4], 'A replacement worker respects persisted cadence and lease expiry')
+  replacement.stop()
+
+  // stop/start while an old round is running must discard its remaining
+  // snapshot; the fresh sweep may include a newly enabled tenant.
+  db.exec(`
+    DELETE FROM autopilot_state;
+    UPDATE organization_settings SET autopilot_enabled=1 WHERE organization_id IN (1,2);
+    UPDATE organization_settings SET autopilot_enabled=0 WHERE organization_id IN (3,4,5);
+  `)
+  const oldEntered = deferred()
+  const oldRelease = deferred()
+  const restarted = []
+  let inFlight = 0
+  let peakRestart = 0
+  const restartable = createAutonomousScheduler(db, {
+    intervalMs: 60_000,
+    maxConcurrentOrganizations: 1,
+    run: async (_database, organizationId) => {
+      restarted.push(organizationId)
+      inFlight++
+      peakRestart = Math.max(peakRestart, inFlight)
+      if (organizationId === 1) {
+        oldEntered.resolve()
+        await oldRelease.promise
+      }
+      inFlight--
+      return result
+    },
+  })
+  const oldSweep = restartable.sweep()
+  await oldEntered.promise
+  restartable.stop()
+  db.exec(`
+    UPDATE organization_settings SET autopilot_enabled=0 WHERE organization_id=1;
+    INSERT INTO autopilot_state VALUES(2,datetime('now','+1 minute'),NULL);
+    UPDATE organization_settings SET autopilot_enabled=1 WHERE organization_id=3;
+  `)
+  // Only the newly enabled tenant is due in the fresh snapshot.
+  restartable.start()
+  oldRelease.resolve()
+  await oldSweep
+  await new Promise((resolve) => setImmediate(resolve))
+  restartable.stop()
+  assert.deepEqual(restarted, [1, 3], 'Restart immediately runs a fresh snapshot, not the old queue')
+  assert.equal(peakRestart, 1, 'Restart cannot overlap the old round')
 } finally {
   db.close()
 }
-console.log('✓ Phase 3: bounded concurrency, tenant isolation, explicit safe retry categories')
+console.log('✓ Phase 3: bounded concurrency, tenant isolation, safe retry categories, fresh eligibility and scheduler restart')
 
 
 import { initializeBaseSchema } from '../server/database/schema.ts'

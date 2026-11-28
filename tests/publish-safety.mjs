@@ -836,12 +836,45 @@ try {
   if (noAlternative.accountId !== account.id)
     throw new Error('Sem conta alternativa disponível, o job deveria permanecer na mesma conta.')
 
+  // An invalid fill result must quarantine a live job rather than let its
+  // legitimate worker reach the publication checkpoint. Use a separate fixture
+  // so that the normal queue lifecycle does not depend on bypassing a conflict.
+  const fencedVehicle = await createReadyVehicle(adminToken)
+  const fencedJob = await call('/publications', adminToken, {
+    method: 'POST',
+    body: JSON.stringify({ vehicleId: fencedVehicle.id, accountId: account.id }),
+  })
+  const fencedPrepared = await call(`/extension/jobs/${fencedJob.id}/prepare`, adminToken, {
+    method: 'POST',
+    body: JSON.stringify({ accountId: account.id, instanceId: 'safety_fenced_instance' }),
+  })
+  await expectStatus(409, () =>
+    call(`/extension/jobs/${fencedJob.id}/fill-result`, adminToken, {
+      method: 'PATCH',
+      body: JSON.stringify({ leaseToken: 'token-incorreto', error: 'Resultado de outra aba' }),
+    }),
+  )
+  const fenceEvents = testDb
+    .prepare("SELECT id FROM publication_job_events WHERE publication_job_id=? AND event_type='fill_result_conflict'")
+    .all(fencedJob.id)
+  assert.equal(fenceEvents.length, 1)
+  for (const checkpoint of ['publish-check', 'publish-started']) {
+    await expectStatus(409, () =>
+      call(`/extension/jobs/${fencedJob.id}/${checkpoint}`, adminToken, {
+        method: 'POST',
+        body: JSON.stringify({ leaseToken: fencedPrepared.leaseToken }),
+      }),
+    )
+  }
+  assert.equal(jobRow(fencedJob.id).publishAttemptAt, null)
+
   testDb.close()
   console.log(
     JSON.stringify(
       {
         ok: true,
         idempotentFillResult: true,
+        invalidResultFencesPublication: true,
         staleRecoveryRequiresConfirmation: true,
         safeRecoveryRespectsMaxRetries: true,
         layoutDriftSignalPersisted: true,
