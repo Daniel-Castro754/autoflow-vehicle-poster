@@ -37,7 +37,7 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
     CREATE TABLE publication_jobs (id INTEGER, organization_id INTEGER, vehicle_id INTEGER, social_account_id INTEGER, status TEXT, started_at TEXT, lease_expires_at TEXT, paused INTEGER, extension_visible INTEGER, error_code TEXT, filled_at TEXT, lease_token TEXT, lease_owner TEXT, updated_at TEXT);
     CREATE TABLE vehicles (id INTEGER, year INTEGER, make TEXT, model TEXT);
     CREATE TABLE social_accounts (id INTEGER, label TEXT);
-    CREATE TABLE publication_job_events (organization_id INTEGER, publication_job_id INTEGER, event_type TEXT, created_by INTEGER, details TEXT);
+    CREATE TABLE publication_job_events (id INTEGER PRIMARY KEY, organization_id INTEGER NOT NULL, publication_job_id INTEGER NOT NULL, event_type TEXT NOT NULL, from_account_id INTEGER, to_account_id INTEGER, created_by INTEGER, details TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE operational_incidents (
       id INTEGER PRIMARY KEY, organization_id INTEGER, publication_job_id INTEGER,
       kind TEXT, severity TEXT, status TEXT DEFAULT 'open', summary TEXT,
@@ -71,6 +71,9 @@ console.log('✓ Somente falhas explicitamente transitórias entram na política
   try {
     const report = await runHealthCheck(db)
     assert.equal(report.recoveredCount, 1)
+    const event = db.prepare("SELECT id,details FROM publication_job_events WHERE publication_job_id=1 AND event_type='stalled_recovered'").get()
+    assert(Number.isInteger(event?.id))
+    assert.equal(JSON.parse(event.details).remainingRetries, 2)
     await new Promise((resolve) => setImmediate(resolve))
     assert(calls.includes('https://api.telegram.org/botorg-bot-token/sendMessage'))
     assert(calls.includes('https://org.example/hook'))
