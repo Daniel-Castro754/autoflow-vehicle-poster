@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { createHash, randomUUID } from 'node:crypto'
 import { getAlertCredentials } from './credential-vault.ts'
 import { sendCommanderReply } from './commander-telegram-reply.ts'
+import { supervisorReport } from './supervisor-report.ts'
 import { buildCommanderMenu, verifyCommanderMenu, type MenuScope } from './commander-inline-menu.ts'
 import { parseSqliteTimestamp } from './profile-capacity.ts'
 import { logger } from '../lib/logger.ts'
@@ -111,7 +112,7 @@ function menuScope(row:Row,c:Credentials,userId:string):MenuScope {
   return {organizationId:row.organization_id,chatId:c.telegramChatId,userId,revision:row.revision,token:c.telegramBotToken}
 }
 function helpText(username:string){
-  return 'AutoFlow AI Commander — consulta somente leitura\n/status — situação do sistema\n/meu_id — seu identificador\n/ajuda — comandos\n/menu — atalhos de consulta\n/ia pergunta — consulta DeepSeek, se ativada no painel.\nResponda diretamente a uma mensagem do bot para conversar. Menções simples @'+username+' dependem da entrega pelo Telegram.\n/limpar_memoria — limpa suas referências locais. /solicitar_pausa ID — demonstração de autorização, se permitida.\n/acoes ID — consultar ações reais elegíveis.\n/autorizar CÓDIGO ou /recusar CÓDIGO — decidir proposta. /pausar ID, /adiar ID AAAA-MM-DDTHH:MM-03:00, /cancelar_trabalho ID — propostas reais se autorizadas. Não publica nem retira anúncios.'
+  return 'AutoFlow AI Commander — consulta somente leitura\n/status — situação do sistema\n/supervisao — diagnóstico e orientações locais, sem DeepSeek\n/meu_id — seu identificador\n/ajuda — comandos\n/menu — atalhos de consulta\n/ia pergunta — consulta DeepSeek, se ativada no painel.\nResponda diretamente a uma mensagem do bot para conversar. Menções simples @'+username+' dependem da entrega pelo Telegram.\n/limpar_memoria — limpa suas referências locais. /solicitar_pausa ID — demonstração de autorização, se permitida.\n/acoes ID — consultar ações reais elegíveis.\n/autorizar CÓDIGO ou /recusar CÓDIGO — decidir proposta. /pausar ID, /adiar ID AAAA-MM-DDTHH:MM-03:00, /cancelar_trabalho ID — propostas reais se autorizadas. Não publica nem retira anúncios.'
 }
 function callbackReply(db:DatabaseSync,row:Row,c:Credentials,username:string,botId:number|undefined,callback:Callback,now:number):Reply{
   const m=callback.message, user=String(callback.from?.id)
@@ -125,6 +126,7 @@ function callbackReply(db:DatabaseSync,row:Row,c:Credentials,username:string,bot
   if(!item)return null
   if('question' in item)return {question:item.question,userId:user}
   if(item.action==='status')return statusText(db,row.organization_id,now)
+  if(item.action==='supervisao')return supervisorReport(db,row.organization_id)
   if(item.action==='help')return helpText(username)
   if(item.action==='memory')return 'Memória de referências: '+(row.memory_enabled?'ativada (até 30 dias).':'desativada.')+'\nPara limpar somente suas referências, use /limpar_memoria@'+username+'. Nenhuma alteração foi feita.'
   if(item.action==='chat')return '💬 Envie sua pergunta usando Responder nesta mensagem, ou /ia@'+username+' seguido da pergunta.'
@@ -168,7 +170,7 @@ function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,botId:nu
     if(!row.ai_enabled)return 'Perguntas com DeepSeek desativadas. Ative no painel.'
     return {question:ai[2].trim(),userId:String(m.from.id)}
   }
-  const match=m.text.trim().match(/^\/(meu_id|ajuda|status|limpar_memoria|menu)(?:@([A-Za-z0-9_]+))?$/i)
+  const match=m.text.trim().match(/^\/(meu_id|ajuda|status|limpar_memoria|menu|supervisao)(?:@([A-Za-z0-9_]+))?$/i)
   if(!match){
     // Only a leading mention or a reply to this bot is a natural query.
     // Slash commands never fall through into the conversational path.
@@ -196,6 +198,7 @@ function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,botId:nu
   }
   if(command==='menu')return {menu:true,userId:user,text:'🤖 AutoFlow — central de operações\nSelecione uma consulta abaixo. Menu válido por 5 minutos e reservado a quem o solicitou. Respostas aparecem no grupo.\n'+(row.ai_enabled?'Consultas de IA usam o limite diário.':'DeepSeek desativado. Consultas básicas disponíveis.')+'\nOperações reais exigem comandos explícitos e confirmação individual.'}
   if(command==='ajuda')return helpText(username)
+  if(command==='supervisao')return supervisorReport(db,row.organization_id)
   return statusText(db,row.organization_id,now)
 }
 
