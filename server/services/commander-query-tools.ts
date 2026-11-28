@@ -6,6 +6,7 @@ import { classifyExtensionFailure, publicationReadinessIssues } from './publicat
 import { openResultConflict } from './result-conflicts.ts'
 import { listingExpiryPolicy } from './listing-expiry.ts'
 import { canonicalMarketplaceListing } from './publication-ledger.ts'
+import { autopilotDiagnostics, summarizeAutopilotDiagnostics } from './autopilot-diagnostics.ts'
 
 type Property = {type:'integer'|'string'; minimum?:number; maximum?:number; enum?:readonly string[]; description:string}
 type Definition = {description:string; properties:Record<string,Property>; required?:string[]; sources:string[]}
@@ -17,6 +18,7 @@ const statuses=['pending','filling','awaiting_confirmation','error','completed',
 const stockStatuses=['Rascunho','Pronto','Publicado','Vendido'] as const
 const definitions = {
   resumo_operacional:{description:'Totais atuais de estoque, trabalhos e presença de perfis; confirmações registradas hoje.',properties:{},sources:['vehicles','publication_jobs','social_accounts','publication_listing_ledger']},
+  diagnosticar_operacao:{description:'Diagnóstico atual de por que o piloto automático recorrente pode ou não agendar veículos: motivos, perfis elegíveis, exemplos e estado da rodada. Somente leitura.',properties:{limit},sources:['vehicles','vehicle_images','publication_jobs','social_accounts','organization_settings','autopilot_state','published_ads','publication_listing_ledger']},
   listar_veiculos:{description:'Lista paginada de veículos, dados cadastrais essenciais e quantidade de fotos.',properties:{limit,beforeId,status:{type:'string',enum:stockStatuses,description:'Status cadastral'}},sources:['vehicles','vehicle_images']},
   consultar_veiculo:{description:'Detalhes essenciais e campos faltantes de um veículo, sem descrição livre nem arquivos.',properties:{vehicleId:id('ID do veículo')},required:['vehicleId'],sources:['vehicles','vehicle_images']},
   listar_publicacoes:{description:'Trabalhos, agendamento, perfil, tentativas e status atual; não confirma estado externo.',properties:{limit,beforeId,vehicleId:id('Filtrar veículo'),accountId:id('Filtrar perfil'),status:{type:'string',enum:statuses,description:'Status do trabalho'}},sources:['publication_jobs','vehicles','social_accounts']},
@@ -94,6 +96,29 @@ export function runCommanderQuery(db:DatabaseSync,org:number,tool:unknown,input:
       const profiles=db.prepare('SELECT COUNT(*) total,COALESCE(SUM(status=\'connected\' AND datetime(last_seen_at)>=datetime(\'now\',\'-5 minutes\') AND datetime(last_seen_at)<=datetime(\'now\',\'+1 minute\')),0) online FROM social_accounts WHERE organization_id=?').get(org)
       const confirmed=db.prepare("SELECT COUNT(*) count FROM publication_listing_ledger WHERE organization_id=? AND autoflow_day(first_confirmed_at)=autoflow_day(CURRENT_TIMESTAMP)").get(org)
       data={stock,jobs,profiles,confirmedToday:confirmed?.count||0,note:'Contagens locais; pronto não garante elegibilidade, presença não garante login no Facebook.'};break
+    }
+    case 'diagnosticar_operacao': {
+      const diagnostic=autopilotDiagnostics(db,org,true)
+      const summary=summarizeAutopilotDiagnostics(diagnostic)
+      const examples=diagnostic.vehicles.filter(v=>v.previewReasons.length||v.executionReasons.length).slice(0,n)
+      const profileExamples=summary.profiles.slice(0,n)
+      data={
+        recurringEnabled:diagnostic.recurringEnabled,
+        nextRunAt:diagnostic.nextRunAt,
+        lastStatus:allowed(diagnostic.lastStatus,['idle','running','completed','error','failed']),
+        lastJobsCreated:diagnostic.lastJobsCreated,
+        totalVehicles:summary.totalVehicles,
+        previewCandidateCount:summary.previewCandidateCount,
+        passingInitialChecks:summary.passingInitialChecks,
+        reasonCounts:summary.reasonCounts,
+        profiles:{total:summary.profiles.length,eligible:summary.profiles.filter(p=>p.canSchedule).length,items:profileExamples,omitted:Math.max(0,summary.profiles.length-n)},
+        blockedVehicles:{total:diagnostic.vehicles.length-diagnostic.passingInitialChecks,items:examples.map(v=>({
+          id:v.id,reasons:[...v.previewReasons,...v.executionReasons].map(reason=>reason.code),
+          blockingJobCount:v.blockingJobs.length,
+          blockingJobs:v.blockingJobs.slice(0,5).map(job=>({id:job.id,status:allowed(job.status,statuses),reviewKind:job.reviewKind,paused:Boolean(job.paused),visible:Boolean(job.visible)})),
+        }))},
+        note:'Diagnóstico local de elegibilidade inicial do piloto recorrente; não garante agendamento, execução ou estado externo. Motivos podem coexistir no mesmo veículo. Nenhuma ação foi executada.',
+      };break
     }
     case 'listar_veiculos': {
       const rows=db.prepare('SELECT '+vehicleColumns+' FROM vehicles v WHERE v.organization_id=? AND (?=0 OR v.id<?) AND (?=\'\' OR v.status=?) ORDER BY v.id DESC LIMIT ?').all(org,cursor,cursor,status,status,n+1)
