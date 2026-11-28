@@ -35,7 +35,7 @@ export function sheetStockSnapshot(values){
 
 export function stockSheetUrl(id,tab){
   if(typeof id!=='string'||!/^[A-Za-z0-9_-]{10,200}$/.test(id)||
-     typeof tab!=='string'||!tab.trim()||tab.length>100||/[\u0000-\u001f]/.test(tab))
+     typeof tab!=='string'||!tab.trim()||tab.length>100||Array.from(tab).some(c=>c.charCodeAt(0)<32))
     throw new Error('Configure o ID da planilha e o nome exato da aba.')
   const range="'"+tab.replace(/'/g,"''")+"'"
   const url=new URL('https://sheets.googleapis.com/v4/spreadsheets/'+id+'/values/'+encodeURIComponent(range))
