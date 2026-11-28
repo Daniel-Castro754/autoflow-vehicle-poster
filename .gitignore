@@ -28,3 +28,6 @@ data-*/
 
 # Temporary launcher dependency staging/rollback (never commit local dependencies)
 .autoflow-launcher-recovery/
+
+# Local Git worktrees used for staged homologation
+worktrees/
