@@ -5,6 +5,7 @@ import { parseSqliteTimestamp, profileCapacity } from './profile-capacity.ts'
 import { listingExpiryOverview } from './listing-expiry.ts'
 import { canonicalMarketplaceListing } from './publication-ledger.ts'
 import { logger } from '../lib/logger.ts'
+import { supervisorReport } from './supervisor-report.ts'
 
 export const telegramCategories = ['schedule','execution','published','review','recovery','profiles','limits','expiry','daily'] as const
 type Category = typeof telegramCategories[number]
@@ -106,7 +107,8 @@ function collect(db:DatabaseSync,org:number,now:number){
     const carrier=new Date(Date.UTC(parts.year,parts.month-1,parts.day))
     const dayStart=localInstant(carrier,0,timezone).toISOString()
     const dayEnd=localInstant(carrier,1440,timezone).toISOString()
-    if(enabled.has('daily') && parts.hour*60+parts.minute>=21*60+30){
+    if(enabled.has('daily') && parts.hour*60+parts.minute>=21*60+30 &&
+      !db.prepare('SELECT 1 FROM telegram_monitor_delivery WHERE organization_id=? AND delivery_key=?').get(org,'daily:'+day)){
       const totals=db.prepare("SELECT status,COUNT(*) n FROM publication_jobs WHERE organization_id=? GROUP BY status").all(org) as Array<{status:string;n:number}>
       const count=(status:string)=>totals.find(t=>t.status===status)?.n||0
       const confirmed=db.prepare("SELECT COUNT(*) n FROM publication_listing_ledger WHERE organization_id=? AND unixepoch(first_confirmed_at)>=unixepoch(?) AND unixepoch(first_confirmed_at)<unixepoch(?)").get(org,dayStart,dayEnd) as {n:number}
@@ -116,7 +118,10 @@ function collect(db:DatabaseSync,org:number,now:number){
         const cap=profileCapacity(db,org,a.id,now)
         return clean(a.label,60)+': '+n+' confirmações; '+cap.used+'/'+cap.dailyLimit+' execuções'
       })
-      claim(db,org,{key:'daily:'+day,text:['📊 AutoFlow — resumo até '+clock(now),'Confirmações registradas hoje: '+confirmed.n,'Trabalhos com erro hoje: '+errors.n,'Aguardando revisão (atual): '+count('awaiting_confirmation'),'Pendentes (atual): '+count('pending'),'Perfis online: '+online+'/'+accounts.length,...lines].join('\n')},now,items)
+      // Preserve the existing summary if this optional analysis fails.
+      let supervision='Supervisão operacional indisponível nesta consulta.'
+      try{supervision=supervisorReport(db,org,true)}catch{logger.warn('TelegramMonitor','Diagnóstico de supervisão indisponível',{organizationId:org})}
+      claim(db,org,{key:'daily:'+day,text:['📊 AutoFlow — resumo até '+clock(now),'Confirmações registradas hoje: '+confirmed.n,'Trabalhos com erro hoje: '+errors.n,'Aguardando revisão (atual): '+count('awaiting_confirmation'),'Pendentes (atual): '+count('pending'),'Perfis online: '+online+'/'+accounts.length,...lines,'',supervision].join('\n')},now,items)
     }
     const events=db.prepare('SELECT e.id,e.event_type type,e.created_at createdAt,e.details,j.id jobId,j.scheduled_at scheduledAt,a.label accountLabel,v.year,v.make,v.model,l.canonical_url url FROM publication_job_events e JOIN publication_jobs j ON j.id=e.publication_job_id AND j.organization_id=e.organization_id JOIN vehicles v ON v.id=j.vehicle_id AND v.organization_id=j.organization_id LEFT JOIN social_accounts a ON a.id=j.social_account_id AND a.organization_id=j.organization_id LEFT JOIN publication_listing_ledger l ON l.publication_job_id=j.id AND l.organization_id=j.organization_id WHERE e.organization_id=? AND e.id>? ORDER BY e.id LIMIT 100').all(org,row.cursor) as Array<{id:number;type:string;createdAt:string;details:string;jobId:number;scheduledAt:string|null;accountLabel:string|null;year:number;make:string;model:string;url:string|null}>
     let cursor=row.cursor
