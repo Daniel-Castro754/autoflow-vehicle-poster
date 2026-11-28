@@ -208,6 +208,58 @@ try {
     api(`/integrations/credentials/${foreign.lastInsertRowid}/revoke`, { method: 'POST' }),
     (error) => error.status === 404,
   )
+  // Stock synchronization preview is scoped, non-mutating and never treats
+  // absence as a sale. A declared complete snapshot is not verified provenance.
+  const stockFixture = db.prepare(
+    'INSERT INTO vehicles(organization_id,year,make,model,price,km,stock_code,vin,status) VALUES(?,?,?,?,?,?,?,?,?)',
+  )
+  const absentId = Number(stockFixture.run(org,2020,'Volkswagen','Saveiro',68000,80000,'SYNC-ABSENT','SYNCVIN123','Rascunho').lastInsertRowid)
+  const protectedId = Number(stockFixture.run(org,2020,'Volkswagen','Saveiro',68000,80000,'SYNC-PROTECTED','','Pronto').lastInsertRowid)
+  db.prepare("INSERT INTO publication_jobs(organization_id,vehicle_id,status) VALUES(?,?,'pending')").run(org,protectedId)
+  stockFixture.run(foreignOrg,2020,'Volkswagen','Saveiro',68000,80000,'SYNC-NEW','FOREIGNVIN123','Rascunho')
+  const sourceRow={stockCode:draftPayload.stockCode,year:2020,make:'Volkswagen',model:'Saveiro',price:68000,km:80000}
+  const snapshot=()=>JSON.stringify({
+    vehicles:db.prepare('SELECT * FROM vehicles ORDER BY id').all(),
+    jobs:db.prepare('SELECT * FROM publication_jobs ORDER BY id').all(),
+    photos:db.prepare('SELECT * FROM vehicle_images ORDER BY id').all(),
+  })
+  const beforePreview=snapshot()
+  const envelope=(rows,sourceState='complete')=>({version:1,source:'sheets',sourceState,rows})
+  const preview=(body,client=integrated)=>client('/integration/v1/stock/preview',{method:'POST',body:JSON.stringify(body)})
+  const newRow={...sourceRow,stockCode:'sync-new'}
+  const plan=await preview(envelope([sourceRow,newRow]))
+  assert.equal(plan.readOnly,true)
+  assert.deepEqual(plan.counts,{new:1,changed:0,unchanged:1,conflict:0})
+  assert.equal(plan.entries[0].vehicleId,draft.id)
+  assert.equal(plan.entries[1].stockCode,'SYNC-NEW')
+  assert(plan.absence.comparable)
+  assert(plan.absence.exampleVehicleIds.includes(absentId))
+  const edited=await preview(envelope([{...sourceRow,price:69000}]))
+  assert.equal(edited.entries[0].category,'changed')
+  assert.deepEqual(edited.entries[0].changedFields,['price'])
+  const protectedPlan=await preview(envelope([{...sourceRow,stockCode:'SYNC-PROTECTED',price:69000}]))
+  assert.equal(protectedPlan.entries[0].reason,'protected_local_vehicle')
+  assert.equal(protectedPlan.absence.comparable,false)
+  const duplicate=await preview(envelope([newRow,{...newRow,stockCode:' SYNC-NEW '}]))
+  assert.equal(duplicate.counts.conflict,2)
+  assert.equal(duplicate.absence.count,null)
+  const duplicatedVin=await preview(envelope([{...newRow,vin:'VIN12345'},{...newRow,stockCode:'SYNC-NEW-2',vin:'VIN12345'}]))
+  assert.equal(duplicatedVin.counts.conflict,2)
+  const identityConflict=await preview(envelope([{...sourceRow,vin:'SYNCVIN123'}]))
+  assert.equal(identityConflict.entries[0].reason,'local_identity_conflict')
+  const partial=await preview(envelope([sourceRow],'partial'))
+  assert.equal(partial.absence.count,null)
+  assert.equal((await preview(envelope([]))).absence.comparable,false)
+  assert.equal((await preview(envelope([],'failed'))).absence.count,null)
+  await assert.rejects(preview(envelope([sourceRow],'failed')),error=>error.status===400)
+  await assert.rejects(preview(envelope([{...sourceRow,status:'Vendido'}])),error=>error.status===400)
+  await assert.rejects(preview(envelope([{...sourceRow,stockCode:'A'.repeat(65)}])),error=>error.status===400)
+  await assert.rejects(preview(envelope([{...sourceRow,price:'68000'}])),error=>error.status===400)
+  await assert.rejects(preview({...envelope([sourceRow]),organizationId:foreignOrg}),error=>error.status===400)
+  await assert.rejects(preview(envelope([sourceRow]),writerStatusApi),error=>error.status===403)
+  assert.equal(snapshot(),beforePreview)
+  assert(db.prepare("SELECT COUNT(*) n FROM integration_audit_events WHERE organization_id=? AND action='stock:preview' AND outcome='allowed'").get(org).n>0)
+  console.log('✓ Stock synchronization preview: identity, differences, partial/failed/empty sources, protection, tenant scope and no inventory changes')
   const revoked = await api(`/integrations/credentials/${issued.id}/revoke`, { method: 'POST' })
   assert.equal(revoked.revoked, true)
   await assert.rejects(integrated('/integration/v1/status'), (error) => error.status === 401)
