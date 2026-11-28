@@ -5,7 +5,8 @@ import { vehicleOptions } from './vehicle-input.ts'
 export class StockSyncInputError extends Error {}
 const detailFields=['vehicleType','location','transmission','fuelType','bodyType','exteriorColor','interiorColor','condition','description'] as const
 type DetailField=typeof detailFields[number]
-type SourceRow = { stockCode:string; vin?:string; year:number; make:string; model:string; trim?:string; price:number; km:number } & Partial<Record<DetailField,string>>
+type CommercialState='available'|'sold'
+type SourceRow = { commercialState?:CommercialState; stockCode:string; vin?:string; year:number; make:string; model:string; trim?:string; price:number; km:number } & Partial<Record<DetailField,string>>
 type LocalRow = SourceRow & { id:number; status:string; soldAt:string|null; protectedWork:number; photoCount:number }
 type Category = 'new'|'changed'|'unchanged'|'conflict'
 type Entry = {stockCode:string; category:Category; vehicleId?:number; changedFields?:string[]; reason?:string}
@@ -40,17 +41,19 @@ function numeric(value:unknown,min:number,max:number,integer=false):number{
 }
 function parseRow(value:unknown):SourceRow{
   const v=object(value)
-  if(Object.keys(v).some(k=>!['stockCode','vin',...fields].includes(k)))return fail('Campo de veículo não permitido nesta prévia.')
+  if(Object.keys(v).some(k=>!['stockCode','vin','commercialState',...fields].includes(k)))return fail('Campo de veículo não permitido nesta prévia.')
   const stockCode=identifier(v.stockCode)
   const vin=v.vin===undefined?undefined:identifier(v.vin,false)
   if(validateInventoryIdentifiers(stockCode,vin||''))return fail('Identificador de estoque/chassi inválido.')
   const make=text(v.make,100)
   if(!vehicleOptions.make.has(make))return fail('Fabricante fora do catálogo.')
+  const commercialState=v.commercialState
+  if(commercialState!==undefined&&commercialState!=='available'&&commercialState!=='sold')return fail('Situação comercial inválida.')
   const details:Partial<Record<DetailField,string>>={}
   for(const field of detailFields){
     if(v[field]!==undefined)details[field]=text(v[field],field==='description'?4000:200,false)
   }
-  return {...details,stockCode,vin,year:numeric(v.year,1900,new Date().getFullYear()+1,true),make,model:text(v.model,150),
+  return {...details,commercialState,stockCode,vin,year:numeric(v.year,1900,new Date().getFullYear()+1,true),make,model:text(v.model,150),
     trim:v.trim===undefined?undefined:text(v.trim,150,false),
     price:numeric(v.price,0.01,1000000000),km:numeric(v.km,0,10000000)}
 }
@@ -93,8 +96,18 @@ export function previewStockSync(db:DatabaseSync,org:number,input:unknown){
     if((sourceStock.get(row.stockCode)?.length||0)>1||(row.vin&&(sourceVin.get(row.vin)?.length||0)>1))return {...base,category:'conflict',reason:'duplicate_source_identifier'}
     if(matches.length>1||vinMatches.length>1||vinMatches.some(match=>match.id!==matches[0]?.id))return {...base,category:'conflict',reason:'local_identity_conflict'}
     const current=matches[0]
-    if(!current)return {...base,category:'new'}
+    if(!current)return row.commercialState==='sold'?{...base,category:'conflict',reason:'source_sale_unknown_vehicle'}:{...base,category:'new'}
     if(row.vin&&current.vin&&row.vin!==normalizeInventoryIdentifier(current.vin))return {...base,vehicleId:current.id,category:'conflict',reason:'vin_mismatch'}
+    const localSold=Boolean(current.soldAt||current.status==='Vendido')
+    if(row.commercialState==='sold'){
+      // A recycled stock code must not be mistaken for proof of a sale.
+      const detailsMatch=row.year===current.year&&row.make===current.make&&row.model===current.model
+      const vinVerified=!current.vin||row.vin===normalizeInventoryIdentifier(current.vin)
+      if(!detailsMatch||!vinVerified)return {...base,vehicleId:current.id,category:'conflict',reason:'source_sale_identity_unverified'}
+      return localSold?{...base,vehicleId:current.id,category:'unchanged',reason:'source_sale_already_recorded'}:
+        {...base,vehicleId:current.id,category:'conflict',reason:'source_sale_requires_review'}
+    }
+    if(row.commercialState==='available'&&localSold)return {...base,vehicleId:current.id,category:'conflict',reason:'source_available_local_sold'}
     const changedFields:string[]=fields.filter(field=>row[field]!==undefined&&row[field]!==current[field])
     if(row.vin&&!current.vin)changedFields.push('vin')
     if(!changedFields.length)return {...base,vehicleId:current.id,category:'unchanged'}
@@ -107,7 +120,8 @@ export function previewStockSync(db:DatabaseSync,org:number,input:unknown){
   const notSeen=absenceComparable?local.filter(row=>!row.soldAt&&row.status!=='Vendido'&&row.stockCode&&!sourceStock.has(normalizeInventoryIdentifier(row.stockCode))):[]
   const photoPreview=photos===undefined?undefined:planPhotos(db,org,photos,entries,local)
   const validation=validateSourceDetails(rows,entries,local,photoPreview)
-  return {version:1,source:v.source,sourceState:v.sourceState,readOnly:true,sourceRows:rows.length,counts,entries,photoPreview,validation,
+  const commercialReview=reviewCommercialState(rows,entries,local)
+  return {version:1,source:v.source,sourceState:v.sourceState,readOnly:true,sourceRows:rows.length,counts,entries,photoPreview,validation,commercialReview,
     absence:{comparable:absenceComparable,count:absenceComparable?notSeen.length:null,exampleVehicleIds:notSeen.slice(0,30).map(row=>row.id)},
     note:'Prévia dos campos fornecidos; não comprova a origem ou completude declarada. Ausência não significa venda, exclusão ou autorização para alterar o estoque. Nenhuma alteração foi executada.'}
 }
@@ -130,6 +144,7 @@ function planPhotos(db:DatabaseSync,org:number,photos:PhotoRow[],entries:Entry[]
     const targets=byStock.get(photo.stockCode)||[]
     const target=targets[0]
     if(targets.length!==1||target.category==='conflict')return conflict('vehicle_identity_unresolved')
+    if(target.reason==='source_sale_already_recorded')return conflict('protected_local_vehicle')
     if(new Set((byHash.get(photo.sha256)||[]).map(p=>p.stockCode)).size>1)return conflict('shared_source_photo')
     const current=target.vehicleId?localById.get(target.vehicleId):undefined
     const existing=galleryByHash.get(photo.sha256)||[]
@@ -181,4 +196,26 @@ function validateSourceDetails(rows:SourceRow[],entries:Entry[],local:LocalRow[]
   return {total:items.length,completeSourceFields:items.filter(i=>i.sourceFieldsComplete).length,
     incompleteSourceFields:items.filter(i=>!i.sourceFieldsComplete).length,items,
     note:'Validação dos dados declarados, sem completar campos por inferência. Fotos locais são contagens de registros e fotos novas são apenas declarações. Não confirma conteúdo, autorização, status Pronto nem elegibilidade de publicação.'}
+}
+
+function reviewCommercialState(rows:SourceRow[],entries:Entry[],local:LocalRow[]){
+  const byId=new Map(local.map(v=>[v.id,v]))
+  const items=rows.flatMap((row,i)=>{
+    if(row.commercialState===undefined)return []
+    const entry=entries[i]
+    const current=entry.vehicleId?byId.get(entry.vehicleId):undefined
+    const disposition=row.commercialState==='sold'?
+      entry.reason==='source_sale_already_recorded'?'already_recorded':
+      entry.reason==='source_sale_requires_review'?'review_sale':'review_identity':
+      entry.reason==='source_available_local_sold'?'review_availability':entry.category==='conflict'?'review_conflict':'no_sale_signal'
+    return [{row:i+1,stockCode:row.stockCode,declaredState:row.commercialState,
+      vehicleId:entry.vehicleId??null,disposition,reason:entry.reason??null,
+      localSold:current?Boolean(current.soldAt||current.status==='Vendido'):null,
+      protectedWork:current?Boolean(current.protectedWork):null,
+      requiresHumanReview:disposition.startsWith('review_'),executed:false}]
+  })
+  return {explicitSaleSignals:items.filter(i=>i.declaredState==='sold').length,
+    alreadyRecorded:items.filter(i=>i.disposition==='already_recorded').length,
+    requiresReview:items.filter(i=>i.requiresHumanReview).length,items,
+    note:'Situação comercial declarada pelo remetente, não comprovada. Venda explícita exige revisão da identidade, fonte e trabalhos existentes pelo operador. Ausência nunca é venda. Não reabre veículos vendidos, não altera status, fila ou anúncio externo.'}
 }
