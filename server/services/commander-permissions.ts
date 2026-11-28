@@ -86,8 +86,9 @@ function pauseSnapshot(db:DatabaseSync,org:number,jobId:number){
 // Only never-started local work is eligible for real operations. No new
 // publication, requeue, retry, resume, limit change or external action here.
 function liveSnapshot(db:DatabaseSync,org:number,jobId:number,action:LiveAction,scheduledAt:string|null,now:number){
-  const j=db.prepare("SELECT j.id,j.vehicle_id vehicleId,j.social_account_id accountId,j.status,j.paused,j.extension_visible visible,j.scheduled_at scheduledAt,j.updated_at updatedAt,j.lease_token leaseToken,j.lease_owner leaseOwner,j.lease_expires_at leaseExpiresAt,j.last_lease_token lastLeaseToken,j.publish_attempt_at publishAttemptAt,j.fill_report fillReport,j.started_at startedAt,j.filled_at filledAt,j.attempt_count attempts,j.retry_count retries,j.result_url resultUrl,j.error_code errorCode,v.status vehicleStatus,v.sold_at soldAt FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id AND v.organization_id=j.organization_id WHERE j.organization_id=? AND j.id=?").get(org,jobId)
+  const j=db.prepare("SELECT j.id,j.vehicle_id vehicleId,j.social_account_id accountId,j.status,j.paused,j.extension_visible visible,j.scheduled_at scheduledAt,j.updated_at updatedAt,j.lease_token leaseToken,j.lease_owner leaseOwner,j.lease_expires_at leaseExpiresAt,j.last_lease_token lastLeaseToken,j.publish_attempt_at publishAttemptAt,j.fill_report fillReport,j.started_at startedAt,j.filled_at filledAt,j.attempt_count attempts,j.retry_count retries,j.result_url resultUrl,j.error_code errorCode,j.removed_at removedAt,j.execution_tab_id executionTabId,j.execution_document executionDocument,j.execution_document_id executionDocumentId,v.status vehicleStatus,v.sold_at soldAt FROM publication_jobs j JOIN vehicles v ON v.id=j.vehicle_id AND v.organization_id=j.organization_id WHERE j.organization_id=? AND j.id=?").get(org,jobId)
   if(!j||j.status!=='pending'||j.leaseToken||j.leaseOwner||j.leaseExpiresAt||j.lastLeaseToken||j.startedAt||j.filledAt||j.resultUrl||j.errorCode||j.attempts!==0||j.retries!==0||j.soldAt||j.vehicleStatus==='Vendido'||publicationMayExist(j)||openResultConflict(db,org,jobId))return null
+  if(j.removedAt||j.executionTabId!=null||j.executionDocument||j.executionDocumentId)return null
   if(j.fillReport&&j.fillReport!==''&&j.fillReport!=='{}')return null
   if(db.prepare("SELECT 1 FROM publication_job_events WHERE organization_id=? AND publication_job_id=? AND event_type IN ('filling_started','auto_published','late_publish_confirmed','confirmed_published','filled_waiting_confirmation','publish_result_unknown','fill_error','fill_result_conflict') LIMIT 1").get(org,jobId))return null
   if(db.prepare('SELECT 1 FROM publication_listing_ledger WHERE organization_id=? AND publication_job_id=? LIMIT 1').get(org,jobId))return null
@@ -102,6 +103,22 @@ function liveSnapshot(db:DatabaseSync,org:number,jobId:number,action:LiveAction,
   }else if(scheduledAt!==null)return null
   const event=db.prepare('SELECT COALESCE(MAX(id),0) n FROM publication_job_events WHERE organization_id=? AND publication_job_id=?').get(org,jobId)?.n
   return {digest:hash(JSON.stringify([j,event,action,scheduledAt])),vehicleId:j.vehicleId,accountId:j.accountId,scheduledAt:j.scheduledAt}
+}
+// Read-only preflight for a real user, not a model tool. The grant and
+// snapshot must be checked again at proposal and confirmation.
+export function commanderAvailableActions(db:DatabaseSync,org:number,actor:CommanderActor,jobId:number,c:Credentials,now=Date.now()){
+  if(!Number.isSafeInteger(jobId)||jobId<1)return 'ID de trabalho inválido.'
+  const actions:LiveAction[]=['pausar_trabalho_real','adiar_trabalho','cancelar_trabalho_pendente']
+  const allowed=actions.filter(action=>permitted(db,org,actor,action,c))
+  if(!allowed.length)return 'Nenhuma permissão de operação real habilitada para este usuário.'
+  const eligible=allowed.filter(action=>liveSnapshot(db,org,jobId,action,
+    action==='adiar_trabalho'?new Date(now+30*86400000).toISOString():null,now))
+  if(!eligible.length)return 'Nenhuma ação real elegível para este trabalho. Consulte o painel.'
+  const lines=eligible.map(action=>action==='pausar_trabalho_real'?'/pausar '+jobId:
+    action==='adiar_trabalho'?'/adiar '+jobId+' AAAA-MM-DDTHH:MM-03:00 (horário futuro sujeito a validação)':
+    '/cancelar_trabalho '+jobId)
+  return ['Ações elegíveis agora — trabalho #'+jobId,...lines,
+    'Consulta somente leitura. Limites de propostas e estado serão revalidados; cada operação exige confirmação individual. Nenhuma ação foi executada.'].join('\n')
 }
 export function parseCommanderSchedule(raw:string){
   if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}-03:00$/.test(raw))return null
