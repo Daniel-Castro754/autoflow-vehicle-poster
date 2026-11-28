@@ -6,7 +6,7 @@ import { buildCommanderMenu, verifyCommanderMenu, type MenuScope } from './comma
 import { parseSqliteTimestamp } from './profile-capacity.ts'
 import { logger } from '../lib/logger.ts'
 import { answerCommanderQuestion, commanderUsage } from './commander-conversation.ts'
-import { proposeCommanderPause, proposeCommanderAction, parseCommanderSchedule, decideCommanderAction } from './commander-permissions.ts'
+import { proposeCommanderPause, proposeCommanderAction, parseCommanderSchedule, decideCommanderAction, commanderAvailableActions } from './commander-permissions.ts'
 import { clearCommanderMemory, commanderMemoryCount, rememberCommanderQueries, type MemoryScope } from './commander-memory.ts'
 
 type Credentials = { telegramBotToken: string; telegramChatId: string }
@@ -111,7 +111,7 @@ function menuScope(row:Row,c:Credentials,userId:string):MenuScope {
   return {organizationId:row.organization_id,chatId:c.telegramChatId,userId,revision:row.revision,token:c.telegramBotToken}
 }
 function helpText(username:string){
-  return 'AutoFlow AI Commander — consulta somente leitura\n/status — situação do sistema\n/meu_id — seu identificador\n/ajuda — comandos\n/menu — atalhos de consulta\n/ia pergunta — consulta DeepSeek, se ativada no painel.\nResponda diretamente a uma mensagem do bot para conversar. Menções simples @'+username+' dependem da entrega pelo Telegram.\n/limpar_memoria — limpa suas referências locais. /solicitar_pausa ID — demonstração de autorização, se permitida.\n/autorizar CÓDIGO ou /recusar CÓDIGO — decidir proposta. /pausar ID, /adiar ID AAAA-MM-DDTHH:MM-03:00, /cancelar_trabalho ID — propostas reais se autorizadas. Não publica nem retira anúncios.'
+  return 'AutoFlow AI Commander — consulta somente leitura\n/status — situação do sistema\n/meu_id — seu identificador\n/ajuda — comandos\n/menu — atalhos de consulta\n/ia pergunta — consulta DeepSeek, se ativada no painel.\nResponda diretamente a uma mensagem do bot para conversar. Menções simples @'+username+' dependem da entrega pelo Telegram.\n/limpar_memoria — limpa suas referências locais. /solicitar_pausa ID — demonstração de autorização, se permitida.\n/acoes ID — consultar ações reais elegíveis.\n/autorizar CÓDIGO ou /recusar CÓDIGO — decidir proposta. /pausar ID, /adiar ID AAAA-MM-DDTHH:MM-03:00, /cancelar_trabalho ID — propostas reais se autorizadas. Não publica nem retira anúncios.'
 }
 function callbackReply(db:DatabaseSync,row:Row,c:Credentials,username:string,botId:number|undefined,callback:Callback,now:number):Reply{
   const m=callback.message, user=String(callback.from?.id)
@@ -138,6 +138,11 @@ function replyFor(db:DatabaseSync,row:Row,c:Credentials,username:string,botId:nu
     !Number.isSafeInteger(m.date)||Number(m.date)*1000<Math.floor(row.activated_at/1000)*1000||
     now-Number(m.date)*1000>120000||Number(m.date)*1000>now+30000||
     typeof m.text!=='string'||m.text.length>1100||m.forward_origin)return null
+  const check=m.text.trim().match(/^\/acoes(?:@([A-Za-z0-9_]+))?\s+([1-9]\d{0,15})$/i)
+  if(check){
+    if((check[1]&&check[1].toLowerCase()!==username.toLowerCase())||!ids(row).includes(String(m.from.id)))return null
+    return commanderAvailableActions(db,row.organization_id,{userId:String(m.from.id),destinationHash:row.destination_hash,receiverRevision:row.revision},Number(check[2]),c,now)
+  }
   const live=m.text.trim().match(/^\/(pausar|adiar|cancelar_trabalho)(?:@([A-Za-z0-9_]+))?\s+([1-9]\d{0,15})(?:\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}-03:00))?$/i)
   if(live){
     if((live[2]&&live[2].toLowerCase()!==username.toLowerCase())||!ids(row).includes(String(m.from.id)))return null
