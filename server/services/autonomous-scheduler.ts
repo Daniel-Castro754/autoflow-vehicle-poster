@@ -22,9 +22,12 @@ export function createAutonomousScheduler(
   let timer: ReturnType<typeof setInterval> | undefined
   let running = false
   let stopped = false
+  let generation = 0
+  let restartPending = false
   async function sweep() {
     if (running || stopped) return
     running = true
+    const sweepGeneration = generation
     try {
       const organizations = db
         .prepare(
@@ -37,12 +40,23 @@ export function createAutonomousScheduler(
         .all() as Array<{ id: number }>
       // Fixed-size pool: a slow AI request in one tenant must not stall all others.
       // No whole-pipeline automatic retry here: a failed run might already have created jobs.
+      // A queued tenant may be disabled, rescheduled or claimed by another
+      // process while waiting behind a slow tenant. The coordinator still
+      // owns the final transactional claim; this is an early revalidation.
+      const due = db.prepare(
+        `SELECT 1 FROM organization_settings s
+        LEFT JOIN autopilot_state a ON a.organization_id=s.organization_id
+        WHERE s.organization_id=? AND s.autopilot_enabled=1
+        AND (a.next_run_at IS NULL OR datetime(a.next_run_at)<=CURRENT_TIMESTAMP)
+        AND (a.lease_expires_at IS NULL OR datetime(a.lease_expires_at)<=CURRENT_TIMESTAMP)`,
+      )
       let nextIndex = 0
       const work = async () => {
-        while (!stopped) {
+        while (!stopped && sweepGeneration === generation) {
           const org = organizations[nextIndex++]
           if (!org) break
           try {
+            if (!due.get(org.id)) continue
             await run(db, org.id, null, { automatic: true })
           } catch (error) {
             logger.error('AutonomousScheduler', 'Falha na rodada de agendamento', {
@@ -61,6 +75,12 @@ export function createAutonomousScheduler(
       logger.error('AutonomousScheduler', 'Falha na consulta de organizações', { error })
     } finally {
       running = false
+      // If start() followed stop() during an in-flight run, discard the old
+      // snapshot and immediately perform one fresh sweep after it drains.
+      if (restartPending && !stopped) {
+        restartPending = false
+        void sweep()
+      }
     }
   }
   return {
@@ -72,10 +92,13 @@ export function createAutonomousScheduler(
         void sweep()
       }, intervalMs)
       timer.unref()
-      void sweep()
+      if (running) restartPending = true
+      else void sweep()
     },
     stop() {
       stopped = true
+      generation++
+      restartPending = false
       clearInterval(timer)
       timer = undefined
     },
