@@ -147,3 +147,20 @@ Fluxo manual autorizado:
 Cada foto é baixada novamente e comparada ao hash da prévia. Uma falha interrompe a sequência, com contagem parcial; fotos já aceitas não são revertidas. Repetir após nova prévia é idempotente para o mesmo conteúdo. Não se substitui a galeria nem se cria publicação. A ordem do manifesto não garante a ordem desejada das fotos; revisão no painel continua necessária.
 
 Testes offline: `npm run test:stock-drive`, `npm run test:stock-sheet`, `npm run test:integration-credentials`. Não houve homologação com uma conta Google real. A configuração de fontes, sincronização periódica, tratamento autorizado de alterações e vendas e liberação operacional continuam pendentes.
+
+## Etapa 4.8 — Execução periódica local, opt-in
+
+O runner `node scripts/stock-sync-runner.mjs` executa uma rodada quando devida e termina; com `--watch`, continua no processo local, sem depender do agendador de publicações. Não é instalado nem iniciado automaticamente pelo Docker. Executar a partir da instalação principal, depois de configurar e homologar as fontes e a credencial local conforme 4.6/4.7. O processo precisa de Node 24 e dependências instaladas. As variáveis secretas devem ser fornecidas pelo ambiente seguro do usuário; não inserir tokens em comandos registrados ou arquivos versionados.
+
+- `AUTOFLOW_STOCK_SYNC_INTERVAL_MINUTES`: intervalo após o término da rodada, padrão 30 minutos, mínimo 5 e máximo 1440.
+- `node scripts/stock-sync-runner.mjs --watch`: somente prévias recorrentes (padrão). Sem criação de veículos ou fotos.
+- `--mode=drafts`, `--mode=photos`, `--mode=drafts-and-photos`: modos explícitos de escrita, respeitando os escopos e revalidações da API. O último executa criação de rascunhos primeiro e, se bem-sucedida, nova leitura/prévia e envio de fotos. Requer pasta Drive configurada. Não aplica vendas, alterações de registros existentes ou promoção para Pronto.
+- `node scripts/stock-sync-runner.mjs --status`: consulta a última rodada concluída e a próxima previsão (timestamps Unix em milissegundos).
+
+O arquivo `data/stock-sync-runner.sqlite` é um SQLite separado do banco de estoque. A transação de escrita nele impede sobreposição entre instâncias que compartilham **o mesmo arquivo local**; não mantém o banco de estoque bloqueado durante chamadas externas. A próxima rodada é persistida, inclusive em reinicializações. Falhas duplicam o intervalo até o máximo de 24 horas e interrompem os passos seguintes. Uma rodada bem-sucedida retorna ao intervalo normal. São mantidas as últimas 100 rodadas com contagens, fase da falha e horários, sem tokens, IDs de fontes, nomes de arquivos ou mensagens brutas do provedor.
+
+O modo é escolhido em cada invocação; uma rodada ainda não devida não é antecipada ao mudar o modo. O modo watch pode ser encerrado com Ctrl+C, aguardando a rodada atual. Não há prazo global por rodada além dos limites e timeouts de requisição dos conectores. Em interrupção abrupta, o bloqueio SQLite é liberado pelo sistema operacional, mas uma operação externa/local já aceita pode ter ocorrido sem o registro final; a rodada seguinte revalida e usa os endpoints idempotentes. Não há transação distribuída entre Google, estoque e galeria.
+
+O bloqueio não cobre invocações manuais do CLI antigo nem cópias do repositório com arquivos de estado diferentes. Usar somente a instalação principal para execução real e não agendar o CLI antigo em paralelo. Um único arquivo serve a uma configuração local de fonte; não há orquestração multi-tenant de fontes neste runner. O agendamento no Windows, inicialização automática após reinício e integração do status com painel/Telegram ainda não foram configurados. A sincronização real e permissões Google continuam sem homologação.
+
+Teste offline: `npm run test:stock-sync-runner`. O teste usa duas conexões no mesmo SQLite temporário e funções de leitura/escrita simuladas; não acessa o Google nem o estoque real.
