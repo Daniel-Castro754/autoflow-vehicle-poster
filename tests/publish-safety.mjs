@@ -497,6 +497,23 @@ try {
   if (recoveredC.retryCount !== 1)
     throw new Error('Uma recuperação automática não-esgotada deveria incrementar retry_count.')
 
+  const recoveryEvent = testDb.prepare(
+    "SELECT details FROM publication_job_events WHERE publication_job_id=? AND event_type='stalled_recovered' ORDER BY id DESC LIMIT 1",
+  ).get(publicationC.id)
+  assert(recoveryEvent)
+  const budget = JSON.parse(recoveryEvent.details)
+  assert.equal(budget.previousRetryCount, 0)
+  assert.equal(budget.retryCount, 1)
+  assert.equal(budget.maxRetries, 3)
+  assert.equal(budget.remainingRetries, 2)
+  assert.equal(budget.recoveredBy, 'health_monitor')
+  await runHealthCheck(testDb, { autoRecover: true })
+  assert.equal(jobRow(publicationC.id).retryCount, 1, 'Another sweep cannot spend the same recovery twice')
+  assert.equal(
+    testDb.prepare("SELECT COUNT(*) n FROM publication_job_events WHERE publication_job_id=? AND event_type='stalled_recovered'").get(publicationC.id).n,
+    1,
+  )
+
   testDb.prepare('UPDATE publication_jobs SET retry_count=3 WHERE id=?').run(publicationC.id)
   await call(`/extension/jobs/${publicationC.id}/prepare`, adminToken, {
     method: 'POST',
@@ -509,6 +526,16 @@ try {
     throw new Error(
       'Um job que esgotou o orçamento de retry deveria virar erro em vez de repetir para sempre.',
     )
+
+  assert.equal(exhaustedC.retryCount, 3, 'Exhaustion cannot consume an extra retry')
+  const exhaustionBudget = JSON.parse(testDb.prepare(
+    "SELECT details FROM publication_job_events WHERE publication_job_id=? AND event_type='stalled_exhausted' ORDER BY id DESC LIMIT 1",
+  ).get(publicationC.id).details)
+  assert.equal(exhaustionBudget.previousRetryCount, 3)
+  assert.equal(exhaustionBudget.retryCount, 3)
+  assert.equal(exhaustionBudget.maxRetries, 3)
+  assert.equal(exhaustionBudget.remainingRetries, 0)
+  assert.equal(exhaustionBudget.recoveredBy, 'health_monitor')
 
   // 3a. Recuperação manual usa o mesmo orçamento de retry do monitor e não pode criar loop infinito.
   const manualVehicle = await createReadyVehicle(adminToken)
@@ -935,6 +962,7 @@ try {
         stalledConflictRemainsQuarantined: true,
         staleRecoveryRequiresConfirmation: true,
         safeRecoveryRespectsMaxRetries: true,
+        recoveryBudgetAuditable: true,
         layoutDriftSignalPersisted: true,
         autoGroupCurationApplied: true,
         scheduleLearnsFromHistory: true,
