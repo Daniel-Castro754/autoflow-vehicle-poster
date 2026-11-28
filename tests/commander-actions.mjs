@@ -65,6 +65,11 @@ db.exec("UPDATE publication_jobs SET attempt_count=1 WHERE id=4")
 assert(decide(stale).includes('alterado'))
 assert.equal(job(4).status,'pending')
 db.exec("UPDATE publication_jobs SET attempt_count=0 WHERE id=4")
+const residual=code(propose('cancelar_trabalho_pendente',4))
+db.exec("UPDATE publication_jobs SET execution_document_id='new-evidence' WHERE id=4")
+assert(decide(residual).includes('alterado'))
+assert.equal(job(4).status,'pending')
+db.exec('UPDATE publication_jobs SET execution_document_id=NULL WHERE id=4')
 const messages=[]
 let updates=[{update_id:1,message:{date:Math.floor(now/1000),text:'/cancelar_trabalho@AutoFlowVeiculosBot 4',from:{id:100,is_bot:false},chat:{id:-123,type:'group'}}}]
 const sweep=()=>sweepTelegramCommander(db,{credentials,now:()=>now,request:async(_token,method)=>({ok:true,result:method==='getMe'?{is_bot:true,username:'AutoFlowVeiculosBot'}:updates}),send:async(text)=>{messages.push(text);return true}})
