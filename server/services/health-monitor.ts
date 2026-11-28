@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { sendCriticalAlert } from './alerting.ts'
 import { getAlertCredentials } from './credential-vault.ts'
 import { publicationMayExist, ambiguousPublicationReport } from './publication-evidence.ts'
+import { openResultConflict } from './result-conflicts.ts'
 import { logger } from '../lib/logger.ts'
 import { warnSlowExecutions } from './proactive-alerts.ts'
 import { recordOperationalSignal } from './operational-incidents.ts'
@@ -92,7 +93,9 @@ export async function runHealthCheck(
         // O checkpoint de publish-check foi registrado: o clique em "Publicar" pode já ter
         // acontecido antes de perdermos contato. Não é seguro assumir que nada foi publicado —
         // o job vai para confirmação manual em vez de voltar direto para a fila.
-        if (publicationMayExist(job)) {
+        const possiblePublication = publicationMayExist(job)
+        const conflictingResult = openResultConflict(db, job.organizationId, job.id)
+        if (possiblePublication || conflictingResult) {
           db.exec('BEGIN IMMEDIATE')
           try {
             const updated = db
@@ -109,7 +112,7 @@ export async function runHealthCheck(
             `,
               )
               .run(
-                JSON.stringify(ambiguousPublicationReport(job.fillReport)),
+                possiblePublication ? JSON.stringify(ambiguousPublicationReport(job.fillReport)) : job.fillReport,
                 job.id,
                 job.organizationId,
                 job.leaseToken,
@@ -129,7 +132,11 @@ export async function runHealthCheck(
             ).run(
               job.organizationId,
               job.id,
-              JSON.stringify({ elapsedMinutes, recoveredBy: 'health_monitor' }),
+              JSON.stringify({
+                elapsedMinutes,
+                recoveredBy: 'health_monitor',
+                reason: conflictingResult ? 'open_result_conflict' : 'publication_uncertain',
+              }),
             )
             recordOperationalSignal(db, job.organizationId, job.id, 'stalled_publish_ambiguous')
 
@@ -148,7 +155,9 @@ export async function runHealthCheck(
               jobId: job.id,
               accountLabel: job.accountLabel,
               type: 'job_stalled_publish_ambiguous',
-              message: `Trabalho travado há ${elapsedMinutes} min (${job.year} ${job.make} ${job.model}) pode já ter sido publicado no Facebook antes da falha. Verifique "Seus classificados" antes de liberar uma nova tentativa.`,
+              message: conflictingResult
+                ? `Trabalho #${job.id} travado com conflito de resultado. Revise as evidências e resolva o conflito antes de qualquer nova tentativa.`
+                : `Trabalho travado há ${elapsedMinutes} min (${job.year} ${job.make} ${job.model}) pode já ter sido publicado no Facebook antes da falha. Verifique "Seus classificados" antes de liberar uma nova tentativa.`,
               attemptCount: job.attemptCount,
             },
             getAlertCredentials(db, job.organizationId),
@@ -162,6 +171,12 @@ export async function runHealthCheck(
         const exhausted = job.retryCount >= job.maxRetries
         db.exec('BEGIN IMMEDIATE')
         try {
+          // A different process may have recorded a conflicting result after
+          // the initial read. Keep the job fenced for the next monitor sweep.
+          if (openResultConflict(db, job.organizationId, job.id)) {
+            db.exec('ROLLBACK')
+            continue
+          }
           if (exhausted) {
             const updated = db
               .prepare(
