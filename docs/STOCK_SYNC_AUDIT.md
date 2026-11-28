@@ -97,3 +97,15 @@ A resposta `validation` contém totais de linhas com campos de origem completos 
 - `localPhotoCount`, `declaredNewPhotos`, `photoConflicts`, `requiresPhotoVerification` e `needsPhotos`: evidência de registros locais e manifesto, sem comprovar arquivos reais ou conteúdo externo.
 
 As diferenças também incluem os campos adicionais fornecidos. Um campo inválido ou vazio pode aparecer como diferença, mas a validação deve ser respeitada antes de qualquer futura aplicação. Nenhuma alteração é aplicada por esta rota. A completude de campos não equivale a status Pronto, autorização, ausência de bloqueios ou aptidão para publicar. A futura gravação deverá revalidar identidade, dados, conteúdo e estado atual, usando as regras de cadastro e publicação existentes.
+
+## Etapa 4.5 — Conciliação de situação comercial
+
+A linha pode declarar `commercialState: "available"` ou `commercialState: "sold"`. O campo é opcional e não corresponde ao status operacional do AutoFlow. Outros valores são rejeitados; a integração deverá mapear os valores da fonte real explicitamente.
+
+Uma venda declarada nunca é candidata a criação ou atualização cadastral normal. Sem correspondência local, com identidade ambígua ou com ano, fabricante, modelo ou VIN local não conferidos, exige revisão de identidade. Mesmo uma venda que corresponda ao cadastro local exige revisão humana da origem e do impacto sobre os trabalhos. Uma venda já registrada localmente é identificada sem nova ação; uma declaração de disponibilidade para um veículo vendido exige revisão e não o reabre.
+
+A resposta `commercialReview` lista sinais explícitos, vendas já registradas, divergências, IDs locais quando resolvidos, presença de trabalhos protegidos e necessidade de revisão. `executed` permanece falso. O campo `validation.identityConflict` conserva o comportamento anterior de sinalizar qualquer conflito de conciliação, inclusive os novos motivos comerciais; não significa necessariamente erro de VIN.
+
+Leitura parcial pode apresentar sinais explícitos para revisão, nunca executar uma venda. Fonte vazia, falha de acesso ou ausência de linha não são sinal de venda. Fotos novas para linhas de venda não são candidatas a importação. Nenhuma mudança é feita no estoque ou na fila. Após verificação humana, o fluxo existente de marcar vendido no painel continua sendo o caminho de aplicação, com revisão de execuções e anúncios incertos; não é substituído por esta prévia.
+
+A leitura real do Google, a autorização da fonte, o agendamento e a aplicação automática ainda precisam de implementação e homologação específicas.
