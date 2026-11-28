@@ -177,6 +177,22 @@ export async function runHealthCheck(
             db.exec('ROLLBACK')
             continue
           }
+          // Retry budget and the original execution must still match the
+          // inspected snapshot under the write lock. A concurrent adjustment
+          // must be evaluated afresh rather than spending a stale budget.
+          const current = db.prepare(
+            `SELECT j.retry_count retryCount,COALESCE(j.max_retries,s.max_retries,3) maxRetries,
+              j.started_at startedAt,COALESCE(s.stuck_timeout_minutes,15) timeoutMinutes
+              FROM publication_jobs j LEFT JOIN organization_settings s ON s.organization_id=j.organization_id
+              WHERE j.id=? AND j.organization_id=?`,
+          ).get(job.id, job.organizationId) as
+            | { retryCount: number; maxRetries: number; startedAt: string | null; timeoutMinutes: number }
+            | undefined
+          if (!current || current.retryCount !== job.retryCount || current.maxRetries !== job.maxRetries ||
+              current.startedAt !== job.startedAt || current.timeoutMinutes !== job.timeoutMinutes) {
+            db.exec('ROLLBACK')
+            continue
+          }
           if (exhausted) {
             const updated = db
               .prepare(
@@ -208,7 +224,10 @@ export async function runHealthCheck(
               JSON.stringify({
                 elapsedMinutes,
                 retryCount: job.retryCount,
+                previousRetryCount: job.retryCount,
                 maxRetries: job.maxRetries,
+                remainingRetries: 0,
+                recoveredBy: 'health_monitor',
               }),
             )
             recordOperationalSignal(db, job.organizationId, job.id, 'stalled_exhausted')
@@ -241,7 +260,14 @@ export async function runHealthCheck(
             ).run(
               job.organizationId,
               job.id,
-              JSON.stringify({ elapsedMinutes, recoveredBy: 'health_monitor' }),
+              JSON.stringify({
+                elapsedMinutes,
+                recoveredBy: 'health_monitor',
+                previousRetryCount: job.retryCount,
+                retryCount: job.retryCount + 1,
+                maxRetries: job.maxRetries,
+                remainingRetries: Math.max(0, job.maxRetries - job.retryCount - 1),
+              }),
             )
             recordOperationalSignal(db, job.organizationId, job.id, 'stalled_recovered')
           }
