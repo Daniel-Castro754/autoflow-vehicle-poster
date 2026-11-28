@@ -84,3 +84,16 @@ A resposta `photoPreview` distingue fotos novas, presentes e conflitos. A mesma 
 Os hashes na prévia são declarados pelo remetente e não comprovam a autenticidade da foto. O upload de conteúdo real continua exigindo `photos:write`, a validação do formato e o SHA-256 calculado pelo servidor. O endpoint existente de upload também aceita `stockCode` e `sha256` opcionais; o futuro conector deve fornecê-los ambos para conferir a associação e o conteúdo. A gravação revalida credencial, estado, duplicidade e limite de galeria dentro de uma transação de escrita após a decodificação assíncrona. Imagens com o mesmo conteúdo em outro veículo da mesma organização são recusadas; o mesmo conteúdo no próprio veículo permanece idempotente. Os arquivos não são substituídos nem removidos por sincronização.
 
 Não há leitura ou download automático do Google Drive nesta etapa. Ainda será necessário definir e autorizar as fontes reais, implementar o conector e homologar o fluxo de aplicação.
+
+## Etapa 4.4 — Validação dos dados cadastrais
+
+A prévia aceita adicionalmente, em cada linha, `vehicleType`, `location`, `transmission`, `fuelType`, `bodyType`, `exteriorColor`, `interiorColor`, `condition` e `description`. Estes campos continuam opcionais no envelope para compatibilidade com a versão anterior. Valores enviados são strings limitadas (200 caracteres, descrição até 4.000); os catálogos são os mesmos utilizados pelo cadastro do AutoFlow. Campos básicos e identidade continuam sujeitos às validações estritas anteriores. Não são aceitos campos de status ou comandos de execução.
+
+A resposta `validation` contém totais de linhas com campos de origem completos ou incompletos, e por linha:
+
+- `missingFields` e `invalidFields`: nomes dos campos ausentes/vazios ou fora do catálogo, sem reproduzir os valores inválidos.
+- `sourceFieldsComplete`: completude dos dados declarados na origem, não do cadastro local. Não usa valores anteriores, descrição gerada ou localização padrão para ocultar lacunas.
+- `identityConflict`: conflito de conciliação, independente da completude.
+- `localPhotoCount`, `declaredNewPhotos`, `photoConflicts`, `requiresPhotoVerification` e `needsPhotos`: evidência de registros locais e manifesto, sem comprovar arquivos reais ou conteúdo externo.
+
+As diferenças também incluem os campos adicionais fornecidos. Um campo inválido ou vazio pode aparecer como diferença, mas a validação deve ser respeitada antes de qualquer futura aplicação. Nenhuma alteração é aplicada por esta rota. A completude de campos não equivale a status Pronto, autorização, ausência de bloqueios ou aptidão para publicar. A futura gravação deverá revalidar identidade, dados, conteúdo e estado atual, usando as regras de cadastro e publicação existentes.
