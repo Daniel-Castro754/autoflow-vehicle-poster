@@ -5,7 +5,7 @@ export const commanderMenuRows = [
   [{ action: 'profiles', label: '👥 Perfis', question: 'Qual é a situação dos perfis e de seus consumidores?' }, { action: 'queue', label: '📋 Fila', question: 'Qual é a situação da fila e quais trabalhos aguardam revisão?' }],
   [{ action: 'diagnosis', label: '⚠️ Diagnóstico', question: 'Quais problemas operacionais estão comprovados e quais os próximos passos?' }, { action: 'performance', label: '📈 Desempenho', question: 'Resuma o desempenho operacional registrado hoje e as limitações dos dados.' }],
   [{ action: 'memory', label: '🧠 Memória' }, { action: 'help', label: '❔ Ajuda' }],
-  [{ action: 'chat', label: '💬 Conversar com a IA', requiresAi: true }],
+  [{ action: 'supervisao', label: '🔎 Supervisão' }, { action: 'chat', label: '💬 Conversar com a IA', requiresAi: true }],
 ] as const
 
 export type MenuScope = { organizationId: number; chatId: string; userId: string; revision: number; token: string }
