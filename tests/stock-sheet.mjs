@@ -1,0 +1,37 @@
+import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import { sheetStockSnapshot, stockSheetUrl } from '../scripts/stock-sheet-lib.mjs'
+const header=['stockCode','year','make','model','price','km','commercialState','vehicleType','location','transmission','fuelType','bodyType','exteriorColor','interiorColor','condition','description','vin','trim']
+const row=['0012',2022,'Volkswagen','Nivus',99000,45000,'available','Carro/picape','Criciúma, SC','Automático','Flex','SUV','Branco','Preto','Bom','Descrição fornecida']
+const data=sheetStockSnapshot([header,row,[],[...row.slice(0,6),'sold',...row.slice(7),'VIN123456','Comfortline']])
+assert.equal(data.version,1)
+assert.equal(data.sourceState,'complete')
+assert.equal(data.source,'sheets')
+assert.equal(data.rows.length,2)
+assert.equal(data.rows[0].stockCode,'0012')
+assert.equal(data.rows[0].price,99000)
+assert(!Object.hasOwn(data.rows[0],'vin'))
+assert.equal(data.rows[1].commercialState,'sold')
+assert.equal(data.rows[1].vin,'VIN123456')
+assert.equal(data.rows[1].trim,'Comfortline')
+assert.throws(()=>sheetStockSnapshot([header,[12,...row.slice(1)]]))
+assert.throws(()=>sheetStockSnapshot([header,[...row.slice(0,4),'99000',...row.slice(5)]]))
+assert.throws(()=>sheetStockSnapshot([header,[...row.slice(0,6),'Vendido',...row.slice(7)]]))
+assert.throws(()=>sheetStockSnapshot([[...header,'unknown'],row]))
+assert.throws(()=>sheetStockSnapshot([header.slice(1),row.slice(1)]))
+assert.throws(()=>sheetStockSnapshot([header.slice(0,-1).concat('stockCode'),row]))
+assert.throws(()=>sheetStockSnapshot([header,row.slice(0,10)]))
+assert.throws(()=>sheetStockSnapshot([header,Array(header.length+1).fill('x')]))
+assert.throws(()=>sheetStockSnapshot([header,...Array(501).fill(row)]))
+assert.deepEqual(sheetStockSnapshot([header]).rows,[])
+const url=stockSheetUrl('abcDEF012345','Estoque do João')
+assert.equal(url.origin,'https://sheets.googleapis.com')
+assert.equal(url.searchParams.get('valueRenderOption'),'UNFORMATTED_VALUE')
+assert(decodeURIComponent(url.pathname).endsWith("/values/'Estoque do João'"))
+assert(decodeURIComponent(stockSheetUrl('abcDEF012345',"D'Ávila").pathname).endsWith("/values/'D''Ávila'"))
+assert.throws(()=>stockSheetUrl('https://example.test','Estoque'))
+// Verify the real CLI loads, denies unsupported modes and stops before network.
+const cli=spawnSync(process.execPath,['scripts/stock-sheet.mjs','--publish'],{encoding:'utf8'})
+assert.equal(cli.status,1)
+assert.match(cli.stderr,/Use sem argumentos/)
+console.log('✓ Google Sheets stock mapping: strict full-tab schema, typed values, no truncation or unsupported execution modes')

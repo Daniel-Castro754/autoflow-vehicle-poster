@@ -109,3 +109,24 @@ A resposta `commercialReview` lista sinais explícitos, vendas já registradas, 
 Leitura parcial pode apresentar sinais explícitos para revisão, nunca executar uma venda. Fonte vazia, falha de acesso ou ausência de linha não são sinal de venda. Fotos novas para linhas de venda não são candidatas a importação. Nenhuma mudança é feita no estoque ou na fila. Após verificação humana, o fluxo existente de marcar vendido no painel continua sendo o caminho de aplicação, com revisão de execuções e anúncios incertos; não é substituído por esta prévia.
 
 A leitura real do Google, a autorização da fonte, o agendamento e a aplicação automática ainda precisam de implementação e homologação específicas.
+
+## Etapa 4.6 — Leitura Google Sheets e aplicação restrita
+
+O comando `node scripts/stock-sheet.mjs` lê uma aba dedicada do Google Sheets com conta de serviço e escopo `spreadsheets.readonly`, envia o snapshot à API local e exibe contagens da prévia. O login Google do painel continua independente. A leitura usa a API oficial `spreadsheets.values.get`, com valores não formatados; não lê o Drive.
+
+Configuração local (não enviar os segredos ao Git, ao chat ou aos logs):
+
+- Habilitar a API Google Sheets no projeto Google Cloud e compartilhar somente a planilha dedicada com a conta de serviço, como leitora. Armazenar o arquivo JSON da conta de serviço fora do repositório e definir `GOOGLE_APPLICATION_CREDENTIALS` com seu caminho.
+- Definir `AUTOFLOW_STOCK_SHEET_ID` com o ID da planilha e `AUTOFLOW_STOCK_SHEET_TAB` com o nome exato da aba. `AUTOFLOW_INTEGRATION_TOKEN` deve ser uma credencial local com `vehicles:read` para prévia. O destino da API é o loopback HTTP (padrão `http://127.0.0.1:3333`).
+- Primeira linha da aba: cabeçalhos exatos (ordem livre) `stockCode, year, make, model, price, km, commercialState, vehicleType, location, transmission, fuelType, bodyType, exteriorColor, interiorColor, condition, description`. Opcionais: `vin, trim`. Não usar colunas extras, cabeçalhos duplicados ou linhas de totais. Códigos de estoque e VIN são texto; ano, preço e quilometragem são células numéricas. Situação comercial é `available` ou `sold`, sem inferência de estado. Os valores de catálogo devem seguir o AutoFlow. Não se assume compatibilidade com a planilha real existente.
+- A leitura abrange a aba escolhida, com até 500 linhas de dados, resposta Google de até 2 MiB e snapshot de até 1 MiB. Leituras excessivas, estrutura inválida, falhas e credenciais ausentes interrompem a operação. Uma aba dedicada não comprova que todo o estoque real está nela. Não há truncamento silencioso.
+
+Para aplicação, um administrador deve emitir uma credencial específica pela API de credenciais com os três escopos `stock:apply`, `vehicles:read` e `vehicles:create`. O novo escopo não é atribuído automaticamente a credenciais existentes. A configuração do painel para emissão desse escopo não foi alterada nesta etapa.
+
+Somente após homologar a leitura, o operador pode executar `node scripts/stock-sheet.mjs --apply-drafts`. O comando solicita `POST /api/integration/v1/stock/apply-drafts` com corpo `{ "confirm": "create_drafts", "snapshot": { ... } }`. O servidor revalida credencial e snapshot sob transação de escrita. Fontes parciais, vazias, com falha ou conflitos são recusadas; somente veículos novos, explicitamente disponíveis e com dados completos e válidos são criados como Rascunho. Veículos já existentes ou incompletos são ignorados com motivo; não há atualização automática de preços, situação comercial ou fotos. Repetir a mesma fonte não duplica os rascunhos. A ausência de foto não impede criar rascunho, mas impede elegibilidade para publicação.
+
+O agendador atual só poderá considerar esses veículos após revisão, fotos verificadas e promoção autorizada para Pronto pelo fluxo existente. A importação não cria publicações, não reabre vendidos, não altera limites e não aciona o Facebook. Não foi instalado agendamento periódico do leitor, nem conector de Drive, nem configuração real de credenciais. É necessário homologar a planilha, implementar a ingestão de fotos e estabelecer a execução periódica antes de concluir a automação em produção.
+
+Verificações: `npm run test:stock-sheet` (mapeamento offline e carregamento do CLI), `npm run test:integration-credentials` (aplicação transacional, escopos e idempotência). Nenhuma prova de acesso ao Google real é produzida por esses testes.
+
+Referência: https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets.values/get

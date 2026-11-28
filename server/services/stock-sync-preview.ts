@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { normalizeInventoryIdentifier, validateInventoryIdentifiers } from './vehicle-import.ts'
-import { vehicleOptions } from './vehicle-input.ts'
+import { vehicleOptions, validateVehicleBody } from './vehicle-input.ts'
 
 export class StockSyncInputError extends Error {}
 const detailFields=['vehicleType','location','transmission','fuelType','bodyType','exteriorColor','interiorColor','condition','description'] as const
@@ -218,4 +218,41 @@ function reviewCommercialState(rows:SourceRow[],entries:Entry[],local:LocalRow[]
     alreadyRecorded:items.filter(i=>i.disposition==='already_recorded').length,
     requiresReview:items.filter(i=>i.requiresHumanReview).length,items,
     note:'Situação comercial declarada pelo remetente, não comprovada. Venda explícita exige revisão da identidade, fonte e trabalhos existentes pelo operador. Ausência nunca é venda. Não reabre veículos vendidos, não altera status, fila ou anúncio externo.'}
+}
+
+// Caller holds BEGIN IMMEDIATE and has revalidated the explicit write grant.
+// Only previously unknown, explicitly available vehicles may be inserted.
+// Existing vehicles, photos, sales and publication jobs are never mutated.
+export function applyStockDrafts(db:DatabaseSync,org:number,actor:number|null,input:unknown){
+  const request=object(input)
+  if(Object.keys(request).some(k=>!['confirm','snapshot'].includes(k))||request.confirm!=='create_drafts')
+    return fail('Confirmação explícita create_drafts obrigatória.')
+  const preview=previewStockSync(db,org,request.snapshot)
+  const source=object(request.snapshot)
+  const rows=(source.rows as unknown[]).map(parseRow)
+  if(preview.sourceState!=='complete'||!rows.length||preview.counts.conflict||preview.photoPreview?.counts.conflict)
+    return {applied:false,reason:'snapshot_requires_review',created:[],counts:preview.counts}
+  const created:{stockCode:string;vehicleId:number}[]=[]
+  const skipped:{stockCode:string;reason:string}[]=[]
+  const insert=db.prepare(`INSERT INTO vehicles
+    (organization_id,year,make,model,trim,price,km,stock_code,vin,status,assigned_user_id,
+     vehicle_type,location,transmission,fuel_type,body_type,exterior_color,interior_color,vehicle_condition,description)
+    VALUES (?,?,?,?,?,?,?,?,?,'Rascunho',?,?,?,?,?,?,?,?,?,?)`)
+  for(const [i,row] of rows.entries()){
+    const entry=preview.entries[i]
+    if(entry.category!=='new'){
+      skipped.push({stockCode:row.stockCode,reason:entry.category==='changed'?'existing_change_requires_review':'already_exists'})
+      continue
+    }
+    if(row.commercialState!=='available'||!preview.validation.items[i].sourceFieldsComplete||
+      validateVehicleBody({...row,status:'Rascunho'})){
+      skipped.push({stockCode:row.stockCode,reason:'explicit_availability_and_complete_fields_required'})
+      continue
+    }
+    const result=insert.run(org,row.year,row.make,row.model,row.trim??'',row.price,row.km,row.stockCode,row.vin??'',actor,
+      row.vehicleType!,row.location!,row.transmission!,row.fuelType!,row.bodyType!,row.exteriorColor!,row.interiorColor!,row.condition!,row.description!)
+    created.push({stockCode:row.stockCode,vehicleId:Number(result.lastInsertRowid)})
+  }
+  return {applied:true,created,skipped,requiresReview:true,status:'Rascunho',
+    note:'Somente novos rascunhos; fotos, alterações existentes, vendas e promoção para Pronto exigem fluxo separado. Nenhum trabalho de publicação criado.'}
 }

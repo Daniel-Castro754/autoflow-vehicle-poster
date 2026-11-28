@@ -372,6 +372,48 @@ try {
 
   assert(db.prepare("SELECT COUNT(*) n FROM integration_audit_events WHERE organization_id=? AND action='stock:preview' AND outcome='allowed'").get(org).n>0)
   console.log('✓ Stock synchronization preview: identity, differences, partial/failed/empty sources, protection, tenant scope and no inventory changes')
+  // Explicit application grants do not inherit from the existing draft writer.
+  const applyGrant=await create({name:'Aplicar novos rascunhos',scopes:['stock:apply','vehicles:read','vehicles:create']})
+  const applyClient=createApiClient(server.base,applyGrant.token)
+  const apply=(snapshot,client=applyClient,confirm='create_drafts')=>client('/integration/v1/stock/apply-drafts',{method:'POST',body:JSON.stringify({confirm,snapshot})})
+  const readyRow={...newRow,...details,stockCode:'SYNC-APPLIED',commercialState:'available'}
+  const incompleteRow={...newRow,stockCode:'SYNC-INCOMPLETE',commercialState:'available'}
+  const withoutAvailability={...newRow,...details,stockCode:'SYNC-UNDECLARED'}
+  const applyBefore=snapshot()
+  await assert.rejects(apply(envelope([readyRow]),writeApi),error=>error.status===403)
+  await assert.rejects(apply(envelope([readyRow]),integrated),error=>error.status===403)
+  await assert.rejects(apply(envelope([readyRow]),applyClient,'publish'),error=>error.status===400)
+  await assert.rejects(apply(envelope([readyRow],'partial')),error=>error.status===409)
+  await assert.rejects(apply(envelope([],'failed')),error=>error.status===409)
+  await assert.rejects(apply(envelope([readyRow,readyRow])),error=>error.status===409)
+  await assert.rejects(apply(envelope([readyRow,{...sourceRow,commercialState:'available'}])),error=>error.status===409)
+  await assert.rejects(apply({...envelope([readyRow]),photos:[{stockCode:'UNKNOWN-STOCK',sha256:'9'.repeat(64)}]}),error=>error.status===409)
+  assert.equal(snapshot(),applyBefore)
+  const existingChange={...sourceRow,stockCode:'SYNC-ABSENT',vin:'SYNCVIN123',price:69000,commercialState:'available',...details}
+  const applied=await apply(envelope([readyRow,incompleteRow,withoutAvailability,existingChange]))
+  assert.equal(applied.applied,true)
+  assert.equal(applied.created.length,1)
+  assert.equal(applied.created[0].stockCode,'SYNC-APPLIED')
+  assert.equal(applied.skipped.length,3)
+  assert.equal(applied.status,'Rascunho')
+  const newId=applied.created[0].vehicleId
+  assert.deepEqual({...db.prepare('SELECT organization_id org,status,stock_code stockCode FROM vehicles WHERE id=?').get(newId)},{org,status:'Rascunho',stockCode:'SYNC-APPLIED'})
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM publication_jobs WHERE vehicle_id=?').get(newId).n,0)
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM vehicle_images WHERE vehicle_id=?').get(newId).n,0)
+  assert.equal(db.prepare('SELECT price FROM vehicles WHERE id=?').get(absentId).price,68000)
+  const appliedSnapshot=snapshot()
+  const repeat=await apply(envelope([readyRow]))
+  assert.equal(repeat.created.length,0)
+  assert.equal(repeat.skipped[0].reason,'already_exists')
+  assert.equal(snapshot(),appliedSnapshot)
+  const concurrentDraft={...readyRow,stockCode:'SYNC-CONCURRENT'}
+  const concurrentApply=await Promise.all([apply(envelope([concurrentDraft])),apply(envelope([concurrentDraft]))])
+  assert.equal(concurrentApply.reduce((n,result)=>n+result.created.length,0),1)
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM vehicles WHERE organization_id=? AND stock_code='SYNC-CONCURRENT'").get(org).n,1)
+  await api('/integrations/credentials/'+applyGrant.id+'/revoke',{method:'POST'})
+  await assert.rejects(apply(envelope([{...readyRow,stockCode:'SYNC-REVOKED'}])),error=>error.status===401)
+  assert(db.prepare("SELECT COUNT(*) n FROM integration_audit_events WHERE organization_id=? AND action='stock:apply' AND outcome='allowed'").get(org).n>0)
+  console.log('✓ Stock draft application: explicit grants, complete source, transactional idempotency, no updates, sales, photos or jobs')
   const revoked = await api(`/integrations/credentials/${issued.id}/revoke`, { method: 'POST' })
   assert.equal(revoked.revoked, true)
   await assert.rejects(integrated('/integration/v1/status'), (error) => error.status === 401)
