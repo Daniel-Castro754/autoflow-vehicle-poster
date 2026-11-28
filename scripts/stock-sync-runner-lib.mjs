@@ -11,7 +11,7 @@ export function stockRunnerOptions(args,env=process.env){
   if(new Set(args).size!==args.length||modeArg.length>1||
     args.some(arg=>arg!=='--watch'&&arg!=='--status'&&!arg.startsWith('--mode='))||
     (status&&args.length!==1))throw new Error('Use --watch, --mode=preview|drafts|photos|drafts-and-photos ou --status isolado.')
-  const mode=modeArg[0]?.slice(7)||'preview'
+  const mode=modeArg.length?modeArg[0].slice(7):'preview'
   const raw=env.AUTOFLOW_STOCK_SYNC_INTERVAL_MINUTES??'30'
   const intervalMinutes=Number(raw)
   if(!modes.includes(mode)||!/^\d+$/.test(raw)||!Number.isInteger(intervalMinutes)||intervalMinutes<5||intervalMinutes>1440)
