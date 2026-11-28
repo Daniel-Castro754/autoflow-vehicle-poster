@@ -4,6 +4,7 @@ import { initializeBaseSchema } from '../server/database/schema.ts'
 import { applyMigrations } from '../server/database/migrations.ts'
 import { saveTelegramCommanderSettings,sweepTelegramCommander } from '../server/services/telegram-commander.ts'
 import { saveCommanderPermissionSettings,proposeCommanderPause,proposeCommanderAction,decideCommanderAction,parseCommanderSchedule,commanderAvailableActions } from '../server/services/commander-permissions.ts'
+import { runCommanderQuery } from '../server/services/commander-query-tools.ts'
 const db=new DatabaseSync(':memory:')
 initializeBaseSchema(db);applyMigrations(db)
 db.exec("INSERT INTO organizations(id,name) VALUES(1,'One'),(2,'Other'); INSERT INTO organization_settings(organization_id) VALUES(1),(2); INSERT INTO users(id,organization_id,name,email,password_hash) VALUES(1,1,'Owner','one@local','fixture'); INSERT INTO social_accounts(id,organization_id,user_id,label,status,last_seen_at) VALUES(1,1,1,'Mae','connected',CURRENT_TIMESTAMP); INSERT INTO vehicles(id,organization_id,year,make,model,price,status) VALUES(1,1,2022,'VW','Nivus',108900,'Pronto'),(2,2,2022,'Private','Foreign',999999,'Pronto'); INSERT INTO publication_jobs(id,organization_id,vehicle_id,social_account_id,status) VALUES(1,1,1,1,'pending'),(2,2,2,NULL,'pending'),(3,1,1,1,'pending'),(4,1,1,1,'pending'),(5,1,1,1,'pending'),(6,1,1,1,'pending'),(7,1,1,1,'pending'); UPDATE publication_jobs SET attempt_count=1 WHERE id=5; UPDATE publication_jobs SET status='awaiting_confirmation' WHERE id=6; UPDATE publication_jobs SET lease_token='fixture-lease' WHERE id=7")
@@ -96,5 +97,31 @@ assert.equal(messages.length,3)
 assert.equal(db.prepare("SELECT COUNT(*) n FROM commander_action_requests WHERE status='executed'").get().n,3)
 assert.equal(db.prepare("SELECT COUNT(*) n FROM publication_job_events WHERE json_extract(details,'$.source')='telegram_commander'").get().n,3)
 assert.equal(db.prepare('SELECT COUNT(*) n FROM publication_listing_ledger').get().n,0)
+// The decision history must reuse actual transactional outcomes, not infer
+// success from the current job status or expose authorization material.
+const history=options=>runCommanderQuery(db,1,'historico_decisoes',options).data
+db.exec("INSERT INTO commander_action_requests(organization_id,telegram_user_id,action,job_id,token_hash,destination_hash,receiver_revision,policy_revision,snapshot_hash,created_at,expires_at,status,mode) SELECT 2,'999999','pausar_trabalho',2,'foreign-token-hash','foreign-destination',receiver_revision,policy_revision,'foreign-snapshot',created_at,expires_at,'validated_only','preview_only' FROM commander_action_requests WHERE organization_id=1 LIMIT 1")
+const expiredToken=code(propose('pausar_trabalho_real',3))
+db.exec("UPDATE commander_action_requests SET expires_at=created_at-1 WHERE organization_id=1 AND status='pending'")
+const historyBefore=db.prepare('SELECT total_changes() n').get().n
+const decisions=history({limit:30})
+assert.equal(decisions.totals.find(t=>t.status==='executed').count,3)
+assert.equal(decisions.totals.find(t=>t.status==='validated_only').count,1)
+assert.equal(decisions.totals.find(t=>t.status==='stale').count,2)
+assert(decisions.items.some(i=>i.status==='pending'&&i.expiredByTime))
+assert(decisions.items.some(i=>i.status==='executed'&&i.action==='adiar_trabalho'&&i.scheduledAt===future))
+assert(decisions.items.some(i=>i.status==='executed'&&i.action==='cancelar_trabalho_pendente'&&i.jobStatus==='canceled'))
+assert(decisions.items.every(i=>i.jobId!==2))
+const json=JSON.stringify(decisions)
+for(const secret of [expiredToken,cancel,'foreign-token-hash','foreign-destination','foreign-snapshot','telegramUserId','token_hash','snapshot_hash','destination_hash'])assert(!json.includes(secret),secret)
+assert(!history({jobId:2}).items.length)
+const first=history({limit:1})
+assert.equal(first.items.length,1)
+assert.equal(first.nextBeforeId,first.items[0].id)
+assert.deepEqual(first.totals,decisions.totals)
+assert(history({limit:1,beforeId:first.nextBeforeId}).items[0].id<first.nextBeforeId)
+assert.throws(()=>history({organizationId:2}))
+assert.throws(()=>history({hours:721}))
+assert.equal(db.prepare('SELECT total_changes() n').get().n,historyBefore)
 db.close()
 console.log('Commander actions: explicit live grants, demo isolation, one-shot atomic pause/postpone/cancel, stale and foreign rejection, read-only scoped action preflight, residual execution protection, no publication or retry changes.')
