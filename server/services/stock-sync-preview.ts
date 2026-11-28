@@ -8,6 +8,14 @@ type LocalRow = SourceRow & { id:number; status:string; soldAt:string|null; prot
 type Category = 'new'|'changed'|'unchanged'|'conflict'
 type Entry = {stockCode:string; category:Category; vehicleId?:number; changedFields?:string[]; reason?:string}
 const fields=['year','make','model','trim','price','km'] as const
+type PhotoRow={stockCode:string;sha256:string}
+function parsePhoto(value:unknown):PhotoRow {
+  const v=object(value)
+  if(Object.keys(v).some(k=>!['stockCode','sha256'].includes(k)))return fail('Campo de foto não permitido.')
+  const stockCode=identifier(v.stockCode)
+  if(validateInventoryIdentifiers(stockCode,'')||typeof v.sha256!=='string'||!/^[a-fA-F0-9]{64}$/.test(v.sha256))return fail('Identificador ou hash de foto inválido.')
+  return {stockCode,sha256:v.sha256.toLowerCase()}
+}
 const maxRows=500
 const maxLocalRows=10000
 const fail=(message:string):never=>{throw new StockSyncInputError(message)}
@@ -53,11 +61,13 @@ function index<T>(rows:T[],key:(row:T)=>string){
 // Read-only, no status transitions, downloads, inserts, updates or scheduling.
 export function previewStockSync(db:DatabaseSync,org:number,input:unknown){
   const v=object(input)
-  if(Object.keys(v).some(k=>!['version','source','sourceState','rows'].includes(k))||v.version!==1||
+  if(Object.keys(v).some(k=>!['version','source','sourceState','rows','photos'].includes(k))||v.version!==1||
     typeof v.source!=='string'||!['sheets','activepieces','manual'].includes(v.source)||
     typeof v.sourceState!=='string'||!['complete','partial','failed'].includes(v.sourceState)||
     !Array.isArray(v.rows)||v.rows.length>maxRows||(v.sourceState==='failed'&&v.rows.length))return fail('Envelope de sincronização inválido.')
   const rows=v.rows.map(parseRow)
+  if(v.photos!==undefined&&(!Array.isArray(v.photos)||v.photos.length>2000||(v.sourceState==='failed'&&v.photos.length)))return fail('Manifesto de fotos inválido.')
+  const photos=Array.isArray(v.photos)?v.photos.map(parsePhoto):undefined
   const local=db.prepare(`SELECT v.id,v.stock_code stockCode,v.vin,v.year,v.make,v.model,v.trim,v.price,v.km,v.status,v.sold_at soldAt,
     EXISTS(SELECT 1 FROM publication_jobs j WHERE j.organization_id=v.organization_id AND j.vehicle_id=v.id
       AND j.status IN ('pending','filling','error','awaiting_confirmation','completed')) protectedWork
@@ -86,7 +96,47 @@ export function previewStockSync(db:DatabaseSync,org:number,input:unknown){
   for(const entry of entries)counts[entry.category]++
   const absenceComparable=v.sourceState==='complete'&&rows.length>0&&counts.conflict===0
   const notSeen=absenceComparable?local.filter(row=>!row.soldAt&&row.status!=='Vendido'&&row.stockCode&&!sourceStock.has(normalizeInventoryIdentifier(row.stockCode))):[]
-  return {version:1,source:v.source,sourceState:v.sourceState,readOnly:true,sourceRows:rows.length,counts,entries,
+  const photoPreview=photos===undefined?undefined:planPhotos(db,org,photos,entries,local)
+  return {version:1,source:v.source,sourceState:v.sourceState,readOnly:true,sourceRows:rows.length,counts,entries,photoPreview,
     absence:{comparable:absenceComparable,count:absenceComparable?notSeen.length:null,exampleVehicleIds:notSeen.slice(0,30).map(row=>row.id)},
     note:'Prévia dos campos básicos fornecidos; não comprova a origem ou completude declarada. Ausência não significa venda, exclusão ou autorização para alterar o estoque. Nenhuma alteração foi executada.'}
+}
+
+function planPhotos(db:DatabaseSync,org:number,photos:PhotoRow[],entries:Entry[],local:LocalRow[]){
+  type PhotoCategory='new'|'already_present'|'conflict'
+  type PhotoEntry={row:number;stockCode:string;category:PhotoCategory;reason?:string}
+  const byStock=index(entries,e=>e.stockCode)
+  const byHash=index(photos,p=>p.sha256)
+  const localById=new Map(local.map(v=>[v.id,v]))
+  const gallery=db.prepare('SELECT vehicle_id vehicleId,content_hash hash FROM vehicle_images WHERE organization_id=? ORDER BY id LIMIT 200001').all(org) as {vehicleId:number;hash:string|null}[]
+  if(gallery.length>200000)return fail('Galerias locais excedem o limite seguro da prévia.')
+  const galleryByVehicle=index(gallery,p=>String(p.vehicleId))
+  const galleryByHash=index(gallery,p=>String(p.hash||'').toLowerCase())
+  const used=new Set<string>()
+  const reserved=new Map<string,number>()
+  const result:PhotoEntry[]=photos.map((photo,i)=>{
+    const base={row:i+1,stockCode:photo.stockCode}
+    const conflict=(reason:string):PhotoEntry=>({...base,category:'conflict',reason})
+    const targets=byStock.get(photo.stockCode)||[]
+    const target=targets[0]
+    if(targets.length!==1||target.category==='conflict')return conflict('vehicle_identity_unresolved')
+    if(new Set((byHash.get(photo.sha256)||[]).map(p=>p.stockCode)).size>1)return conflict('shared_source_photo')
+    const current=target.vehicleId?localById.get(target.vehicleId):undefined
+    const existing=galleryByHash.get(photo.sha256)||[]
+    if(existing.some(p=>p.vehicleId!==current?.id))return conflict('shared_local_photo')
+    if(existing.length)return {...base,category:'already_present'}
+    if(current&&(current.status!=='Rascunho'||current.soldAt||current.protectedWork))return conflict('protected_local_vehicle')
+    const key=photo.stockCode+':'+photo.sha256
+    if(used.has(key))return conflict('duplicate_manifest_photo')
+    used.add(key)
+    const currentGallery=current?galleryByVehicle.get(String(current.id))||[]:[]
+    if(currentGallery.some(p=>!p.hash))return conflict('unverified_local_photo')
+    const n=reserved.get(photo.stockCode)||0
+    if(currentGallery.length+n>=20)return conflict('photo_limit')
+    reserved.set(photo.stockCode,n+1)
+    return {...base,category:'new'}
+  })
+  const counts={new:0,already_present:0,conflict:0}
+  for(const item of result)counts[item.category]++
+  return {counts,entries:result,note:'Hashes declarados pelo remetente; conteúdo e origem ainda não verificados. Não autoriza download, upload, exclusão ou troca de galeria.'}
 }
