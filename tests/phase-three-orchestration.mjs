@@ -253,7 +253,7 @@ console.log('✓ Phase 3: bounded concurrency, tenant isolation, safe retry cate
 
 import { initializeBaseSchema } from '../server/database/schema.ts'
 import { applyMigrations } from '../server/database/migrations.ts'
-import { recordConsumerState } from '../server/services/execution-diagnostics.ts'
+import { recordConsumerDecision, recordConsumerState } from '../server/services/execution-diagnostics.ts'
 import { redistributeOfflinePendingJobs } from '../server/services/pending-job-reassignment.ts'
 import { listingSnapshotForVehicle, calculateListingHash, reserveListingHash } from '../server/services/duplicate-checker.ts'
 
@@ -306,6 +306,9 @@ import { listingSnapshotForVehicle, calculateListingHash, reserveListingHash } f
     db.exec("UPDATE social_accounts SET last_seen_at=datetime('now','-30 minutes') WHERE id=1; UPDATE organization_settings SET autopilot_enabled=0 WHERE organization_id=1")
     assert.deepEqual(redistributeOfflinePendingJobs(db,1,()=>true),[], 'Recurring pilot must be enabled')
     db.exec("UPDATE organization_settings SET autopilot_enabled=1 WHERE organization_id=1")
+    recordConsumerDecision(db,1,2,{code:'facebook_not_ready',at:Date.now()})
+    assert.deepEqual(redistributeOfflinePendingJobs(db,1,()=>true),[], 'Operationally blocked destination excluded')
+    recordConsumerDecision(db,1,2,{code:'queue_empty',at:Date.now()})
     // A business-day boundary may prevent a safe same-day transfer.
     const today=db.prepare("SELECT autoflow_day(CURRENT_TIMESTAMP) day,autoflow_day(datetime('now','+1 minute')) nextDay").get()
     const moved=redistributeOfflinePendingJobs(db,1,()=>true)
