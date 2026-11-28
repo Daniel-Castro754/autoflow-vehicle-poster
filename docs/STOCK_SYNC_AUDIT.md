@@ -130,3 +130,20 @@ O agendador atual só poderá considerar esses veículos após revisão, fotos v
 Verificações: `npm run test:stock-sheet` (mapeamento offline e carregamento do CLI), `npm run test:integration-credentials` (aplicação transacional, escopos e idempotência). Nenhuma prova de acesso ao Google real é produzida por esses testes.
 
 Referência: https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets.values/get
+
+## Etapa 4.7 — Conector Google Drive e importação de fotos
+
+O leitor Sheets aceita opcionalmente `AUTOFLOW_STOCK_DRIVE_FOLDER_ID`, o ID de uma pasta dedicada, compartilhada como leitora com a mesma conta de serviço. Habilitar também a API Google Drive no projeto Google Cloud. Com essa configuração, a autenticação solicita os escopos de leitura Sheets e Drive. Não há escrita no Google. Sem o ID, a leitura Sheets continua funcionando como antes.
+
+A raiz deve conter somente pastas diretas de veículos. O nome de cada pasta deve corresponder exatamente ao código de estoque após normalização (maiúsculas, sem espaços). Pastas desconhecidas, duplicadas, atalhos, subpastas ou formatos não suportados provocam falha da rodada; `anuncio.txt` com MIME text/plain é ignorado. Fotos aceitas: JPEG, PNG e WebP. Pastas de veículos vendidos não têm seu conteúdo baixado. Não se presume venda nem se remove foto quando uma pasta não existe. Não se usa correspondência aproximada.
+
+O conector percorre a paginação da API Drive, recusa listagens incompletas e verifica tamanho e SHA-256 dos bytes reais. Limites: 500 pastas, 100 arquivos por pasta, 2.000 imagens, 12 MiB por imagem, 256 MiB por rodada; o limite local de 20 fotos por veículo continua vigente. Não segue redirecionamentos. Esses limites são escolhas conservadoras, ajustáveis após homologação. A prévia não comprova a autenticidade comercial ou a validade visual da foto. O servidor verifica conteúdo no upload.
+
+Fluxo manual autorizado:
+1. `node scripts/stock-sheet.mjs` — prévia conjunta, usando escopo local vehicles:read.
+2. `node scripts/stock-sheet.mjs --apply-drafts` — criação de novos rascunhos com os escopos existentes da etapa 4.6.
+3. `node scripts/stock-sheet.mjs --upload-photos` — nova leitura e prévia, com escopos locais vehicles:read e photos:write. Só considera fotos novas de registros locais inalterados, completos, explicitamente disponíveis e sem conflitos na prévia. O endpoint de upload revalida credencial, código de estoque, hash, conteúdo, status Rascunho, trabalhos protegidos e capacidade. Fotos de novos veículos ainda não cadastrados ou de registros com diferenças são adiadas. A opção de upload é separada da criação; não pode ser combinada na mesma invocação.
+
+Cada foto é baixada novamente e comparada ao hash da prévia. Uma falha interrompe a sequência, com contagem parcial; fotos já aceitas não são revertidas. Repetir após nova prévia é idempotente para o mesmo conteúdo. Não se substitui a galeria nem se cria publicação. A ordem do manifesto não garante a ordem desejada das fotos; revisão no painel continua necessária.
+
+Testes offline: `npm run test:stock-drive`, `npm run test:stock-sheet`, `npm run test:integration-credentials`. Não houve homologação com uma conta Google real. A configuração de fontes, sincronização periódica, tratamento autorizado de alterações e vendas e liberação operacional continuam pendentes.
