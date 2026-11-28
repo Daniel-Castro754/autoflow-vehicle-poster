@@ -8,3 +8,9 @@ backups
 coverage
 .tmp-*
 *.log
+
+# Isolated development checkouts and their local data/dependencies
+worktrees/
+work/
+data-*/
+.autoflow-launcher-recovery/
