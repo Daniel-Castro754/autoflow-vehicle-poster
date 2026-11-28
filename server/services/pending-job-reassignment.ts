@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { consumerState } from './execution-diagnostics.ts'
+import { consumerOperationalBlock, consumerState } from './execution-diagnostics.ts'
 import { profileCapacity, parseSqliteTimestamp } from './profile-capacity.ts'
 import { publicationDuplicateRisk, publicationReadinessIssues } from './publication-policy.ts'
 import { calculateListingHash, findDuplicateListingHash, listingSnapshotForVehicle } from './duplicate-checker.ts'
@@ -87,7 +87,7 @@ export function redistributeOfflinePendingJobs(
         AND j.social_account_id=a.id AND j.status IN ('filling','error','awaiting_confirmation')) ORDER BY backlog,a.id`,
       ).all(org,job.userId,job.accountId) as Target[]
       for (const target of targets) {
-        if (consumerState(db,org,target.id).state!=='enabled') continue
+        if (consumerState(db,org,target.id).state!=='enabled' || consumerOperationalBlock(db,org,target.id)) continue
         const cap = profileCapacity(db,org,target.id)
         // Count all outstanding jobs in addition to current-day reservations,
         // including work created on earlier dates. Never transfer to a full profile.
