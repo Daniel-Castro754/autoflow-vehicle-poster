@@ -99,7 +99,9 @@ try {
   assert.equal(findBestAccountForVehicle(db, owner.org, 12345), null)
 
   const background = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8')
-  assert(background.includes('async function reportExtensionPresence()'))
+  assert.match(background, /async function reportExtensionPresence\([^)]*\)/)
+  // The recovery pass reports the updated consumer decision after its initial heartbeat.
+  assert(background.includes('await reportExtensionPresence(previousReport)'))
   assert(background.includes('await reportExtensionPresence()'))
   assert(background.includes('void reportExtensionPresence()'))
   const view = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
