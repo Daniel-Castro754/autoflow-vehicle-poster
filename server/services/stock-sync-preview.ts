@@ -3,11 +3,13 @@ import { normalizeInventoryIdentifier, validateInventoryIdentifiers } from './ve
 import { vehicleOptions } from './vehicle-input.ts'
 
 export class StockSyncInputError extends Error {}
-type SourceRow = { stockCode:string; vin?:string; year:number; make:string; model:string; trim?:string; price:number; km:number }
-type LocalRow = SourceRow & { id:number; status:string; soldAt:string|null; protectedWork:number }
+const detailFields=['vehicleType','location','transmission','fuelType','bodyType','exteriorColor','interiorColor','condition','description'] as const
+type DetailField=typeof detailFields[number]
+type SourceRow = { stockCode:string; vin?:string; year:number; make:string; model:string; trim?:string; price:number; km:number } & Partial<Record<DetailField,string>>
+type LocalRow = SourceRow & { id:number; status:string; soldAt:string|null; protectedWork:number; photoCount:number }
 type Category = 'new'|'changed'|'unchanged'|'conflict'
 type Entry = {stockCode:string; category:Category; vehicleId?:number; changedFields?:string[]; reason?:string}
-const fields=['year','make','model','trim','price','km'] as const
+const fields=['year','make','model','trim','price','km',...detailFields] as const
 type PhotoRow={stockCode:string;sha256:string}
 function parsePhoto(value:unknown):PhotoRow {
   const v=object(value)
@@ -44,7 +46,11 @@ function parseRow(value:unknown):SourceRow{
   if(validateInventoryIdentifiers(stockCode,vin||''))return fail('Identificador de estoque/chassi inválido.')
   const make=text(v.make,100)
   if(!vehicleOptions.make.has(make))return fail('Fabricante fora do catálogo.')
-  return {stockCode,vin,year:numeric(v.year,1900,new Date().getFullYear()+1,true),make,model:text(v.model,150),
+  const details:Partial<Record<DetailField,string>>={}
+  for(const field of detailFields){
+    if(v[field]!==undefined)details[field]=text(v[field],field==='description'?4000:200,false)
+  }
+  return {...details,stockCode,vin,year:numeric(v.year,1900,new Date().getFullYear()+1,true),make,model:text(v.model,150),
     trim:v.trim===undefined?undefined:text(v.trim,150,false),
     price:numeric(v.price,0.01,1000000000),km:numeric(v.km,0,10000000)}
 }
@@ -69,6 +75,9 @@ export function previewStockSync(db:DatabaseSync,org:number,input:unknown){
   if(v.photos!==undefined&&(!Array.isArray(v.photos)||v.photos.length>2000||(v.sourceState==='failed'&&v.photos.length)))return fail('Manifesto de fotos inválido.')
   const photos=Array.isArray(v.photos)?v.photos.map(parsePhoto):undefined
   const local=db.prepare(`SELECT v.id,v.stock_code stockCode,v.vin,v.year,v.make,v.model,v.trim,v.price,v.km,v.status,v.sold_at soldAt,
+    v.vehicle_type vehicleType,v.location,v.transmission,v.fuel_type fuelType,v.body_type bodyType,
+    v.exterior_color exteriorColor,v.interior_color interiorColor,v.vehicle_condition condition,v.description,
+    (SELECT COUNT(*) FROM vehicle_images i WHERE i.organization_id=v.organization_id AND i.vehicle_id=v.id) photoCount,
     EXISTS(SELECT 1 FROM publication_jobs j WHERE j.organization_id=v.organization_id AND j.vehicle_id=v.id
       AND j.status IN ('pending','filling','error','awaiting_confirmation','completed')) protectedWork
     FROM vehicles v WHERE v.organization_id=? ORDER BY v.id LIMIT ?`).all(org,maxLocalRows+1) as LocalRow[]
@@ -97,9 +106,10 @@ export function previewStockSync(db:DatabaseSync,org:number,input:unknown){
   const absenceComparable=v.sourceState==='complete'&&rows.length>0&&counts.conflict===0
   const notSeen=absenceComparable?local.filter(row=>!row.soldAt&&row.status!=='Vendido'&&row.stockCode&&!sourceStock.has(normalizeInventoryIdentifier(row.stockCode))):[]
   const photoPreview=photos===undefined?undefined:planPhotos(db,org,photos,entries,local)
-  return {version:1,source:v.source,sourceState:v.sourceState,readOnly:true,sourceRows:rows.length,counts,entries,photoPreview,
+  const validation=validateSourceDetails(rows,entries,local,photoPreview)
+  return {version:1,source:v.source,sourceState:v.sourceState,readOnly:true,sourceRows:rows.length,counts,entries,photoPreview,validation,
     absence:{comparable:absenceComparable,count:absenceComparable?notSeen.length:null,exampleVehicleIds:notSeen.slice(0,30).map(row=>row.id)},
-    note:'Prévia dos campos básicos fornecidos; não comprova a origem ou completude declarada. Ausência não significa venda, exclusão ou autorização para alterar o estoque. Nenhuma alteração foi executada.'}
+    note:'Prévia dos campos fornecidos; não comprova a origem ou completude declarada. Ausência não significa venda, exclusão ou autorização para alterar o estoque. Nenhuma alteração foi executada.'}
 }
 
 function planPhotos(db:DatabaseSync,org:number,photos:PhotoRow[],entries:Entry[],local:LocalRow[]){
@@ -139,4 +149,36 @@ function planPhotos(db:DatabaseSync,org:number,photos:PhotoRow[],entries:Entry[]
   const counts={new:0,already_present:0,conflict:0}
   for(const item of result)counts[item.category]++
   return {counts,entries:result,note:'Hashes declarados pelo remetente; conteúdo e origem ainda não verificados. Não autoriza download, upload, exclusão ou troca de galeria.'}
+}
+
+const catalogs:Partial<Record<DetailField,Set<string>>>={
+  vehicleType:vehicleOptions.vehicleType,transmission:vehicleOptions.transmission,
+  fuelType:vehicleOptions.fuelType,bodyType:vehicleOptions.bodyType,
+  exteriorColor:vehicleOptions.color,interiorColor:vehicleOptions.color,condition:vehicleOptions.condition,
+}
+
+// Assess the submitted source, not a synthesized vehicle. Existing details
+// and organization defaults must not silently hide missing source data.
+function validateSourceDetails(rows:SourceRow[],entries:Entry[],local:LocalRow[],photoPreview:ReturnType<typeof planPhotos>|undefined){
+  const localById=new Map(local.map(v=>[v.id,v]))
+  const byStock=index(photoPreview?.entries||[],p=>p.stockCode)
+  const items=rows.map((row,i)=>{
+    const entry=entries[i]
+    const missingFields=detailFields.filter(field=>!row[field]?.trim())
+    const invalidFields=detailFields.filter(field=>!!row[field]?.trim()&&!!catalogs[field]&&!catalogs[field]?.has(row[field]!))
+    const current=entry.vehicleId?localById.get(entry.vehicleId):undefined
+    const photos=byStock.get(row.stockCode)||[]
+    const localPhotoCount=entry.category==='conflict'?null:current?.photoCount??0
+    const declaredNewPhotos=photos.filter(p=>p.category==='new').length
+    const photoConflicts=photos.filter(p=>p.category==='conflict').length
+    const sourceFieldsComplete=missingFields.length===0&&invalidFields.length===0
+    const identityConflict=entry.category==='conflict'
+    return {row:i+1,stockCode:row.stockCode,sourceFieldsComplete,missingFields,invalidFields,
+      identityConflict,localPhotoCount,declaredNewPhotos,photoConflicts,
+      requiresPhotoVerification:declaredNewPhotos>0,
+      needsPhotos:!identityConflict&&localPhotoCount===0&&declaredNewPhotos===0}
+  })
+  return {total:items.length,completeSourceFields:items.filter(i=>i.sourceFieldsComplete).length,
+    incompleteSourceFields:items.filter(i=>!i.sourceFieldsComplete).length,items,
+    note:'Validação dos dados declarados, sem completar campos por inferência. Fotos locais são contagens de registros e fotos novas são apenas declarações. Não confirma conteúdo, autorização, status Pronto nem elegibilidade de publicação.'}
 }
