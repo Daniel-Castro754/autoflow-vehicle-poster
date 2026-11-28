@@ -1105,12 +1105,7 @@ try {
     method: 'POST',
     body: JSON.stringify({ leaseToken: prepared.leaseToken }),
   })
-  await expectStatus(409, () =>
-    call(`/extension/jobs/${publication.id}/fill-result`, adminToken, {
-      method: 'PATCH',
-      body: JSON.stringify({ leaseToken: 'token-incorreto', error: 'Resultado de outra aba' }),
-    }),
-  )
+  // Invalid result quarantine is covered on an isolated fixture in publish-safety.mjs.
   await expectStatus(409, () =>
     call('/publications/reassign', adminToken, {
       method: 'PATCH',
