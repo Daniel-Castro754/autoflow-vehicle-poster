@@ -892,6 +892,39 @@ try {
   }
   assert.equal(jobRow(fencedJob.id).publishAttemptAt, null)
 
+  // An expired execution with an open conflict must not become retryable,
+  // even without the publication checkpoint on the current lease.
+  const beforeFenceRecovery = jobRow(fencedJob.id)
+  backdateStuck(fencedJob.id)
+  await expectStatus(409, () =>
+    call(`/publications/${fencedJob.id}/recover`, adminToken, { method: 'POST' }),
+  )
+  assert.equal(jobRow(fencedJob.id).status, 'filling')
+  await runHealthCheck(testDb, { autoRecover: true })
+  const afterFenceRecovery = jobRow(fencedJob.id)
+  assert.equal(afterFenceRecovery.status, 'awaiting_confirmation')
+  assert.equal(afterFenceRecovery.paused, 1)
+  assert.equal(afterFenceRecovery.retryCount, beforeFenceRecovery.retryCount)
+  assert.equal(afterFenceRecovery.fillReport, beforeFenceRecovery.fillReport)
+  assert.equal(afterFenceRecovery.publishAttemptAt, null)
+  assert.equal(
+    testDb.prepare('SELECT extension_visible FROM publication_jobs WHERE id=?').get(fencedJob.id).extension_visible,
+    0,
+  )
+  await expectStatus(409, () =>
+    call(`/publications/${fencedJob.id}`, adminToken, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'pending', confirmNoPublication: true }),
+    }),
+  )
+  await runHealthCheck(testDb, { autoRecover: true })
+  assert.equal(
+    testDb.prepare("SELECT COUNT(*) n FROM publication_job_events WHERE publication_job_id=? AND event_type='stalled_publish_ambiguous'").get(fencedJob.id).n,
+    1,
+    'Repeated monitor sweeps cannot reset or duplicate the recovery event',
+  )
+  assert.equal(jobRow(fencedJob.id).status, 'awaiting_confirmation')
+
   testDb.close()
   console.log(
     JSON.stringify(
@@ -899,6 +932,7 @@ try {
         ok: true,
         idempotentFillResult: true,
         invalidResultFencesPublication: true,
+        stalledConflictRemainsQuarantined: true,
         staleRecoveryRequiresConfirmation: true,
         safeRecoveryRespectsMaxRetries: true,
         layoutDriftSignalPersisted: true,
