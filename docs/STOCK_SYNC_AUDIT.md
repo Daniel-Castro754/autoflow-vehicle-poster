@@ -74,3 +74,13 @@ Exemplo de envelope normalizado (dados fictícios):
 - `absence` é informativa, nunca ação de venda. A comparação de ausência é suprimida em fontes parciais, com falha, vazias ou com conflitos detectados. Mesmo em leitura declarada completa, veículos não vistos não devem ser marcados como vendidos.
 - A consulta registra metadados de auditoria e uso de credencial, sem alterar estoque, fotos ou fila. Não é um plano de aplicação autorizado; nenhuma operação de gravação pode consumir esse resultado como autorização.
 - A conversão de planilhas e pastas reais, a leitura recorrente, validação completa de cadastro e o mecanismo opt-in de aplicação ainda serão implementados.
+
+## Etapa 4.3 — Conciliação de fotos
+
+O envelope de prévia aceita opcionalmente `photos`, uma lista de até 2.000 registros com `stockCode` e `sha256` (hash hexadecimal de 64 caracteres). Cada código precisa identificar exatamente uma linha sem conflito na lista de veículos. O manifesto não aceita URLs, caminhos de arquivos ou instruções de download.
+
+A resposta `photoPreview` distingue fotos novas, presentes e conflitos. A mesma foto declarada para veículos diferentes, duplicidades no manifesto, códigos desconhecidos, galerias sem hash verificável, fotos compartilhadas no estoque local e limites de 20 imagens são motivos de revisão. Novas fotos em veículos locais são candidatas somente quando se trata de rascunhos não vendidos e sem trabalhos protegidos. A ausência de fotos no manifesto não exclui nenhuma imagem. A comparação de ausência de veículos continua independente.
+
+Os hashes na prévia são declarados pelo remetente e não comprovam a autenticidade da foto. O upload de conteúdo real continua exigindo `photos:write`, a validação do formato e o SHA-256 calculado pelo servidor. O endpoint existente de upload também aceita `stockCode` e `sha256` opcionais; o futuro conector deve fornecê-los ambos para conferir a associação e o conteúdo. A gravação revalida credencial, estado, duplicidade e limite de galeria dentro de uma transação de escrita após a decodificação assíncrona. Imagens com o mesmo conteúdo em outro veículo da mesma organização são recusadas; o mesmo conteúdo no próprio veículo permanece idempotente. Os arquivos não são substituídos nem removidos por sincronização.
+
+Não há leitura ou download automático do Google Drive nesta etapa. Ainda será necessário definir e autorizar as fontes reais, implementar o conector e homologar o fluxo de aplicação.

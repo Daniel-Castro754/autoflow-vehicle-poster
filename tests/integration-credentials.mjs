@@ -217,6 +217,22 @@ try {
   const protectedId = Number(stockFixture.run(org,2020,'Volkswagen','Saveiro',68000,80000,'SYNC-PROTECTED','','Pronto').lastInsertRowid)
   db.prepare("INSERT INTO publication_jobs(organization_id,vehicle_id,status) VALUES(?,?,'pending')").run(org,protectedId)
   stockFixture.run(foreignOrg,2020,'Volkswagen','Saveiro',68000,80000,'SYNC-NEW','FOREIGNVIN123','Rascunho')
+  // Explicit identity and hash are rechecked at upload; concurrent retries
+  // of identical content must not create two rows.
+  const existingHash=createHash('sha256').update(Buffer.from(photo.dataBase64,'base64')).digest('hex')
+  const freshPhoto={mimeType:'image/jpeg',dataBase64:jpegBase64('sync-photo-fresh')}
+  const freshHash=createHash('sha256').update(Buffer.from(freshPhoto.dataBase64,'base64')).digest('hex')
+  const uploadTo=(id,body)=>photoApi('/integration/v1/vehicles/'+id+'/photos',{method:'POST',body:JSON.stringify(body)})
+  await assert.rejects(uploadTo(absentId,{...photo,stockCode:'SYNC-ABSENT',sha256:existingHash}),error=>error.status===409)
+  await assert.rejects(uploadTo(absentId,{...freshPhoto,stockCode:'WRONG',sha256:freshHash}),error=>error.status===409)
+  await assert.rejects(uploadTo(absentId,{...freshPhoto,stockCode:'SYNC-ABSENT',sha256:'a'.repeat(64)}),error=>error.status===400)
+  const concurrent=await Promise.all([1,2].map(()=>uploadTo(absentId,{...freshPhoto,stockCode:'sync-absent',sha256:freshHash})))
+  assert.equal(concurrent[0].id,concurrent[1].id)
+  assert.equal(concurrent.filter(item=>item.duplicate===true).length,1)
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM vehicle_images WHERE vehicle_id=?').get(absentId).n,1)
+  db.prepare("UPDATE vehicles SET status='Rascunho' WHERE id=?").run(protectedId)
+  await assert.rejects(uploadTo(protectedId,{mimeType:'image/jpeg',dataBase64:jpegBase64('protected-new-photo')}),error=>error.status===409)
+  db.prepare("UPDATE vehicles SET status='Pronto' WHERE id=?").run(protectedId)
   const sourceRow={stockCode:draftPayload.stockCode,year:2020,make:'Volkswagen',model:'Saveiro',price:68000,km:80000}
   const snapshot=()=>JSON.stringify({
     vehicles:db.prepare('SELECT * FROM vehicles ORDER BY id').all(),
@@ -257,6 +273,28 @@ try {
   await assert.rejects(preview(envelope([{...sourceRow,price:'68000'}])),error=>error.status===400)
   await assert.rejects(preview({...envelope([sourceRow]),organizationId:foreignOrg}),error=>error.status===400)
   await assert.rejects(preview(envelope([sourceRow]),writerStatusApi),error=>error.status===403)
+  const manifest=await preview({...envelope([sourceRow,newRow,{...sourceRow,stockCode:'SYNC-PROTECTED'}]),photos:[
+    {stockCode:sourceRow.stockCode,sha256:existingHash},
+    {stockCode:'SYNC-NEW',sha256:freshHash},
+    {stockCode:'SYNC-NEW',sha256:'1'.repeat(64)},
+    {stockCode:'SYNC-NEW',sha256:'1'.repeat(64)},
+    {stockCode:'UNKNOWN-STOCK',sha256:'2'.repeat(64)},
+    {stockCode:'SYNC-PROTECTED',sha256:'3'.repeat(64)},
+    {stockCode:sourceRow.stockCode,sha256:'4'.repeat(64)},
+    {stockCode:'SYNC-NEW',sha256:'4'.repeat(64)},
+  ]})
+  assert.deepEqual(manifest.photoPreview.counts,{new:1,already_present:1,conflict:6})
+  assert.deepEqual(manifest.photoPreview.entries.map(p=>p.reason||p.category),[
+    'already_present','shared_local_photo','new','duplicate_manifest_photo','vehicle_identity_unresolved',
+    'protected_local_vehicle','shared_source_photo','shared_source_photo',
+  ])
+  const photoLimit=await preview({...envelope([newRow]),photos:Array.from({length:21},(_,i)=>({stockCode:'SYNC-NEW',sha256:(100+i).toString(16).padStart(64,'0')}))})
+  assert.equal(photoLimit.photoPreview.counts.new,20)
+  assert.equal(photoLimit.photoPreview.entries[20].reason,'photo_limit')
+  await assert.rejects(preview({...envelope([newRow]),photos:[{stockCode:'SYNC-NEW',sha256:'invalid'}]}),error=>error.status===400)
+  await assert.rejects(preview({...envelope([newRow]),photos:[{stockCode:'SYNC-NEW',sha256:'a'.repeat(64),url:'https://example.test/image.jpg'}]}),error=>error.status===400)
+  await assert.rejects(preview({...envelope([],'failed'),photos:[{stockCode:'SYNC-NEW',sha256:'a'.repeat(64)}]}),error=>error.status===400)
+  console.log('✓ Photo reconciliation: exact stock identity, hashes, shared photos, gallery limits and concurrent idempotent upload')
   assert.equal(snapshot(),beforePreview)
   assert(db.prepare("SELECT COUNT(*) n FROM integration_audit_events WHERE organization_id=? AND action='stock:preview' AND outcome='allowed'").get(org).n>0)
   console.log('✓ Stock synchronization preview: identity, differences, partial/failed/empty sources, protection, tenant scope and no inventory changes')
